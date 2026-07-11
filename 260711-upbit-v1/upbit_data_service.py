@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 import pandas as pd
@@ -11,6 +11,7 @@ UPBIT_BASE_URL = "https://api.upbit.com/v1"
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
 RATE_LIMIT_BACKOFF_SECONDS = 5.0
+REQUEST_DELAY_SECONDS = 0.15
 
 _CANDLE_COLUMNS = ["candle_time", "open", "high", "low", "close", "volume"]
 
@@ -70,3 +71,50 @@ def _parse_candles(raw: list[dict]) -> pd.DataFrame:
     )
     df = df[_CANDLE_COLUMNS]
     return df.sort_values("candle_time").reset_index(drop=True)
+
+
+def _fetch_range(
+    market: str,
+    timeframe: str,
+    start: datetime,
+    end: datetime,
+    client: httpx.Client | None = None,
+) -> pd.DataFrame:
+    url = _endpoint_for_timeframe(timeframe)
+    close_client = client is None
+    client = client or httpx.Client(timeout=10)
+
+    try:
+        frames: list[pd.DataFrame] = []
+        to_cursor: datetime | None = end
+
+        while True:
+            raw = _fetch_page(client, url, market, to_cursor)
+            if not raw:
+                break
+
+            page_df = _parse_candles(raw)
+            frames.append(page_df)
+
+            oldest = page_df["candle_time"].min()
+            if oldest <= start or len(raw) < 200:
+                break
+
+            to_cursor = oldest - timedelta(seconds=1)
+            time.sleep(REQUEST_DELAY_SECONDS)
+
+        if not frames:
+            return pd.DataFrame(columns=_CANDLE_COLUMNS)
+
+        merged = (
+            pd.concat(frames)
+            .drop_duplicates(subset="candle_time")
+            .sort_values("candle_time")
+            .reset_index(drop=True)
+        )
+        return merged[
+            (merged["candle_time"] >= start) & (merged["candle_time"] <= end)
+        ].reset_index(drop=True)
+    finally:
+        if close_client:
+            client.close()
