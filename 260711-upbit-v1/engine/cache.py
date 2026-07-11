@@ -153,6 +153,13 @@ def run_backtest_cached(
     end: datetime,
     strategy_params: dict | None = None,
 ) -> dict:
+    """
+    캐시된 백테스트 결과를 반환하거나 새로 실행해 저장한다.
+
+    주의: 캐시 키는 df의 실제 내용을 포함하지 않고 (strategy_source, params, market, timeframe, start, end, risk_config)
+    으로만 생성된다. end가 과거의 완료된 시간이면 안전하지만, end가 현재 근처로 고정되고 캔들 마감 후
+    재실행되면 get_candles()는 더 많은 바를 반환하면서도 캐시 키는 동일하게 유지되어 오래된 결과가 반환될 수 있다.
+    """
     strategy_params = strategy_params or {}
     run_id = compute_cache_key(
         strategy_cls, strategy_params, market, timeframe, start, end, risk_config
