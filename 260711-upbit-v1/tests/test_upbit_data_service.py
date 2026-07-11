@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 import pandas as pd
 import pytest
 
 import upbit_data_service as uds
-from upbit_data_service import _endpoint_for_timeframe, _parse_candles, _fetch_page, _fetch_range, _compute_gaps
+from upbit_data_service import _endpoint_for_timeframe, _parse_candles, _fetch_page, _fetch_range, _compute_gaps, get_candles
 
 
 def test_endpoint_for_days():
@@ -199,3 +200,59 @@ def test_compute_gaps_fully_covered_returns_empty():
     start = datetime(2026, 1, 2, tzinfo=timezone.utc)
     end = datetime(2026, 1, 9, tzinfo=timezone.utc)
     assert _compute_gaps(cached, start, end) == []
+
+
+def test_get_candles_fetches_full_range_when_no_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(uds, "CACHE_DIR", tmp_path)
+    calls: list[tuple] = []
+
+    def fake_fetch_range(market, timeframe, start, end, client=None):
+        calls.append((market, timeframe, start, end))
+        idx = pd.date_range(start, end, freq="D", tz="UTC")
+        return pd.DataFrame(
+            {"candle_time": idx, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+        )
+
+    monkeypatch.setattr(uds, "_fetch_range", fake_fetch_range)
+    monkeypatch.setattr(
+        uds, "datetime",
+        type("_FixedDatetime", (), {
+            "now": staticmethod(lambda tz=None: datetime(2026, 1, 20, tzinfo=timezone.utc))
+        }),
+    )
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    df = get_candles("KRW-BTC", "days", start, end)
+
+    assert len(calls) == 1
+    assert len(df) == 10
+    assert (tmp_path / "KRW-BTC_days.parquet").exists()
+
+
+def test_get_candles_skips_fetch_when_fully_cached(monkeypatch, tmp_path):
+    monkeypatch.setattr(uds, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(
+        uds, "datetime",
+        type("_FixedDatetime", (), {
+            "now": staticmethod(lambda tz=None: datetime(2026, 1, 20, tzinfo=timezone.utc))
+        }),
+    )
+
+    idx = pd.date_range("2026-01-01", "2026-01-10", freq="D", tz="UTC")
+    existing = pd.DataFrame(
+        {"candle_time": idx, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+    )
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    existing.to_parquet(tmp_path / "KRW-BTC_days.parquet", index=False)
+
+    def fail_fetch_range(*args, **kwargs):
+        raise AssertionError("캐시가 이미 구간을 커버하므로 호출되면 안 됨")
+
+    monkeypatch.setattr(uds, "_fetch_range", fail_fetch_range)
+
+    start = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 9, tzinfo=timezone.utc)
+    df = get_candles("KRW-BTC", "days", start, end)
+
+    assert len(df) == 8

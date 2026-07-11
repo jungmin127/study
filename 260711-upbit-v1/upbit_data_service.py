@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 import pandas as pd
@@ -135,3 +136,42 @@ def _compute_gaps(
     if end > cache_end:
         gaps.append((max(start, cache_end + timedelta(seconds=1)), end))
     return gaps
+
+
+CACHE_DIR = Path(__file__).parent / "data" / "cache" / "ohlcv"
+
+
+def _cache_path(market: str, timeframe: str) -> Path:
+    return CACHE_DIR / f"{market}_{timeframe}.parquet"
+
+
+def _load_cache(market: str, timeframe: str) -> pd.DataFrame:
+    path = _cache_path(market, timeframe)
+    if not path.exists():
+        return pd.DataFrame(columns=_CANDLE_COLUMNS)
+    return pd.read_parquet(path)
+
+
+def _save_cache(market: str, timeframe: str, df: pd.DataFrame) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(_cache_path(market, timeframe), index=False)
+
+
+def get_candles(market: str, timeframe: str, start: datetime, end: datetime) -> pd.DataFrame:
+    cached = _load_cache(market, timeframe)
+    gaps = _compute_gaps(cached, start, end)
+
+    if gaps:
+        fetched = [_fetch_range(market, timeframe, g_start, g_end) for g_start, g_end in gaps]
+        cached = (
+            pd.concat([cached, *fetched])
+            .drop_duplicates(subset="candle_time")
+            .sort_values("candle_time")
+            .reset_index(drop=True)
+        )
+        _save_cache(market, timeframe, cached)
+
+    now = datetime.now(timezone.utc)
+    closed = cached[cached["candle_time"] <= now]
+    result = closed[(closed["candle_time"] >= start) & (closed["candle_time"] <= end)]
+    return result.reset_index(drop=True)
