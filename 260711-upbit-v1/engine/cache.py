@@ -12,6 +12,11 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+import backtrader as bt
+
+from engine.runner import run_backtest
+
 DB_PATH = Path(__file__).parent.parent / "data" / "backtest_results.db"
 
 _SCHEMA = """
@@ -136,3 +141,38 @@ def save_result(
         conn.commit()
     finally:
         conn.close()
+
+
+def run_backtest_cached(
+    df: pd.DataFrame,
+    strategy_cls: type[bt.Strategy],
+    risk_config: dict,
+    market: str,
+    timeframe: str,
+    start: datetime,
+    end: datetime,
+    strategy_params: dict | None = None,
+) -> dict:
+    strategy_params = strategy_params or {}
+    run_id = compute_cache_key(
+        strategy_cls, strategy_params, market, timeframe, start, end, risk_config
+    )
+
+    cached = load_result(run_id)
+    if cached is not None:
+        return cached
+
+    result = run_backtest(df, strategy_cls, risk_config, strategy_params)
+    save_result(
+        run_id=run_id,
+        strategy_name=strategy_cls.__name__,
+        strategy_params=strategy_params,
+        market=market,
+        timeframe=timeframe,
+        start=start,
+        end=end,
+        risk_config=risk_config,
+        result=result,
+    )
+    result["from_cache"] = False
+    return result
