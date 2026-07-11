@@ -1,6 +1,10 @@
+from datetime import datetime, timezone
+
+import httpx
 import pytest
 
-from upbit_data_service import _endpoint_for_timeframe, _parse_candles
+import upbit_data_service as uds
+from upbit_data_service import _endpoint_for_timeframe, _parse_candles, _fetch_page
 
 
 def test_endpoint_for_days():
@@ -42,3 +46,49 @@ def test_parse_candles_empty_input():
     df = _parse_candles([])
     assert list(df.columns) == ["candle_time", "open", "high", "low", "close", "volume"]
     assert len(df) == 0
+
+
+def _mock_client(handler) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_fetch_page_returns_json_on_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["market"] == "KRW-BTC"
+        return httpx.Response(200, json=[{"market": "KRW-BTC"}])
+
+    with _mock_client(handler) as client:
+        result = _fetch_page(client, "https://api.upbit.com/v1/candles/days", "KRW-BTC", None)
+
+    assert result == [{"market": "KRW-BTC"}]
+
+
+def test_fetch_page_retries_on_429_then_succeeds(monkeypatch):
+    monkeypatch.setattr(uds, "RATE_LIMIT_BACKOFF_SECONDS", 0.0)
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(429)
+        return httpx.Response(200, json=[{"market": "KRW-BTC"}])
+
+    with _mock_client(handler) as client:
+        result = _fetch_page(
+            client, "https://api.upbit.com/v1/candles/days", "KRW-BTC",
+            datetime(2026, 7, 10, tzinfo=timezone.utc),
+        )
+
+    assert calls["count"] == 2
+    assert result == [{"market": "KRW-BTC"}]
+
+
+def test_fetch_page_raises_after_exhausting_retries(monkeypatch):
+    monkeypatch.setattr(uds, "RETRY_BASE_DELAY_SECONDS", 0.0)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    with _mock_client(handler) as client:
+        with pytest.raises(RuntimeError):
+            _fetch_page(client, "https://api.upbit.com/v1/candles/days", "KRW-BTC", None)
