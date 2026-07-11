@@ -1,0 +1,5 @@
+httpx>=0.26
+pandas>=2.2
+pyarrow>=15.0
+backtrader>=1.9.78
+pytest>=8.0
