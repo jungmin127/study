@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import pandas as pd
 import pytest
 
 import upbit_data_service as uds
-from upbit_data_service import _endpoint_for_timeframe, _parse_candles, _fetch_page, _fetch_range
+from upbit_data_service import _endpoint_for_timeframe, _parse_candles, _fetch_page, _fetch_range, _compute_gaps
 
 
 def test_endpoint_for_days():
@@ -141,7 +142,7 @@ def test_fetch_range_pages_backward_until_start_reached(monkeypatch):
         calls["count"] += 1
         if calls["count"] == 1:
             # 200개 꽉 채운 페이지(가장 오래된 캔들도 여전히 start보다 나중)를 반환해
-            # "더 오래된 데이터가 있으니 한 페이지 더 가져와야 함"을 흉내낸다.
+            # "더 오래된 데이터가 있으니 한 페이지 더 가져해야 함"을 흉내낸다.
             page = [
                 _candle(
                     (page1_end - timedelta(days=i)).strftime("%Y-%m-%dT%H:%M:%S"),
@@ -159,3 +160,42 @@ def test_fetch_range_pages_backward_until_start_reached(monkeypatch):
 
     assert calls["count"] == 2
     assert df["candle_time"].min() <= start
+
+
+def _df_with_range(start_iso: str, end_iso: str) -> pd.DataFrame:
+    idx = pd.date_range(start_iso, end_iso, freq="D", tz="UTC")
+    return pd.DataFrame({"candle_time": idx, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1})
+
+
+def test_compute_gaps_no_cache_returns_full_range():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    gaps = _compute_gaps(pd.DataFrame(columns=uds._CANDLE_COLUMNS), start, end)
+    assert gaps == [(start, end)]
+
+
+def test_compute_gaps_missing_front_only():
+    cached = _df_with_range("2026-01-05", "2026-01-10")
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    gaps = _compute_gaps(cached, start, end)
+    assert len(gaps) == 1
+    assert gaps[0][0] == start
+    assert gaps[0][1] < datetime(2026, 1, 5, tzinfo=timezone.utc)
+
+
+def test_compute_gaps_missing_back_only():
+    cached = _df_with_range("2026-01-01", "2026-01-05")
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    gaps = _compute_gaps(cached, start, end)
+    assert len(gaps) == 1
+    assert gaps[0][1] == end
+    assert gaps[0][0] > datetime(2026, 1, 5, tzinfo=timezone.utc)
+
+
+def test_compute_gaps_fully_covered_returns_empty():
+    cached = _df_with_range("2026-01-01", "2026-01-10")
+    start = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 9, tzinfo=timezone.utc)
+    assert _compute_gaps(cached, start, end) == []

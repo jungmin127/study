@@ -118,3 +118,20 @@ def _fetch_range(
     finally:
         if close_client:
             client.close()
+
+
+def _compute_gaps(
+    cached: pd.DataFrame, start: datetime, end: datetime
+) -> list[tuple[datetime, datetime]]:
+    if cached.empty:
+        return [(start, end)]
+
+    cache_start = cached["candle_time"].min()
+    cache_end = cached["candle_time"].max()
+
+    gaps: list[tuple[datetime, datetime]] = []
+    if start < cache_start:
+        gaps.append((start, cache_start - timedelta(seconds=1)))
+    if end > cache_end:
+        gaps.append((max(start, cache_end + timedelta(seconds=1)), end))
+    return gaps
