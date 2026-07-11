@@ -256,3 +256,37 @@ def test_get_candles_skips_fetch_when_fully_cached(monkeypatch, tmp_path):
     df = get_candles("KRW-BTC", "days", start, end)
 
     assert len(df) == 8
+
+
+def test_get_candles_excludes_unclosed_candle_from_result_and_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(uds, "CACHE_DIR", tmp_path)
+    fixed_now = datetime(2026, 1, 5, 12, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        uds, "datetime",
+        type("_FixedDatetime", (), {"now": staticmethod(lambda tz=None: fixed_now)}),
+    )
+
+    def fake_fetch_range(market, timeframe, start, end, client=None):
+        idx = pd.date_range(start, end, freq="D", tz="UTC")
+        return pd.DataFrame(
+            {"candle_time": idx, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+        )
+
+    monkeypatch.setattr(uds, "_fetch_range", fake_fetch_range)
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    df = uds.get_candles("KRW-BTC", "days", start, end)
+
+    # 1/5 일봉은 00:00에 열려 1/6 00:00에 마감되는데, now=1/5 12:00이므로 아직 마감 전 → 제외돼야 함
+    assert df["candle_time"].max() < datetime(2026, 1, 5, tzinfo=timezone.utc)
+
+    saved = pd.read_parquet(tmp_path / "KRW-BTC_days.parquet")
+    assert saved["candle_time"].max() < datetime(2026, 1, 5, tzinfo=timezone.utc)
+
+
+def test_timeframe_duration():
+    assert uds._timeframe_duration("days") == timedelta(days=1)
+    assert uds._timeframe_duration("minutes60") == timedelta(minutes=60)
+    with pytest.raises(ValueError):
+        uds._timeframe_duration("weeks")

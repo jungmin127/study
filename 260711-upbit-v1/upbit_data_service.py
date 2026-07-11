@@ -28,6 +28,17 @@ def _endpoint_for_timeframe(timeframe: str) -> str:
     raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
 
 
+def _timeframe_duration(timeframe: str) -> timedelta:
+    if timeframe == "days":
+        return timedelta(days=1)
+    if timeframe.startswith("minutes"):
+        unit = timeframe[len("minutes"):]
+        if not unit.isdigit():
+            raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
+        return timedelta(minutes=int(unit))
+    raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
+
+
 def _fetch_page(
     client: httpx.Client,
     url: str,
@@ -169,9 +180,13 @@ def get_candles(market: str, timeframe: str, start: datetime, end: datetime) -> 
             .sort_values("candle_time")
             .reset_index(drop=True)
         )
-        _save_cache(market, timeframe, cached)
 
+    duration = _timeframe_duration(timeframe)
     now = datetime.now(timezone.utc)
-    closed = cached[cached["candle_time"] <= now]
+    closed = cached[cached["candle_time"] + duration <= now].reset_index(drop=True)
+
+    if gaps:
+        _save_cache(market, timeframe, closed)
+
     result = closed[(closed["candle_time"] >= start) & (closed["candle_time"] <= end)]
     return result.reset_index(drop=True)
