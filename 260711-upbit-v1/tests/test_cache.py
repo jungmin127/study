@@ -99,6 +99,21 @@ def test_compute_cache_key_ignores_non_primitive_runtime_attributes():
     assert _key(params={"signals": [a]}) == _key(params={"signals": [b]})
 
 
+class _SignalWithNonPrimitiveConfig:
+    """리스트/딕셔너리처럼 원시 타입이 아닌 생성자 파라미터를 가진 (가상의) 신호.
+    현재 signals.py의 4개 신호는 전부 원시 타입 파라미터만 쓰지만, 향후 이런
+    신호가 추가되면 캐시 키에서 조용히 빠져 false cache hit 위험이 생긴다 —
+    최소한 경고는 나와야 한다."""
+
+    def __init__(self, thresholds: list[float]):
+        self.thresholds = thresholds
+
+
+def test_compute_cache_key_warns_when_dropping_non_primitive_config():
+    with pytest.warns(UserWarning, match="thresholds"):
+        _key(params={"signals": [_SignalWithNonPrimitiveConfig([30.0, 70.0])]})
+
+
 def test_save_result_accepts_object_valued_strategy_params(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
 

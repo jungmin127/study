@@ -9,6 +9,7 @@ import hashlib
 import inspect
 import json
 import sqlite3
+import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -73,9 +74,23 @@ def _json_default(obj):
     캐시 키에서 제외한다 — 그런 런타임 상태는 신호의 "설정"이 아니고, 종종
     자기 자신을 참조하는 순환 구조라 재귀 직렬화 시 오류가 난다."""
     if hasattr(obj, "__dict__"):
-        primitives = {
-            k: v for k, v in vars(obj).items() if isinstance(v, _JSON_PRIMITIVES)
-        }
+        attrs = vars(obj)
+        primitives = {k: v for k, v in attrs.items() if isinstance(v, _JSON_PRIMITIVES)}
+        # signals.py의 관례: 생성자 설정값은 public 속성, setup()이 붙이는
+        # backtrader 지표 등 런타임 상태는 `_`로 시작하는 private 속성이다.
+        # private 속성이 걸러지는 건 정상이므로 경고하지 않는다 — public인데도
+        # 원시 타입이 아니어서 걸러진 경우만, 캐시 키가 실수로 설정값 차이를
+        # 구분하지 못하는 상황일 수 있어 경고한다.
+        dropped_config = sorted(
+            k for k in set(attrs) - set(primitives) if not k.startswith("_")
+        )
+        if dropped_config:
+            warnings.warn(
+                f"{type(obj).__name__}의 비-원시 타입 속성 {dropped_config}이(가) 캐시 키에서 "
+                "제외되었습니다. list/dict가 아닌 원시 타입으로 바꾸지 않는 한 캐시 키가 "
+                "그 값의 차이를 구분하지 못해 잘못된 캐시 hit이 발생할 수 있습니다.",
+                stacklevel=2,
+            )
         return {"__class__": type(obj).__name__, **primitives}
     return str(obj)
 
