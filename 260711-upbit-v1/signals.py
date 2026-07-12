@@ -29,3 +29,29 @@ class Signal(Protocol):
 
 
 SIGNAL_REGISTRY: dict[str, Signal] = {}
+
+
+class MacdCrossSignal:
+    """MACD선이 시그널선 위(강세 상태)/아래(약세 상태)인지를 매수/매도 조건으로 사용."""
+
+    def __init__(self, fast: int = 12, slow: int = 26, signal_period: int = 9):
+        self.fast = fast
+        self.slow = slow
+        self.signal_period = signal_period
+
+    def setup(self, strategy: bt.Strategy) -> None:
+        self._macd = bt.indicators.MACD(
+            strategy.data,
+            period_me1=self.fast,
+            period_me2=self.slow,
+            period_signal=self.signal_period,
+        )
+
+    def should_buy(self, strategy: bt.Strategy) -> bool:
+        return self._macd.macd[0] > self._macd.signal[0]
+
+    def should_sell(self, strategy: bt.Strategy) -> bool:
+        return self._macd.macd[0] < self._macd.signal[0]
+
+
+SIGNAL_REGISTRY["macd_cross"] = MacdCrossSignal()
