@@ -16,6 +16,23 @@
 - 전략은 `bt.Strategy` 서브클래스를 코드로 직접 작성한다 — JSON 조건 트리나 동적 클래스 생성 레이어는 만들지 않는다.
 - 캐시 키는 전략 클래스의 소스코드(`inspect.getsource`)를 포함해 해시한다 — 이름이 같아도 로직이 바뀌면 재실행되어야 한다.
 
+## 진행 현황 (2026-07-12 기준 — 전체 완료)
+
+- [x] Task 0: 프로젝트 스캐폴딩 (`25a3c2a`)
+- [x] Task 1: Upbit 캔들 API 엔드포인트 매핑 + 응답 파싱 (`5f63c61`, `e7d9576`)
+- [x] Task 2: 재시도 포함 단일 페이지 API 호출 (`4d162ae`)
+- [x] Task 3: 구간 페이지네이션 `_fetch_range` (`97bc23f`)
+- [x] Task 4: 부분 캐시 갭 계산 `_compute_gaps` (`9805c47`)
+- [x] Task 5: `get_candles()` 오케스트레이션 + Parquet 캐시 (`580215e`) — 리뷰에서 Critical 버그(마감 안 된 캔들이 캐시/반환 결과에 새어 들어감) 발견, `_timeframe_duration()` 도입으로 수정 (`a0a0f9d`)
+- [x] Task 6: backtrader 실행 엔진 포팅 `engine/runner.py` (`3c1612a`) — 최초 시도에서 합성 테스트 데이터의 일봉 변동폭이 너무 커 마진 부족으로 매수 주문이 거부되는 실제 버그를 발견해 플랜 자체를 수정 (`9c0408b`) 후 재시도로 통과
+- [x] Task 7: 캐시 키 계산 `compute_cache_key` (`558a685`)
+- [x] Task 8: SQLite 결과 저장/조회 `save_result`/`load_result` (`b683763`)
+- [x] Task 9: `run_backtest_cached()` 오케스트레이션 — hit/miss/실패 처리 (`6007050`)
+- [x] Task 10: 수동 통합 스모크 테스트 — 실제 Upbit API로 검증 (`004bd3e`)
+- [x] 최종 전체 브랜치 리뷰 — **머지 가능** 판정, Critical 이슈 없음. 캐시 결정성 관련 docstring 보완 (`198d259`)
+
+**결과**: 서브프로젝트 1(로컬 시세 캐시) + 서브프로젝트 2(룰 기반 백테스팅 엔진) 코드 완료, 27/27 테스트 통과. 서브프로젝트 3(통계/ML 모델링), 서브프로젝트 4(자동매매 엔진)는 범위 밖으로 남아있으며 별도 설계가 필요하다.
+
 ---
 
 ### Task 0: 프로젝트 스캐폴딩
@@ -29,7 +46,7 @@
 **Interfaces:**
 - Produces: `pytest`가 저장소 루트에서 `import upbit_data_service`, `import engine.runner`, `import engine.cache`를 바로 할 수 있는 환경 (별도 `pip install -e .` 불필요).
 
-- [ ] **Step 1: 의존성 파일 작성**
+- [x] **Step 1: 의존성 파일 작성**
 
 `requirements.txt`:
 ```
@@ -40,7 +57,7 @@ backtrader>=1.9.78
 pytest>=8.0
 ```
 
-- [ ] **Step 2: pytest 설정 작성**
+- [x] **Step 2: pytest 설정 작성**
 
 `pytest.ini`:
 ```ini
@@ -49,7 +66,7 @@ pythonpath = .
 testpaths = tests
 ```
 
-- [ ] **Step 3: gitignore 작성**
+- [x] **Step 3: gitignore 작성**
 
 `.gitignore`:
 ```
@@ -59,11 +76,11 @@ __pycache__/
 data/
 ```
 
-- [ ] **Step 4: engine 패키지 초기화 파일 생성**
+- [x] **Step 4: engine 패키지 초기화 파일 생성**
 
 `engine/__init__.py`: (빈 파일)
 
-- [ ] **Step 5: 의존성 설치 및 pytest 동작 확인**
+- [x] **Step 5: 의존성 설치 및 pytest 동작 확인**
 
 Run:
 ```bash
@@ -73,7 +90,7 @@ pytest --collect-only
 ```
 Expected: `no tests ran` (에러 없이 수집 단계 통과)
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add requirements.txt pytest.ini .gitignore engine/__init__.py
@@ -91,7 +108,7 @@ git commit -m "chore: scaffold Python project for cache + backtest engine"
 **Interfaces:**
 - Produces: `_CANDLE_COLUMNS: list[str]`, `_endpoint_for_timeframe(timeframe: str) -> str`, `_parse_candles(raw: list[dict]) -> pd.DataFrame` (컬럼 `[candle_time, open, high, low, close, volume]`, `candle_time`은 UTC-aware).
 
-- [ ] **Step 1: 실패하는 테스트 작성 — 엔드포인트 매핑**
+- [x] **Step 1: 실패하는 테스트 작성 — 엔드포인트 매핑**
 
 `tests/test_upbit_data_service.py`:
 ```python
@@ -113,12 +130,12 @@ def test_endpoint_for_unsupported_timeframe_raises():
         _endpoint_for_timeframe("weeks")
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'upbit_data_service'`
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `upbit_data_service.py`:
 ```python
@@ -140,19 +157,19 @@ def _endpoint_for_timeframe(timeframe: str) -> str:
     raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add upbit_data_service.py tests/test_upbit_data_service.py
 git commit -m "feat: map upbit candle timeframe to API endpoint"
 ```
 
-- [ ] **Step 6: 실패하는 테스트 작성 — 응답 파싱**
+- [x] **Step 6: 실패하는 테스트 작성 — 응답 파싱**
 
 `tests/test_upbit_data_service.py`에 추가:
 ```python
@@ -187,12 +204,12 @@ def test_parse_candles_empty_input():
     assert len(df) == 0
 ```
 
-- [ ] **Step 7: 테스트 실패 확인**
+- [x] **Step 7: 테스트 실패 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: FAIL with `ImportError: cannot import name '_parse_candles'`
 
-- [ ] **Step 8: 구현 추가**
+- [x] **Step 8: 구현 추가**
 
 `upbit_data_service.py`에 추가:
 ```python
@@ -218,12 +235,12 @@ def _parse_candles(raw: list[dict]) -> pd.DataFrame:
     return df.sort_values("candle_time").reset_index(drop=True)
 ```
 
-- [ ] **Step 9: 테스트 통과 확인**
+- [x] **Step 9: 테스트 통과 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: PASS (5 tests)
 
-- [ ] **Step 10: 커밋**
+- [x] **Step 10: 커밋**
 
 ```bash
 git add upbit_data_service.py tests/test_upbit_data_service.py
@@ -242,7 +259,7 @@ git commit -m "feat: parse upbit candle API response into OHLCV dataframe"
 - Consumes: `_endpoint_for_timeframe`, `_CANDLE_COLUMNS` (Task 1)
 - Produces: `_fetch_page(client: httpx.Client, url: str, market: str, to: datetime | None, count: int = 200) -> list[dict]`, 모듈 상수 `RETRY_ATTEMPTS`, `RETRY_BASE_DELAY_SECONDS`, `RATE_LIMIT_BACKOFF_SECONDS` (테스트에서 monkeypatch로 0에 가깝게 낮춰 재시도 대기를 건너뜀).
 
-- [ ] **Step 1: 실패하는 테스트 작성 — 정상 응답**
+- [x] **Step 1: 실패하는 테스트 작성 — 정상 응답**
 
 `tests/test_upbit_data_service.py`에 추가:
 ```python
@@ -300,12 +317,12 @@ def test_fetch_page_raises_after_exhausting_retries(monkeypatch):
             _fetch_page(client, "https://api.upbit.com/v1/candles/days", "KRW-BTC", None)
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: FAIL with `ImportError: cannot import name '_fetch_page'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `upbit_data_service.py`에 추가:
 ```python
@@ -346,12 +363,12 @@ def _fetch_page(
     raise RuntimeError(f"Upbit API 호출 실패 (market={market}, url={url}): {last_exc}")
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: PASS (8 tests)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add upbit_data_service.py tests/test_upbit_data_service.py
@@ -372,7 +389,7 @@ git commit -m "feat: fetch single upbit candle page with 429/error retry"
 
 Upbit 캔들 API는 `to` 기준 과거로만 페이지네이션된다(최신→과거, 최대 200개/페이지). `end`부터 시작해 받아온 페이지의 가장 오래된 시각을 다음 `to`로 삼아 `start`에 도달하거나 200개 미만 응답을 받을 때까지 반복한다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_upbit_data_service.py`에 추가 (`timedelta`는 이 태스크에서 처음 쓰이므로 파일 상단 `from datetime import datetime, timezone` 옆에 `timedelta`도 추가해야 한다 — `from datetime import datetime, timedelta, timezone`로 수정):
 ```python
@@ -446,12 +463,12 @@ def test_fetch_range_pages_backward_until_start_reached(monkeypatch):
     assert df["candle_time"].min() <= start
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: FAIL with `ImportError: cannot import name '_fetch_range'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `upbit_data_service.py`에 추가:
 ```python
@@ -507,12 +524,12 @@ def _fetch_range(
             client.close()
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: PASS (10 tests)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add upbit_data_service.py tests/test_upbit_data_service.py
@@ -532,7 +549,7 @@ git commit -m "feat: paginate upbit candle range fetch backward from end"
 
 순수 함수, 네트워크/파일 I/O 없음.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_upbit_data_service.py`에 추가:
 ```python
@@ -578,12 +595,12 @@ def test_compute_gaps_fully_covered_returns_empty():
     assert _compute_gaps(cached, start, end) == []
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: FAIL with `ImportError: cannot import name '_compute_gaps'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `upbit_data_service.py`에 추가:
 ```python
@@ -604,12 +621,12 @@ def _compute_gaps(
     return gaps
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: PASS (14 tests)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add upbit_data_service.py tests/test_upbit_data_service.py
@@ -628,7 +645,7 @@ git commit -m "feat: compute uncovered date ranges against cached candles"
 - Consumes: `_compute_gaps` (Task 4), `_fetch_range` (Task 3), `_CANDLE_COLUMNS` (Task 1)
 - Produces: `get_candles(market: str, timeframe: str, start: datetime, end: datetime) -> pd.DataFrame` — 서브프로젝트 2가 그대로 소비하는 공개 인터페이스. 모듈 레벨 `CACHE_DIR: Path` (테스트에서 monkeypatch로 임시 디렉터리로 교체).
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_upbit_data_service.py`에 추가:
 ```python
@@ -693,12 +710,12 @@ def test_get_candles_skips_fetch_when_fully_cached(monkeypatch, tmp_path):
     assert len(df) == 8
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: FAIL with `ImportError: cannot import name 'get_candles'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `upbit_data_service.py`에 추가:
 ```python
@@ -744,12 +761,12 @@ def get_candles(market: str, timeframe: str, start: datetime, end: datetime) -> 
     return result.reset_index(drop=True)
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_upbit_data_service.py -v`
 Expected: PASS (16 tests)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add upbit_data_service.py tests/test_upbit_data_service.py
@@ -768,7 +785,7 @@ git commit -m "feat: add get_candles() lazy-fetch parquet cache orchestration"
 - Produces: `run_backtest(df: pd.DataFrame, strategy_cls: type[bt.Strategy], risk_config: dict, strategy_params: dict | None = None) -> dict` — 반환 키: `equity_curve`, `trades`, `final_value`, `sharpe`, `max_drawdown`.
 - `backtesting_1/backend/app/engine/runner.py`를 포팅하되 다음을 변경: (1) `df.set_index("open_time")` → `df.set_index("candle_time")` (서브프로젝트 1 캐시 컬럼명에 맞춤), (2) `sharpe`/`max_drawdown`을 반환 dict에 포함 (원본은 analyzer를 등록만 하고 반환하지 않았음 — 이번 설계 문서가 요구하는 필드이므로 추가).
 
-- [ ] **Step 1: 실패하는 스모크 테스트 작성**
+- [x] **Step 1: 실패하는 스모크 테스트 작성**
 
 `tests/test_runner.py`:
 ```python
@@ -831,12 +848,12 @@ def test_run_backtest_buy_and_hold_once():
     assert "max_drawdown" in result
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_runner.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'engine.runner'`
 
-- [ ] **Step 3: `backtesting_1/backend/app/engine/runner.py`를 포팅**
+- [x] **Step 3: `backtesting_1/backend/app/engine/runner.py`를 포팅**
 
 `engine/runner.py` — 아래 세 부분만 원본과 다르다: 클래스/함수 본문은 `C:\Users\jungm\project\backtesting_1\backend\app\engine\runner.py`와 동일하게 유지하고, (a) `run_backtest()` 안의 `df_bt = df_bt.set_index("open_time")`를 `df_bt = df_bt.set_index("candle_time")`로 변경, (b) 함수 끝의 `return` 직전에 sharpe/max_drawdown 추출을 추가, (c) `return` dict에 `sharpe`, `max_drawdown` 키 추가.
 
@@ -1052,12 +1069,12 @@ def run_backtest(
 __all__ = ["run_backtest"]
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_runner.py -v`
 Expected: PASS (1 test)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add engine/runner.py tests/test_runner.py
@@ -1075,7 +1092,7 @@ git commit -m "feat: port backtrader runner engine for upbit candle_time schema"
 **Interfaces:**
 - Produces: `compute_cache_key(strategy_cls: type, strategy_params: dict, market: str, timeframe: str, start: datetime, end: datetime, risk_config: dict) -> str`
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_cache.py`:
 ```python
@@ -1124,12 +1141,12 @@ def test_different_risk_config_produces_different_key():
     assert _key(risk={"initial_capital": 10000}) != _key(risk={"initial_capital": 5000})
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_cache.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'engine.cache'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `engine/cache.py`:
 ```python
@@ -1168,12 +1185,12 @@ def compute_cache_key(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_cache.py -v`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add engine/cache.py tests/test_cache.py
@@ -1194,7 +1211,7 @@ git commit -m "feat: hash strategy source + params + data range into cache key"
 
 `backtest_runs`(메타데이터)와 `backtest_results`(요약 지표 + equity_curve/trades를 JSON 컬럼으로) 2개 테이블로 단순화한다 — 설계 문서는 `trades`/`equity_curve`를 별도 테이블로 둘지 JSON 컬럼으로 둘지 "구현 단계에서 결정"하도록 남겨뒀고, 현재는 SQL로 개별 거래를 조회할 필요가 없으므로 JSON 컬럼이 더 단순하다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_cache.py`에 추가:
 ```python
@@ -1241,12 +1258,12 @@ def test_load_missing_run_id_returns_none(monkeypatch, tmp_path):
     assert load_result("does-not-exist") is None
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_cache.py -v`
 Expected: FAIL with `ImportError: cannot import name 'save_result'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `engine/cache.py`에 추가:
 ```python
@@ -1357,12 +1374,12 @@ def save_result(
         conn.close()
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_cache.py -v`
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add engine/cache.py tests/test_cache.py
@@ -1381,7 +1398,7 @@ git commit -m "feat: persist and load backtest results from local sqlite file"
 - Consumes: `compute_cache_key`, `load_result`, `save_result` (Task 7, 8), `engine.runner.run_backtest` (Task 6)
 - Produces: `run_backtest_cached(df: pd.DataFrame, strategy_cls: type[bt.Strategy], risk_config: dict, market: str, timeframe: str, start: datetime, end: datetime, strategy_params: dict | None = None) -> dict` — 서브프로젝트 2의 최종 공개 인터페이스.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_cache.py`에 추가:
 ```python
@@ -1467,12 +1484,12 @@ def test_run_backtest_cached_does_not_cache_on_failure(monkeypatch, tmp_path):
     assert load_result(run_id) is None
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_cache.py -v`
 Expected: FAIL with `ImportError: cannot import name 'run_backtest_cached'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `engine/cache.py` 상단 import에 추가:
 ```python
@@ -1521,17 +1538,17 @@ def run_backtest_cached(
 
 `tests/test_cache.py` 상단 import에 `import engine.cache as cache_module`가 이미 있어야 한다(Task 8에서 추가됨). `run_backtest`를 `cache_module.run_backtest`로 monkeypatch할 수 있도록 `engine/cache.py`에서 `from engine.runner import run_backtest` 형태로 이름을 모듈 네임스페이스에 바인딩해야 한다(위 import 그대로 사용하면 됨).
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_cache.py -v`
 Expected: PASS (8 tests)
 
-- [ ] **Step 5: 전체 테스트 스위트 확인**
+- [x] **Step 5: 전체 테스트 스위트 확인**
 
 Run: `pytest -v`
 Expected: PASS (모든 테스트, Task 0~9 누적)
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add engine/cache.py tests/test_cache.py
@@ -1547,7 +1564,7 @@ git commit -m "feat: wire run_backtest_cached() orchestration with hit/miss/fail
 **Files:**
 - Create: `scripts/smoke_test.py`
 
-- [ ] **Step 1: 스모크 스크립트 작성**
+- [x] **Step 1: 스모크 스크립트 작성**
 
 `scripts/smoke_test.py`:
 ```python
@@ -1618,7 +1635,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: 실행 및 육안 확인**
+- [x] **Step 2: 실행 및 육안 확인**
 
 Run: `python scripts/smoke_test.py`
 
@@ -1627,7 +1644,7 @@ Run: `python scripts/smoke_test.py`
 - `data/backtest_results.db` 파일이 생성되었는지
 - 콘솔에 "스모크 테스트 통과" 출력, 두 번째 실행이 `from_cache=True`인지
 
-- [ ] **Step 3: 커밋**
+- [x] **Step 3: 커밋**
 
 ```bash
 git add scripts/smoke_test.py
