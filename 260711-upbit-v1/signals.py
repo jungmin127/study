@@ -76,3 +76,24 @@ class RsiZoneSignal:
 
 
 SIGNAL_REGISTRY["rsi_zone"] = RsiZoneSignal()
+
+
+class SmaCrossSignal:
+    """단기 SMA가 장기 SMA 위(강세 상태)/아래(약세 상태)인지를 조건으로 사용."""
+
+    def __init__(self, short: int = 10, long: int = 30):
+        self.short = short
+        self.long = long
+
+    def setup(self, strategy: bt.Strategy) -> None:
+        self._short = bt.indicators.SMA(strategy.data, period=self.short)
+        self._long = bt.indicators.SMA(strategy.data, period=self.long)
+
+    def should_buy(self, strategy: bt.Strategy) -> bool:
+        return self._short[0] > self._long[0]
+
+    def should_sell(self, strategy: bt.Strategy) -> bool:
+        return self._short[0] < self._long[0]
+
+
+SIGNAL_REGISTRY["sma_cross"] = SmaCrossSignal()
