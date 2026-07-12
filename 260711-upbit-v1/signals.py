@@ -55,3 +55,24 @@ class MacdCrossSignal:
 
 
 SIGNAL_REGISTRY["macd_cross"] = MacdCrossSignal()
+
+
+class RsiZoneSignal:
+    """RSI가 과매도(매수 구간)/과매수(매도 구간) 상태인지를 조건으로 사용."""
+
+    def __init__(self, period: int = 14, oversold: float = 30.0, overbought: float = 70.0):
+        self.period = period
+        self.oversold = oversold
+        self.overbought = overbought
+
+    def setup(self, strategy: bt.Strategy) -> None:
+        self._rsi = bt.indicators.RSI(strategy.data, period=self.period)
+
+    def should_buy(self, strategy: bt.Strategy) -> bool:
+        return self._rsi[0] < self.oversold
+
+    def should_sell(self, strategy: bt.Strategy) -> bool:
+        return self._rsi[0] > self.overbought
+
+
+SIGNAL_REGISTRY["rsi_zone"] = RsiZoneSignal()
