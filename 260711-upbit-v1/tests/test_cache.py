@@ -54,6 +54,45 @@ def test_different_risk_config_produces_different_key():
     assert _key(risk={"initial_capital": 10000}) != _key(risk={"initial_capital": 5000})
 
 
+class _DummySignal:
+    """signals.py의 Signal 구현체를 흉내낸, __dict__ 속성을 가진 평범한 객체."""
+
+    def __init__(self, threshold: float):
+        self.threshold = threshold
+
+
+def test_compute_cache_key_is_stable_for_object_params_regardless_of_identity():
+    a = _key(params={"signals": [_DummySignal(30)]})
+    b = _key(params={"signals": [_DummySignal(30)]})
+    assert a == b
+
+
+def test_compute_cache_key_differs_for_different_object_attributes():
+    a = _key(params={"signals": [_DummySignal(30)]})
+    b = _key(params={"signals": [_DummySignal(70)]})
+    assert a != b
+
+
+def test_save_result_accepts_object_valued_strategy_params(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    run_id = _key(params={"signals": [_DummySignal(30)]})
+    save_result(
+        run_id=run_id,
+        strategy_name="SignalStrategy",
+        strategy_params={"signals": [_DummySignal(30)]},
+        market="KRW-BTC",
+        timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+    )
+
+    loaded = load_result(run_id)
+    assert loaded["final_value"] == 10500.0
+
+
 def test_save_then_load_round_trips(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
 

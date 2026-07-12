@@ -60,6 +60,16 @@ CREATE TABLE IF NOT EXISTS sweep_history (
 """
 
 
+def _json_default(obj):
+    """JSON으로 직렬화할 수 없는 객체(예: signals.py의 Signal 구현체)를
+    안정적인 표현으로 변환한다. str(obj)의 기본 repr은 메모리 주소를 포함해
+    프로세스마다 달라지므로, 클래스명 + 인스턴스 속성으로 대체해 같은 설정이면
+    항상 같은 캐시 키가 나오도록 한다."""
+    if hasattr(obj, "__dict__"):
+        return {"__class__": type(obj).__name__, **vars(obj)}
+    return str(obj)
+
+
 def compute_cache_key(
     strategy_cls: type,
     strategy_params: dict,
@@ -78,7 +88,7 @@ def compute_cache_key(
         "end": end.isoformat(),
         "risk_config": risk_config,
     }
-    canonical = json.dumps(payload, sort_keys=True, default=str)
+    canonical = json.dumps(payload, sort_keys=True, default=_json_default)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -134,7 +144,7 @@ def save_result(
             (
                 run_id,
                 strategy_name,
-                json.dumps(strategy_params, sort_keys=True),
+                json.dumps(strategy_params, sort_keys=True, default=_json_default),
                 market,
                 timeframe,
                 start.isoformat(),
