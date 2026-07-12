@@ -42,6 +42,23 @@ CREATE TABLE IF NOT EXISTS backtest_results (
 );
 """
 
+_SCHEMA += """
+CREATE TABLE IF NOT EXISTS sweep_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    signal_set_name TEXT NOT NULL,
+    is_combined INTEGER NOT NULL,
+    market TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    start TEXT NOT NULL,
+    end TEXT NOT NULL,
+    return_rate REAL,
+    sharpe REAL,
+    max_drawdown REAL,
+    swept_at TEXT NOT NULL
+);
+"""
+
 
 def compute_cache_key(
     strategy_cls: type,
@@ -167,6 +184,7 @@ def run_backtest_cached(
 
     cached = load_result(run_id)
     if cached is not None:
+        cached["run_id"] = run_id
         return cached
 
     result = run_backtest(df, strategy_cls, risk_config, strategy_params)
@@ -182,4 +200,111 @@ def run_backtest_cached(
         result=result,
     )
     result["from_cache"] = False
+    result["run_id"] = run_id
     return result
+
+
+def save_sweep_result(
+    run_id: str,
+    signal_set_name: str,
+    is_combined: bool,
+    market: str,
+    timeframe: str,
+    start: datetime,
+    end: datetime,
+    return_rate: float | None,
+    sharpe: float | None,
+    max_drawdown: float | None,
+) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO sweep_history "
+            "(run_id, signal_set_name, is_combined, market, timeframe, start, end, "
+            " return_rate, sharpe, max_drawdown, swept_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (
+                run_id, signal_set_name, int(is_combined), market, timeframe,
+                start.isoformat(), end.isoformat(), return_rate, sharpe, max_drawdown,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _row_to_sweep_dict(row: tuple) -> dict:
+    (run_id, signal_set_name, is_combined, market, timeframe, start, end,
+     return_rate, sharpe, max_drawdown, swept_at) = row
+    return {
+        "run_id": run_id,
+        "signal_set_name": signal_set_name,
+        "is_combined": bool(is_combined),
+        "market": market,
+        "timeframe": timeframe,
+        "start": start,
+        "end": end,
+        "return_rate": return_rate,
+        "sharpe": sharpe,
+        "max_drawdown": max_drawdown,
+        "swept_at": swept_at,
+    }
+
+
+def list_latest_sweep_results() -> list[dict]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT run_id, signal_set_name, is_combined, market, timeframe, start, end, "
+            "       return_rate, sharpe, max_drawdown, swept_at "
+            "FROM sweep_history "
+            "WHERE id IN ("
+            "  SELECT MAX(id) FROM sweep_history "
+            "  GROUP BY signal_set_name, is_combined, market, timeframe"
+            ") "
+            "ORDER BY signal_set_name, market, timeframe"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_sweep_dict(r) for r in rows]
+
+
+def list_combined_ranking() -> list[dict]:
+    return sorted(
+        (r for r in list_latest_sweep_results() if r["is_combined"]),
+        key=lambda r: (r["return_rate"] if r["return_rate"] is not None else float("-inf")),
+        reverse=True,
+    )
+
+
+def list_sweep_history(
+    signal_set_name: str, market: str, timeframe: str, is_combined: bool
+) -> list[dict]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT run_id, signal_set_name, is_combined, market, timeframe, start, end, "
+            "       return_rate, sharpe, max_drawdown, swept_at "
+            "FROM sweep_history "
+            "WHERE signal_set_name = ? AND market = ? AND timeframe = ? AND is_combined = ? "
+            "ORDER BY swept_at",
+            (signal_set_name, market, timeframe, int(is_combined)),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_sweep_dict(r) for r in rows]
+
+
+def list_distinct_combos() -> list[dict]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT signal_set_name, is_combined, market, timeframe FROM sweep_history "
+            "ORDER BY signal_set_name, market, timeframe"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        {"signal_set_name": r[0], "is_combined": bool(r[1]), "market": r[2], "timeframe": r[3]}
+        for r in rows
+    ]

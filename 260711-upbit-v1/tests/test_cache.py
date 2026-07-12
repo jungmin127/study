@@ -7,6 +7,13 @@ import pytest
 import engine.cache as cache_module
 from engine.cache import compute_cache_key, load_result, save_result
 from engine.cache import run_backtest_cached
+from engine.cache import (
+    list_combined_ranking,
+    list_distinct_combos,
+    list_latest_sweep_results,
+    list_sweep_history,
+    save_sweep_result,
+)
 
 
 class _StrategyA(bt.Strategy):
@@ -161,3 +168,90 @@ def test_run_backtest_cached_does_not_cache_on_failure(monkeypatch, tmp_path):
         {"initial_capital": 10000},
     )
     assert load_result(run_id) is None
+
+
+def test_run_backtest_cached_exposes_run_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params=None):
+        return {"equity_curve": [], "trades": [], "final_value": 10000.0, "sharpe": None, "max_drawdown": None}
+
+    monkeypatch.setattr(cache_module, "run_backtest", fake_run_backtest)
+
+    result = run_backtest_cached(
+        df=_synthetic_df(), strategy_cls=_StrategyA, risk_config={"initial_capital": 10000},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+    )
+    expected_run_id = compute_cache_key(
+        _StrategyA, {}, "KRW-BTC", "days",
+        datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 10, tzinfo=timezone.utc),
+        {"initial_capital": 10000},
+    )
+    assert result["run_id"] == expected_run_id
+
+
+def test_save_and_list_latest_sweep_results(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    save_sweep_result(
+        run_id="run-1", signal_set_name="macd_cross", is_combined=False,
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        return_rate=5.0, sharpe=1.1, max_drawdown=2.0,
+    )
+    # 같은 조합을 다시 스윕 — append-only이므로 새 행이 추가돼야 함
+    save_sweep_result(
+        run_id="run-2", signal_set_name="macd_cross", is_combined=False,
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 11, tzinfo=timezone.utc),
+        return_rate=7.0, sharpe=1.3, max_drawdown=2.5,
+    )
+
+    latest = list_latest_sweep_results()
+    assert len(latest) == 1  # 같은 (signal_set_name, is_combined, market, timeframe) 조합은 최신 1건만
+    assert latest[0]["return_rate"] == 7.0
+
+    history = list_sweep_history("macd_cross", "KRW-BTC", "days", is_combined=False)
+    assert len(history) == 2  # 히스토리는 append-only로 둘 다 보여야 함
+
+
+def test_combined_ranking_filters_and_sorts_by_return_rate(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    save_sweep_result(
+        run_id="run-a", signal_set_name="macd_cross", is_combined=False,
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        return_rate=100.0, sharpe=None, max_drawdown=None,
+    )
+    save_sweep_result(
+        run_id="run-b", signal_set_name="mixed_all", is_combined=True,
+        market="KRW-ETH", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        return_rate=3.0, sharpe=None, max_drawdown=None,
+    )
+    save_sweep_result(
+        run_id="run-c", signal_set_name="mixed_all", is_combined=True,
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        return_rate=8.0, sharpe=None, max_drawdown=None,
+    )
+
+    ranking = list_combined_ranking()
+    assert [r["market"] for r in ranking] == ["KRW-BTC", "KRW-ETH"]  # is_combined=False(run-a)는 제외, 수익률 내림차순
+
+
+def test_list_distinct_combos(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    save_sweep_result(
+        run_id="run-x", signal_set_name="rsi_zone", is_combined=False,
+        market="KRW-BTC", timeframe="minutes60",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        return_rate=1.0, sharpe=None, max_drawdown=None,
+    )
+    combos = list_distinct_combos()
+    assert combos == [
+        {"signal_set_name": "rsi_zone", "is_combined": False, "market": "KRW-BTC", "timeframe": "minutes60"}
+    ]
