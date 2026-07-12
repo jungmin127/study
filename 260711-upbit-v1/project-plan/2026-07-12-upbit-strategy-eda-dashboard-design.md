@@ -54,7 +54,8 @@ backend/ (FastAPI)                          frontend/ (Next.js App Router + shad
 ```
 
 - **신호(Signal) 인터페이스**: 각 신호는 (a) `setup(strategy)` — `__init__`에서 필요한 `bt.indicators.*`를 등록, (b) `should_buy(strategy) -> bool`, (c) `should_sell(strategy) -> bool` 세 메서드를 갖는다. 단독 실행(View: 개별 전략 비교)과 혼합 실행(View: 혼합전략 랭킹) 모두 신호 개수만 다를 뿐 같은 `SignalStrategy` 클래스를 쓴다 — 별도의 "단일 전략용 클래스"를 두지 않는다(신호 1개짜리 `SignalStrategy`가 곧 단독 실행).
-- **초기 신호 4개**: MACD 골든크로스(매수)/데드크로스(매도), RSI 과매도(30) 반등(매수)/과매수(70) 하회(매도), SMA 단기·장기 골든크로스(매수)/데드크로스(매도), 볼린저밴드 하단 이탈 후 복귀(매수)/상단 이탈(매도). 각각 독립 모듈 함수/클래스로 등록되므로 이후 신호 추가가 쉽다(등록 리스트에 추가만 하면 됨).
+- **초기 신호 4개**: MACD 골든크로스(매수)/데드크로스(매도), RSI 과매도(30) 반등(매수)/과매수(70) 하회(매도), SMA 단기·장기 골든크로스(매수)/데드크로스(매도), 볼린저밴드 하단 이탈 후 복귀(매수)/상단 이탈(매도). 각 신호는 `Signal` 프로토콜을 구현하는 독립 클래스이며, 서로의 존재를 모르는 완전히 분리된 단위다(한 신호를 수정해도 다른 신호나 `SignalStrategy`/`run_sweep`을 건드릴 필요 없음).
+- **신호 레지스트리(확장성 확보)**: `signals.py`에 `SIGNAL_REGISTRY: dict[str, Signal]` 딕셔너리를 두고 4개 신호를 등록한다. 스윕 대상 신호 목록, 대시보드가 보여줄 "개별 신호 목록"은 모두 이 레지스트리에서 동적으로 가져온다. 새 신호를 추가하는 절차는 항상 다음 두 단계로 고정된다: (1) `Signal` 프로토콜을 구현하는 새 클래스를 `signals.py`(또는 신호가 많아지면 `signals/` 패키지로 분리)에 작성, (2) `SIGNAL_REGISTRY`에 한 줄 등록. 이 외에 `engine/strategies.py`, `engine/sweep.py`, 백엔드 API, 프론트엔드 코드는 전혀 수정할 필요가 없다 — 새 신호는 등록되는 즉시 단독 실행/혼합 조합/대시보드 목록에 자동으로 포함된다.
 - **`engine/sweep.py`**: 호출부가 넘긴 `markets`(코인 리스트, 서브1과 동일하게 설정 파일 없이 인자로 전달)와 `timeframes` 리스트, `signal_sets`(개별 신호 리스트 + 혼합 신호 조합 리스트를 함께 넘김)를 전부 조합해 반복 실행. 캐시는 `run_backtest_cached()`가 담당하므로 `run_sweep()`을 반복 호출해도 새 조합만 실제로 실행된다.
 - **`sweep_history` 테이블**(append-only): `id, run_id(FK→backtest_runs.id), signal_set_name, is_combined, market, timeframe, start, end, return_rate, sharpe, max_drawdown, swept_at`. 같은 조합을 여러 날짜에 스윕하면 매번 새 row가 쌓여 시간대별 추이(③ 화면)를 그릴 수 있다.
 - **백엔드**: FastAPI가 `engine/sweep.py`, `engine/cache.py`를 직접 import해 SQLite를 조회한다. 스윕 실행은 API가 아니라 스크립트에서 `run_sweep()`을 직접 호출하는 방식으로 시작한다(대시보드 버튼 트리거는 향후 확장).
@@ -109,6 +110,7 @@ def run_sweep(
 ## 테스트
 
 - 신호별 `should_buy`/`should_sell` 단위 테스트 — 합성 OHLCV 데이터로 각 신호가 의도한 시점에 정확히 발동하는지 확인.
+- `SIGNAL_REGISTRY` 확장성 테스트 — 테스트 전용 더미 `Signal`을 레지스트리에 등록했을 때, `engine/strategies.py`나 `engine/sweep.py`를 전혀 수정하지 않고도 `run_sweep()`의 개별 신호 목록에 자동으로 포함되는지 확인(레지스트리 기반 동적 참조가 실제로 동작함을 증명).
 - `SignalStrategy`가 신호 1개일 때(단독)와 여러 개일 때(매수 AND/매도 OR)의 동작 차이를 확인하는 테스트.
 - `run_sweep()`이 조합별로 `sweep_history`에 정확히 한 row씩 추가하는지, 같은 조합을 반복 실행하면 캐시가 재사용되면서도 `sweep_history`에는 새 row가 계속 쌓이는지(append-only) 확인하는 테스트.
 - FastAPI 엔드포인트 통합 테스트(TestClient) — 각 화면이 소비하는 API가 예상 스키마를 반환하는지.
