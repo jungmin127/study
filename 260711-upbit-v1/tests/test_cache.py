@@ -73,6 +73,32 @@ def test_compute_cache_key_differs_for_different_object_attributes():
     assert a != b
 
 
+class _SignalWithRuntimeState:
+    """setup() 호출 후의 실제 Signal처럼, 원시 타입이 아니고 순환 참조까지 있는
+    런타임 속성(예: backtrader 지표 객체)이 붙은 상태를 흉내낸다."""
+
+    def __init__(self, period: int):
+        self.period = period
+        # 실제 Signal 클래스들처럼(예: MacdCrossSignal), 런타임 상태 속성은
+        # setup()이 호출되기 전까지 아예 존재하지 않는다 - 여기서 미리 선언하지 않는다.
+
+    def attach_runtime_state(self) -> None:
+        # backtrader 지표는 종종 자기 자신이나 상위 객체를 참조하는 복잡한 그래프를 가진다.
+        node = {"self_ref": None}
+        node["self_ref"] = node
+        self._indicator = node
+
+
+def test_compute_cache_key_ignores_non_primitive_runtime_attributes():
+    a = _SignalWithRuntimeState(14)
+    b = _SignalWithRuntimeState(14)
+    b.attach_runtime_state()
+
+    # a는 setup() 전, b는 setup() 후(순환 참조 포함) 상태를 흉내낸다.
+    # 캐시 키는 오직 생성자 파라미터(period)에만 의존해야 하므로 동일해야 한다.
+    assert _key(params={"signals": [a]}) == _key(params={"signals": [b]})
+
+
 def test_save_result_accepts_object_valued_strategy_params(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
 

@@ -60,13 +60,23 @@ CREATE TABLE IF NOT EXISTS sweep_history (
 """
 
 
+_JSON_PRIMITIVES = (str, int, float, bool, type(None))
+
+
 def _json_default(obj):
     """JSON으로 직렬화할 수 없는 객체(예: signals.py의 Signal 구현체)를
     안정적인 표현으로 변환한다. str(obj)의 기본 repr은 메모리 주소를 포함해
-    프로세스마다 달라지므로, 클래스명 + 인스턴스 속성으로 대체해 같은 설정이면
-    항상 같은 캐시 키가 나오도록 한다."""
+    프로세스마다 달라지므로, 클래스명 + 원시 타입 인스턴스 속성으로 대체해
+    같은 설정이면 항상 같은 캐시 키가 나오도록 한다.
+
+    원시 타입이 아닌 속성(예: setup() 이후 신호에 붙는 backtrader 지표 객체)은
+    캐시 키에서 제외한다 — 그런 런타임 상태는 신호의 "설정"이 아니고, 종종
+    자기 자신을 참조하는 순환 구조라 재귀 직렬화 시 오류가 난다."""
     if hasattr(obj, "__dict__"):
-        return {"__class__": type(obj).__name__, **vars(obj)}
+        primitives = {
+            k: v for k, v in vars(obj).items() if isinstance(v, _JSON_PRIMITIVES)
+        }
+        return {"__class__": type(obj).__name__, **primitives}
     return str(obj)
 
 
