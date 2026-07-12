@@ -97,3 +97,23 @@ class SmaCrossSignal:
 
 
 SIGNAL_REGISTRY["sma_cross"] = SmaCrossSignal()
+
+
+class BollingerBandSignal:
+    """종가가 볼린저밴드 하단 아래(매수 구간)/상단 위(매도 구간)인지를 조건으로 사용."""
+
+    def __init__(self, period: int = 20, devfactor: float = 2.0):
+        self.period = period
+        self.devfactor = devfactor
+
+    def setup(self, strategy: bt.Strategy) -> None:
+        self._bb = bt.indicators.BollingerBands(strategy.data, period=self.period, devfactor=self.devfactor)
+
+    def should_buy(self, strategy: bt.Strategy) -> bool:
+        return strategy.data.close[0] < self._bb.bot[0]
+
+    def should_sell(self, strategy: bt.Strategy) -> bool:
+        return strategy.data.close[0] > self._bb.top[0]
+
+
+SIGNAL_REGISTRY["bollinger_band"] = BollingerBandSignal()
