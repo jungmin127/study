@@ -24,7 +24,13 @@ export default function ComboHistoryChart() {
   useEffect(() => {
     const combo = combos.find((c) => comboKey(c) === selectedKey);
     if (!combo) return;
-    getHistory(combo).then(setHistory);
+    let ignore = false;
+    getHistory(combo).then((h) => {
+      if (!ignore) setHistory(h);
+    });
+    return () => {
+      ignore = true;
+    };
   }, [selectedKey, combos]);
 
   if (combos.length === 0) {
