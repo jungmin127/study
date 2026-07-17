@@ -102,3 +102,12 @@ def test_backtest_detail_returns_result_for_known_run(monkeypatch, tmp_path):
     resp = client.get("/api/v1/backtests/r1")
     assert resp.status_code == 200
     assert resp.json()["final_value"] == 10500.0
+
+
+def test_get_signals_returns_registered_signal_keys():
+    from signals import SIGNAL_REGISTRY
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/eda/signals")
+    assert resp.status_code == 200
+    assert resp.json() == sorted(SIGNAL_REGISTRY.keys())

@@ -16,6 +16,7 @@ from engine.cache import (
     list_sweep_history,
     load_result,
 )
+from signals import SIGNAL_REGISTRY
 
 app = FastAPI(title="Upbit Strategy EDA API", version="0.1.0")
 
@@ -46,6 +47,11 @@ def get_ranking() -> list[dict]:
 @app.get("/api/v1/eda/combos")
 def get_combos() -> list[dict]:
     return list_distinct_combos()
+
+
+@app.get("/api/v1/eda/signals")
+def get_signals() -> list[str]:
+    return sorted(SIGNAL_REGISTRY.keys())
 
 
 @app.get("/api/v1/eda/history")
