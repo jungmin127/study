@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 import backend.main as backend_module
 import engine.cache as cache_module
 from backend.main import app
 from engine.cache import save_result, save_sweep_result
+from tests.signal_fixtures import make_oscillating_df
 
 
 def _client(monkeypatch, tmp_path):
@@ -111,3 +113,102 @@ def test_get_signals_returns_registered_signal_keys():
     resp = client.get("/api/v1/eda/signals")
     assert resp.status_code == 200
     assert resp.json() == sorted(SIGNAL_REGISTRY.keys())
+
+
+def _patch_get_candles(monkeypatch, df: pd.DataFrame | None = None):
+    monkeypatch.setattr(
+        backend_module, "get_candles",
+        lambda market, timeframe, start, end: df if df is not None else make_oscillating_df(),
+    )
+
+
+def test_run_backtest_returns_run_id_and_is_retrievable(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json={
+            "market": "KRW-BTC",
+            "timeframe": "days",
+            "start": "2026-01-01",
+            "end": "2026-03-01",
+            "signal_keys": ["macd_cross"],
+        },
+    )
+    assert resp.status_code == 200
+    run_id = resp.json()["run_id"]
+    assert run_id
+
+    detail_resp = client.get(f"/api/v1/backtests/{run_id}")
+    assert detail_resp.status_code == 200
+    assert "final_value" in detail_resp.json()
+
+
+def test_run_backtest_rejects_empty_signal_keys(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json={
+            "market": "KRW-BTC",
+            "timeframe": "days",
+            "start": "2026-01-01",
+            "end": "2026-03-01",
+            "signal_keys": [],
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_run_backtest_rejects_unknown_signal_key(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json={
+            "market": "KRW-BTC",
+            "timeframe": "days",
+            "start": "2026-01-01",
+            "end": "2026-03-01",
+            "signal_keys": ["no_such_signal"],
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_run_backtest_rejects_reversed_date_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json={
+            "market": "KRW-BTC",
+            "timeframe": "days",
+            "start": "2026-03-01",
+            "end": "2026-01-01",
+            "signal_keys": ["macd_cross"],
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_run_backtest_rejects_empty_candle_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    empty_df = pd.DataFrame(columns=["candle_time", "open", "high", "low", "close", "volume"])
+    _patch_get_candles(monkeypatch, df=empty_df)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json={
+            "market": "KRW-BTC",
+            "timeframe": "days",
+            "start": "2026-01-01",
+            "end": "2026-03-01",
+            "signal_keys": ["macd_cross"],
+        },
+    )
+    assert resp.status_code == 400
