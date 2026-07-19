@@ -225,3 +225,20 @@ def test_get_markets_returns_krw_markets_only(monkeypatch, tmp_path):
     resp = client.get("/api/v1/markets")
     assert resp.status_code == 200
     assert resp.json() == [{"market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"}]
+
+
+def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp_path):
+    from engine.indicators import INDICATOR_FACTORY
+
+    client = _client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/indicators/catalog")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    catalog_values = {item["value"] for item in body}
+    assert catalog_values == set(INDICATOR_FACTORY.keys())
+
+    for item in body:
+        assert item["description"], f"{item['value']}에 description이 없음"
+        assert item["example"], f"{item['value']}에 example이 없음"
+        assert item["category"] in {"추세", "오실레이터", "거래량"}
