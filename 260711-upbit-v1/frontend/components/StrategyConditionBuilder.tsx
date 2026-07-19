@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { ComparisonOperator, ConditionBlock, ConditionGroup } from '@/lib/types/strategy';
 import type { IndicatorCatalogItem } from '@/lib/types/eda';
 import { INPUT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
@@ -69,6 +70,31 @@ function summarizeGroup(group: ConditionGroup): string {
   return parts.join(group.type === 'AND' ? ' and ' : ' or ');
 }
 
+function InfoTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <span className="relative shrink-0">
+      <button
+        type="button"
+        className="flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground text-[10px] leading-none text-muted-foreground hover:border-foreground hover:text-foreground"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        aria-label="지표 설명"
+      >
+        ?
+      </button>
+      {open && (
+        <div className="absolute left-1/2 top-full z-50 mt-1 w-64 -translate-x-1/2 whitespace-pre-line rounded-md border bg-background p-2 text-left text-xs font-normal text-foreground shadow-lg">
+          {text}
+        </div>
+      )}
+    </span>
+  );
+}
+
 // ── 조건 블록 에디터 ─────────────────────────────────────────────────────────
 interface ConditionBlockEditorProps {
   block: ConditionBlock;
@@ -89,8 +115,8 @@ function ConditionBlockEditor({ block, catalog, onChange, onDelete }: ConditionB
   }
 
   return (
-    <div className="overflow-hidden rounded-md border">
-      <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-2 dark:bg-slate-800">
+    <div className="rounded-md border">
+      <div className="flex items-center gap-2 rounded-t-md border-b bg-slate-50 px-3 py-2 dark:bg-slate-800">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
         <select
           className="flex-1 bg-transparent text-sm font-medium outline-none"
@@ -107,15 +133,7 @@ function ConditionBlockEditor({ block, catalog, onChange, onDelete }: ConditionB
             </optgroup>
           ))}
         </select>
-        {tooltip && (
-          <span
-            className="shrink-0 cursor-help text-xs text-muted-foreground"
-            title={tooltip}
-            aria-label="지표 설명"
-          >
-            ⓘ
-          </span>
-        )}
+        {tooltip && <InfoTooltip text={tooltip} />}
         <button
           type="button"
           onClick={onDelete}
@@ -303,11 +321,11 @@ export default function StrategyConditionBuilder({
 }) {
   return (
     <div>
-      <div className={SECTION_HEADER_CLASS}>{label}</div>
+      <div className={`rounded-t-md ${SECTION_HEADER_CLASS}`}>{label}</div>
       <div className="p-4">
         <ConditionGroupEditor group={group} catalog={catalog} onChange={onChange} depth={0} />
       </div>
-      <div className="border-t bg-slate-50 px-4 py-2 text-xs dark:bg-slate-800">
+      <div className="rounded-b-md border-t bg-slate-50 px-4 py-2 text-xs dark:bg-slate-800">
         <span className="font-medium text-foreground">조건식: </span>
         <span className="font-mono text-muted-foreground">{summarizeGroup(group)}</span>
       </div>

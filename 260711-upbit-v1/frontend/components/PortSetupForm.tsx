@@ -141,7 +141,7 @@ export default function PortSetupForm() {
         <h2 className="mb-2 text-sm font-semibold">전략 선택</h2>
         {catalogError && <p className="mb-2 text-xs text-red-600 dark:text-red-400">{catalogError}</p>}
         <div className="grid grid-cols-2 gap-4">
-          <div className="overflow-hidden rounded-md border">
+          <div className="rounded-md border">
             <StrategyConditionBuilder
               label="매수 조건"
               group={buyConditions}
@@ -149,7 +149,7 @@ export default function PortSetupForm() {
               onChange={setBuyConditions}
             />
           </div>
-          <div className="overflow-hidden rounded-md border">
+          <div className="rounded-md border">
             <StrategyConditionBuilder
               label="매도 조건"
               group={sellConditions}
