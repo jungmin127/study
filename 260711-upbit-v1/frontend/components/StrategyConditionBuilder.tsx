@@ -1,56 +1,10 @@
 'use client';
 
 import type { ComparisonOperator, ConditionBlock, ConditionGroup } from '@/lib/types/strategy';
+import type { IndicatorCatalogItem } from '@/lib/types/eda';
 import { INPUT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 
-interface IndicatorDef {
-  value: string;
-  label: string;
-  defaultParams: Record<string, number>;
-}
-
-interface IndicatorCategory {
-  label: string;
-  items: IndicatorDef[];
-}
-
-const INDICATOR_CATEGORIES: IndicatorCategory[] = [
-  {
-    label: '추세',
-    items: [
-      { value: 'SMA', label: 'SMA (단순 이동평균)', defaultParams: { period: 14 } },
-      { value: 'EMA', label: 'EMA (지수 이동평균)', defaultParams: { period: 14 } },
-      { value: 'WMA', label: 'WMA (가중 이동평균)', defaultParams: { period: 14 } },
-    ],
-  },
-  {
-    label: '오실레이터',
-    items: [
-      { value: 'RSI', label: 'RSI', defaultParams: { period: 14 } },
-      { value: 'MACD_line', label: 'MACD Line', defaultParams: { fast: 12, slow: 26 } },
-      { value: 'MACD_signal', label: 'MACD Signal', defaultParams: { fast: 12, slow: 26, signal: 9 } },
-      { value: 'STOCH_K', label: '스토캐스틱 %K', defaultParams: { k_period: 14, d_period: 3 } },
-      { value: 'STOCH_D', label: '스토캐스틱 %D', defaultParams: { k_period: 14, d_period: 3 } },
-      { value: 'CCI', label: 'CCI', defaultParams: { period: 20 } },
-      { value: 'WILLIAMS_R', label: 'Williams %R', defaultParams: { period: 14 } },
-      { value: 'BB_upper', label: 'BB 상단', defaultParams: { period: 20 } },
-      { value: 'BB_lower', label: 'BB 하단', defaultParams: { period: 20 } },
-      { value: 'BB_middle', label: 'BB 중간선', defaultParams: { period: 20 } },
-      { value: 'ATR', label: 'ATR', defaultParams: { period: 14 } },
-    ],
-  },
-  {
-    label: '거래량',
-    items: [
-      { value: 'OBV', label: 'OBV', defaultParams: {} },
-      { value: 'VOLUME_SMA', label: '거래량 SMA', defaultParams: { period: 20 } },
-    ],
-  },
-  {
-    label: '시장 심리',
-    items: [{ value: 'FEAR_GREED_CMC', label: 'CMC 공포/탐욕 지수', defaultParams: {} }],
-  },
-];
+const CATEGORY_ORDER = ['추세', '오실레이터', '거래량', '시장 심리'];
 
 const CATEGORY_DOT_COLOR: Record<string, string> = {
   추세: 'bg-blue-500',
@@ -67,45 +21,71 @@ const OPERATORS: { value: ComparisonOperator; label: string }[] = [
   { value: '==', label: '같음 (=)' },
 ];
 
-const PARAM_LABELS: Record<string, string> = {
-  period: '기간',
-  fast: '단기',
-  slow: '장기',
-  signal: '시그널',
-  k_period: 'K기간',
-  d_period: 'D기간',
+const OPERATOR_SYMBOLS: Record<ComparisonOperator, string> = {
+  '>': '>',
+  '<': '<',
+  '>=': '≥',
+  '<=': '≤',
+  '==': '=',
 };
 
-const ALL_INDICATORS = INDICATOR_CATEGORIES.flatMap((cat) => cat.items);
-
-function createDefaultBlock(): ConditionBlock {
-  return { indicator: 'RSI', params: { period: 14 }, operator: '<', threshold: 30 };
+function groupByCategory(catalog: IndicatorCatalogItem[]): { label: string; items: IndicatorCatalogItem[] }[] {
+  return CATEGORY_ORDER.map((label) => ({
+    label,
+    items: catalog.filter((item) => item.category === label),
+  })).filter((cat) => cat.items.length > 0);
 }
 
-function createDefaultGroup(): ConditionGroup {
-  return { type: 'AND', conditions: [createDefaultBlock()] };
+function defaultParamsFor(item: IndicatorCatalogItem | undefined): Record<string, number> {
+  if (!item) return {};
+  return Object.fromEntries(item.params.map((p) => [p.key, p.default]));
+}
+
+function createDefaultBlock(catalog: IndicatorCatalogItem[]): ConditionBlock {
+  const first = catalog.find((i) => i.value === 'RSI') ?? catalog[0];
+  return {
+    indicator: first?.value ?? 'RSI',
+    params: defaultParamsFor(first),
+    operator: '<',
+    threshold: 30,
+  };
+}
+
+function createDefaultGroup(catalog: IndicatorCatalogItem[]): ConditionGroup {
+  return { type: 'AND', conditions: [createDefaultBlock(catalog)] };
 }
 
 function isConditionBlock(item: ConditionBlock | ConditionGroup): item is ConditionBlock {
   return 'indicator' in item;
 }
 
-function ConditionBlockEditor({
-  block,
-  onChange,
-  onDelete,
-}: {
+function summarizeGroup(group: ConditionGroup): string {
+  if (group.conditions.length === 0) return '(조건 없음)';
+  const parts = group.conditions.map((c) =>
+    isConditionBlock(c)
+      ? `${c.indicator}${OPERATOR_SYMBOLS[c.operator]}${c.threshold}`
+      : `(${summarizeGroup(c)})`
+  );
+  return parts.join(group.type === 'AND' ? ' and ' : ' or ');
+}
+
+// ── 조건 블록 에디터 ─────────────────────────────────────────────────────────
+interface ConditionBlockEditorProps {
   block: ConditionBlock;
+  catalog: IndicatorCatalogItem[];
   onChange: (updated: ConditionBlock) => void;
   onDelete: () => void;
-}) {
-  const category = INDICATOR_CATEGORIES.find((cat) => cat.items.some((i) => i.value === block.indicator));
-  const dotColor = category ? (CATEGORY_DOT_COLOR[category.label] ?? 'bg-slate-400') : 'bg-slate-400';
-  const operatorSymbol = { '>': '>', '<': '<', '>=': '≥', '<=': '≤', '==': '=' }[block.operator] ?? block.operator;
+}
+
+function ConditionBlockEditor({ block, catalog, onChange, onDelete }: ConditionBlockEditorProps) {
+  const categories = groupByCategory(catalog);
+  const catalogItem = catalog.find((i) => i.value === block.indicator);
+  const dotColor = catalogItem ? (CATEGORY_DOT_COLOR[catalogItem.category] ?? 'bg-slate-400') : 'bg-slate-400';
+  const tooltip = catalogItem ? `${catalogItem.description}\n\n예시: ${catalogItem.example}` : '';
 
   function handleIndicatorChange(value: string) {
-    const found = ALL_INDICATORS.find((i) => i.value === value);
-    onChange({ ...block, indicator: value, params: found?.defaultParams ?? {} });
+    const found = catalog.find((i) => i.value === value);
+    onChange({ ...block, indicator: value, params: defaultParamsFor(found) });
   }
 
   return (
@@ -117,7 +97,7 @@ function ConditionBlockEditor({
           value={block.indicator}
           onChange={(e) => handleIndicatorChange(e.target.value)}
         >
-          {INDICATOR_CATEGORIES.map((cat) => (
+          {categories.map((cat) => (
             <optgroup key={cat.label} label={cat.label}>
               {cat.items.map((ind) => (
                 <option key={ind.value} value={ind.value}>
@@ -127,6 +107,15 @@ function ConditionBlockEditor({
             </optgroup>
           ))}
         </select>
+        {tooltip && (
+          <span
+            className="shrink-0 cursor-help text-xs text-muted-foreground"
+            title={tooltip}
+            aria-label="지표 설명"
+          >
+            ⓘ
+          </span>
+        )}
         <button
           type="button"
           onClick={onDelete}
@@ -139,19 +128,22 @@ function ConditionBlockEditor({
 
       {Object.keys(block.params).length > 0 && (
         <div className="flex flex-wrap gap-3 border-b px-3 py-2">
-          {Object.entries(block.params).map(([key, val]) => (
-            <div key={key} className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">{PARAM_LABELS[key] ?? key}</span>
-              <input
-                type="number"
-                value={val}
-                onChange={(e) =>
-                  onChange({ ...block, params: { ...block.params, [key]: Number(e.target.value) } })
-                }
-                className="h-7 w-16 rounded border border-input bg-background px-1 text-center text-xs"
-              />
-            </div>
-          ))}
+          {Object.entries(block.params).map(([key, val]) => {
+            const paramLabel = catalogItem?.params.find((p) => p.key === key)?.label ?? key;
+            return (
+              <div key={key} className="flex items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">{paramLabel}</span>
+                <input
+                  type="number"
+                  value={val}
+                  onChange={(e) =>
+                    onChange({ ...block, params: { ...block.params, [key]: Number(e.target.value) } })
+                  }
+                  className="h-7 w-16 rounded border border-input bg-background px-1 text-center text-xs"
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -177,32 +169,32 @@ function ConditionBlockEditor({
           className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs"
         />
         <span className="shrink-0 rounded-md bg-primary px-2 py-0.5 font-mono text-xs font-semibold text-primary-foreground">
-          {operatorSymbol} {block.threshold}
+          {OPERATOR_SYMBOLS[block.operator]} {block.threshold}
         </span>
       </div>
     </div>
   );
 }
 
-function ConditionGroupEditor({
-  group,
-  onChange,
-  depth,
-}: {
+// ── 조건 그룹 에디터 ─────────────────────────────────────────────────────────
+interface ConditionGroupEditorProps {
   group: ConditionGroup;
+  catalog: IndicatorCatalogItem[];
   onChange: (updated: ConditionGroup) => void;
   depth: number;
-}) {
+}
+
+function ConditionGroupEditor({ group, catalog, onChange, depth }: ConditionGroupEditorProps) {
   function toggleOperator() {
     onChange({ ...group, type: group.type === 'AND' ? 'OR' : 'AND' });
   }
 
   function addBlock() {
-    onChange({ ...group, conditions: [...group.conditions, createDefaultBlock()] });
+    onChange({ ...group, conditions: [...group.conditions, createDefaultBlock(catalog)] });
   }
 
   function addGroup() {
-    onChange({ ...group, conditions: [...group.conditions, createDefaultGroup()] });
+    onChange({ ...group, conditions: [...group.conditions, createDefaultGroup(catalog)] });
   }
 
   function updateCondition(index: number, updated: ConditionBlock | ConditionGroup) {
@@ -247,6 +239,7 @@ function ConditionGroupEditor({
           {isConditionBlock(condition) ? (
             <ConditionBlockEditor
               block={condition}
+              catalog={catalog}
               onChange={(updated) => updateCondition(index, updated)}
               onDelete={() => deleteCondition(index)}
             />
@@ -266,6 +259,7 @@ function ConditionGroupEditor({
               </div>
               <ConditionGroupEditor
                 group={condition}
+                catalog={catalog}
                 onChange={(updated) => updateCondition(index, updated)}
                 depth={depth + 1}
               />
@@ -299,17 +293,23 @@ function ConditionGroupEditor({
 export default function StrategyConditionBuilder({
   label,
   group,
+  catalog,
   onChange,
 }: {
   label: string;
   group: ConditionGroup;
+  catalog: IndicatorCatalogItem[];
   onChange: (updated: ConditionGroup) => void;
 }) {
   return (
     <div>
       <div className={SECTION_HEADER_CLASS}>{label}</div>
       <div className="p-4">
-        <ConditionGroupEditor group={group} onChange={onChange} depth={0} />
+        <ConditionGroupEditor group={group} catalog={catalog} onChange={onChange} depth={0} />
+      </div>
+      <div className="border-t bg-slate-50 px-4 py-2 text-xs dark:bg-slate-800">
+        <span className="font-medium text-foreground">조건식: </span>
+        <span className="font-mono text-muted-foreground">{summarizeGroup(group)}</span>
       </div>
     </div>
   );
