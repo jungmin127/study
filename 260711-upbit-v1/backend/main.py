@@ -7,6 +7,7 @@ Run: uvicorn backend.main:app --reload --port 8000  (저장소 루트에서 실�
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal, Union
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,8 @@ from engine.cache import (
     load_result,
     run_backtest_cached,
 )
+from engine.condition_strategy import ConditionTreeStrategy
+from engine.condition_tree import find_unknown_indicators, is_empty, max_required_period
 from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
@@ -202,25 +205,69 @@ def get_backtest_detail(run_id: str) -> dict:
     return result
 
 
+ComparisonOperator = Literal[">", "<", ">=", "<=", "=="]
+
+
+class ConditionBlockRequest(BaseModel):
+    indicator: str
+    params: dict[str, float] = {}
+    operator: ComparisonOperator
+    threshold: float
+
+
+class ConditionGroupRequest(BaseModel):
+    type: Literal["AND", "OR"]
+    conditions: list[Union[ConditionBlockRequest, "ConditionGroupRequest"]]
+
+
+ConditionGroupRequest.model_rebuild()
+
+
 class RunBacktestRequest(BaseModel):
     market: str
     timeframe: str
     start: str
     end: str
-    signal_keys: list[str]
+    initial_capital: float
+    buy_conditions: ConditionGroupRequest
+    sell_conditions: ConditionGroupRequest
+
+
+def _validate_backtest_request(req: RunBacktestRequest) -> list[str]:
+    """구조적 검증 + 시장 데이터 기반 검증을 모두 수행해 오류 사유 목록을 반환.
+    Task 7의 /validate 엔드포인트와 이 함수를 공유한다."""
+    errors: list[str] = []
+
+    buy_dict = req.buy_conditions.model_dump()
+    sell_dict = req.sell_conditions.model_dump()
+
+    if is_empty(buy_dict):
+        errors.append("매수 조건이 없습니다. 최소 1개 이상의 조건을 추가하세요.")
+    if is_empty(sell_dict):
+        errors.append("매도 조건이 없습니다. 최소 1개 이상의 조건을 추가하세요.")
+
+    unknown = sorted(set(find_unknown_indicators(buy_dict)) | set(find_unknown_indicators(sell_dict)))
+    if unknown:
+        errors.append(f"지원하지 않는 지표입니다: {', '.join(unknown)}")
+
+    if req.start >= req.end:
+        errors.append("시작일은 종료일보다 빨라야 합니다.")
+
+    if req.initial_capital <= 0:
+        errors.append("운용자금은 0보다 커야 합니다.")
+
+    krw_markets = {m["market"] for m in get_krw_markets()}
+    if req.market not in krw_markets:
+        errors.append(f"{req.market}은(는) 업비트 KRW 마켓 목록에 없습니다.")
+
+    return errors
 
 
 @app.post("/api/v1/backtests/run")
 def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
-    if not req.signal_keys:
-        raise HTTPException(status_code=400, detail="전략을 최소 1개 선택해야 합니다")
-
-    unknown_keys = [k for k in req.signal_keys if k not in SIGNAL_REGISTRY]
-    if unknown_keys:
-        raise HTTPException(status_code=400, detail=f"등록되지 않은 전략입니다: {unknown_keys}")
-
-    if req.start >= req.end:
-        raise HTTPException(status_code=400, detail="시작일은 종료일보다 빨라야 합니다")
+    errors = _validate_backtest_request(req)
+    if errors:
+        raise HTTPException(status_code=400, detail=" / ".join(errors))
 
     start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_dt = datetime.strptime(req.end, "%Y-%m-%d").replace(
@@ -237,16 +284,28 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
     if df.empty:
         raise HTTPException(status_code=400, detail="해당 기간에 캔들 데이터가 없습니다")
 
-    signals = [SIGNAL_REGISTRY[k] for k in req.signal_keys]
+    buy_dict = req.buy_conditions.model_dump()
+    sell_dict = req.sell_conditions.model_dump()
+    required_bars = max(max_required_period(buy_dict), max_required_period(sell_dict))
+    if len(df) < required_bars:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"선택한 지표가 최소 {required_bars}개의 봉을 필요로 하지만, "
+                f"해당 기간에는 {len(df)}개의 봉만 있습니다. 기간을 늘리거나 지표 파라미터를 줄이세요."
+            ),
+        )
+
+    risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": req.initial_capital}
 
     result = run_backtest_cached(
         df=df,
-        strategy_cls=SignalStrategy,
-        risk_config=DEFAULT_RISK_CONFIG,
+        strategy_cls=ConditionTreeStrategy,
+        risk_config=risk_config,
         market=req.market,
         timeframe=req.timeframe,
         start=start_dt,
         end=end_dt,
-        strategy_params={"signals": signals},
+        strategy_params={"buy_conditions": buy_dict, "sell_conditions": sell_dict},
     )
     return {"run_id": result["run_id"]}

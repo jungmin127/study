@@ -115,105 +115,6 @@ def test_get_signals_returns_registered_signal_keys():
     assert resp.json() == sorted(SIGNAL_REGISTRY.keys())
 
 
-def _patch_get_candles(monkeypatch, df: pd.DataFrame | None = None):
-    monkeypatch.setattr(
-        backend_module, "get_candles",
-        lambda market, timeframe, start, end: df if df is not None else make_oscillating_df(),
-    )
-
-
-def test_run_backtest_returns_run_id_and_is_retrievable(monkeypatch, tmp_path):
-    client = _client(monkeypatch, tmp_path)
-    _patch_get_candles(monkeypatch)
-
-    resp = client.post(
-        "/api/v1/backtests/run",
-        json={
-            "market": "KRW-BTC",
-            "timeframe": "days",
-            "start": "2026-01-01",
-            "end": "2026-03-01",
-            "signal_keys": ["macd_cross"],
-        },
-    )
-    assert resp.status_code == 200
-    run_id = resp.json()["run_id"]
-    assert run_id
-
-    detail_resp = client.get(f"/api/v1/backtests/{run_id}")
-    assert detail_resp.status_code == 200
-    assert "final_value" in detail_resp.json()
-
-
-def test_run_backtest_rejects_empty_signal_keys(monkeypatch, tmp_path):
-    client = _client(monkeypatch, tmp_path)
-    _patch_get_candles(monkeypatch)
-
-    resp = client.post(
-        "/api/v1/backtests/run",
-        json={
-            "market": "KRW-BTC",
-            "timeframe": "days",
-            "start": "2026-01-01",
-            "end": "2026-03-01",
-            "signal_keys": [],
-        },
-    )
-    assert resp.status_code == 400
-
-
-def test_run_backtest_rejects_unknown_signal_key(monkeypatch, tmp_path):
-    client = _client(monkeypatch, tmp_path)
-    _patch_get_candles(monkeypatch)
-
-    resp = client.post(
-        "/api/v1/backtests/run",
-        json={
-            "market": "KRW-BTC",
-            "timeframe": "days",
-            "start": "2026-01-01",
-            "end": "2026-03-01",
-            "signal_keys": ["no_such_signal"],
-        },
-    )
-    assert resp.status_code == 400
-
-
-def test_run_backtest_rejects_reversed_date_range(monkeypatch, tmp_path):
-    client = _client(monkeypatch, tmp_path)
-    _patch_get_candles(monkeypatch)
-
-    resp = client.post(
-        "/api/v1/backtests/run",
-        json={
-            "market": "KRW-BTC",
-            "timeframe": "days",
-            "start": "2026-03-01",
-            "end": "2026-01-01",
-            "signal_keys": ["macd_cross"],
-        },
-    )
-    assert resp.status_code == 400
-
-
-def test_run_backtest_rejects_empty_candle_range(monkeypatch, tmp_path):
-    client = _client(monkeypatch, tmp_path)
-    empty_df = pd.DataFrame(columns=["candle_time", "open", "high", "low", "close", "volume"])
-    _patch_get_candles(monkeypatch, df=empty_df)
-
-    resp = client.post(
-        "/api/v1/backtests/run",
-        json={
-            "market": "KRW-BTC",
-            "timeframe": "days",
-            "start": "2026-01-01",
-            "end": "2026-03-01",
-            "signal_keys": ["macd_cross"],
-        },
-    )
-    assert resp.status_code == 400
-
-
 def test_get_markets_returns_krw_markets_only(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
 
@@ -242,3 +143,119 @@ def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp
         assert item["description"], f"{item['value']}에 description이 없음"
         assert item["example"], f"{item['value']}에 example이 없음"
         assert item["category"] in {"추세", "오실레이터", "거래량"}
+
+
+def _patch_get_candles(monkeypatch, df: pd.DataFrame | None = None):
+    monkeypatch.setattr(
+        backend_module, "get_candles",
+        lambda market, timeframe, start, end: df if df is not None else make_oscillating_df(),
+    )
+
+
+_VALID_BUY = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 60}]}
+_VALID_SELL = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 40}]}
+
+
+def _run_request(**overrides) -> dict:
+    body = {
+        "market": "KRW-BTC",
+        "timeframe": "days",
+        "start": "2026-01-01",
+        "end": "2026-03-01",
+        "initial_capital": 1_000_000,
+        "buy_conditions": _VALID_BUY,
+        "sell_conditions": _VALID_SELL,
+    }
+    body.update(overrides)
+    return body
+
+
+def test_run_backtest_returns_run_id_and_is_retrievable(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post("/api/v1/backtests/run", json=_run_request())
+    assert resp.status_code == 200
+    run_id = resp.json()["run_id"]
+    assert run_id
+
+    detail_resp = client.get(f"/api/v1/backtests/{run_id}")
+    assert detail_resp.status_code == 200
+    assert "final_value" in detail_resp.json()
+
+
+def test_run_backtest_rejects_empty_buy_conditions(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(buy_conditions={"type": "AND", "conditions": []}),
+    )
+    assert resp.status_code == 400
+    assert "매수 조건" in resp.json()["detail"]
+
+
+def test_run_backtest_rejects_empty_sell_conditions(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(sell_conditions={"type": "AND", "conditions": []}),
+    )
+    assert resp.status_code == 400
+    assert "매도 조건" in resp.json()["detail"]
+
+
+def test_run_backtest_rejects_unknown_indicator(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    bad_buy = {"type": "AND", "conditions": [{"indicator": "NOPE", "params": {}, "operator": ">", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(buy_conditions=bad_buy))
+    assert resp.status_code == 400
+    assert "NOPE" in resp.json()["detail"]
+
+
+def test_run_backtest_rejects_reversed_date_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post("/api/v1/backtests/run", json=_run_request(start="2026-03-01", end="2026-01-01"))
+    assert resp.status_code == 400
+
+
+def test_run_backtest_rejects_market_not_in_krw_list(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-NOTLISTED"))
+    assert resp.status_code == 400
+    assert "KRW-NOTLISTED" in resp.json()["detail"]
+
+
+def test_run_backtest_rejects_empty_candle_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    empty_df = pd.DataFrame(columns=["candle_time", "open", "high", "low", "close", "volume"])
+    _patch_get_candles(monkeypatch, df=empty_df)
+
+    resp = client.post("/api/v1/backtests/run", json=_run_request())
+    assert resp.status_code == 400
+
+
+def test_run_backtest_uses_requested_initial_capital(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post("/api/v1/backtests/run", json=_run_request(initial_capital=5_000_000))
+    assert resp.status_code == 200
+    run_id = resp.json()["run_id"]
+
+    resp2 = client.post("/api/v1/backtests/run", json=_run_request(initial_capital=9_000_000))
+    assert resp2.status_code == 200
+    run_id2 = resp2.json()["run_id"]
+
+    assert run_id != run_id2, "운용자금이 다른데 같은 run_id(캐시 hit)가 나옴 — initial_capital이 캐시 키에 반영 안 됨"
