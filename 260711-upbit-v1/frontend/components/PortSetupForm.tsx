@@ -54,8 +54,9 @@ export default function PortSetupForm() {
   useEffect(() => {
     getMarkets()
       .then((data) => {
-        setMarkets(data);
-        if (data.length > 0) setMarket((prev) => prev || data[0].market);
+        const sorted = [...data].sort((a, b) => a.korean_name.localeCompare(b.korean_name, 'ko'));
+        setMarkets(sorted);
+        if (sorted.length > 0) setMarket((prev) => prev || sorted[0].market);
       })
       .catch((err) => setMarketsError(err instanceof ApiError ? err.message : '코인 목록을 불러오지 못했습니다.'));
 
