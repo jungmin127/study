@@ -23,11 +23,72 @@ function defaultDate(daysAgo: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function StrategyConditionBox({
+  label,
+  selected,
+  thresholds,
+  onToggle,
+  onThresholdChange,
+}: {
+  label: string;
+  selected: string[];
+  thresholds: Record<string, string>;
+  onToggle: (key: string) => void;
+  onThresholdChange: (key: string, value: string) => void;
+}) {
+  return (
+    <div>
+      <div className={SECTION_HEADER_CLASS}>{label}</div>
+      <div className="space-y-3 p-4">
+        <div className="flex flex-wrap gap-2">
+          {DUMMY_SIGNALS.map((key) => {
+            const isSelected = selected.includes(key);
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onToggle(key)}
+                className={
+                  isSelected
+                    ? 'rounded-full border-2 border-primary bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm'
+                    : 'rounded-full border-2 border-border bg-background px-4 py-1.5 text-sm font-medium text-foreground hover:bg-muted'
+                }
+              >
+                {key}
+              </button>
+            );
+          })}
+        </div>
+        {selected.length > 0 && (
+          <div className="space-y-2 border-t pt-3">
+            {selected.map((key) => (
+              <div key={key} className="flex items-center gap-2">
+                <span className="w-32 shrink-0 text-sm text-muted-foreground">{key}</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="threshold"
+                  className={`${INPUT_CLASS} w-32`}
+                  value={thresholds[key] ?? ''}
+                  onChange={(e) => onThresholdChange(key, e.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PortSetupForm() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [market, setMarket] = useState(MARKETS[0]);
-  const [selectedSignals, setSelectedSignals] = useState<string[]>([DUMMY_SIGNALS[0]]);
+  const [buySignals, setBuySignals] = useState<string[]>([DUMMY_SIGNALS[0]]);
+  const [buyThresholds, setBuyThresholds] = useState<Record<string, string>>({});
+  const [sellSignals, setSellSignals] = useState<string[]>([]);
+  const [sellThresholds, setSellThresholds] = useState<Record<string, string>>({});
   const [capital, setCapital] = useState('1000000');
   const [candleUnit, setCandleUnit] = useState(CANDLE_UNITS[0]);
   const [tickVerification, setTickVerification] = useState(false);
@@ -35,20 +96,32 @@ export default function PortSetupForm() {
   const [startTime, setStartTime] = useState('00:00');
   const [endDate, setEndDate] = useState(defaultDate(0));
   const [endTime, setEndTime] = useState('00:00');
-  const [feeRate, setFeeRate] = useState('0.100');
 
-  function toggleSignal(key: string) {
-    setSelectedSignals((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-    );
+  function toggleBuySignal(key: string) {
+    setBuySignals((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   }
 
-  function handleNext() {
-    console.log('next step (mock)', {
+  function toggleSellSignal(key: string) {
+    setSellSignals((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  function updateBuyThreshold(key: string, value: string) {
+    setBuyThresholds((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateSellThreshold(key: string, value: string) {
+    setSellThresholds((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleRun() {
+    console.log('run backtest (mock)', {
       title,
       description,
       market,
-      selectedSignals,
+      buySignals,
+      buyThresholds,
+      sellSignals,
+      sellThresholds,
       capital,
       candleUnit,
       tickVerification,
@@ -56,13 +129,12 @@ export default function PortSetupForm() {
       startTime,
       endDate,
       endTime,
-      feeRate,
     });
   }
 
   return (
     <div className="max-w-4xl space-y-6 rounded-xl border p-6 shadow-sm">
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-3 gap-6">
         <div>
           <label className="mb-1.5 block text-sm font-medium">포트 제목</label>
           <input
@@ -85,50 +157,35 @@ export default function PortSetupForm() {
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium">코인 선택</label>
+          <select className={SELECT_CLASS} value={market} onChange={(e) => setMarket(e.target.value)}>
+            {MARKETS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div>
-        <h2 className="mb-2 text-sm font-semibold">매매 대상</h2>
+        <h2 className="mb-2 text-sm font-semibold">전략 선택</h2>
         <div className="grid grid-cols-2 divide-x rounded-md border">
-          <div>
-            <div className={SECTION_HEADER_CLASS}>코인 선택</div>
-            <div className="p-4">
-              <select
-                className={SELECT_CLASS}
-                value={market}
-                onChange={(e) => setMarket(e.target.value)}
-              >
-                {MARKETS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <div className={SECTION_HEADER_CLASS}>전략 선택</div>
-            <div className="flex flex-wrap gap-2 p-4">
-              {DUMMY_SIGNALS.map((key) => {
-                const selected = selectedSignals.includes(key);
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => toggleSignal(key)}
-                    className={
-                      selected
-                        ? 'rounded-full border-2 border-primary bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm'
-                        : 'rounded-full border-2 border-border bg-background px-4 py-1.5 text-sm font-medium text-foreground hover:bg-muted'
-                    }
-                  >
-                    {key}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <StrategyConditionBox
+            label="매수 조건"
+            selected={buySignals}
+            thresholds={buyThresholds}
+            onToggle={toggleBuySignal}
+            onThresholdChange={updateBuyThreshold}
+          />
+          <StrategyConditionBox
+            label="매도 조건"
+            selected={sellSignals}
+            thresholds={sellThresholds}
+            onToggle={toggleSellSignal}
+            onThresholdChange={updateSellThreshold}
+          />
         </div>
       </div>
 
@@ -177,7 +234,7 @@ export default function PortSetupForm() {
           <div>
             <div className={SECTION_HEADER_CLASS}>운용기간</div>
             <div className="space-y-2 p-4">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="date"
                   className={INPUT_CLASS}
@@ -191,8 +248,6 @@ export default function PortSetupForm() {
                   onChange={(e) => setStartTime(e.target.value)}
                 />
                 <span className="text-sm text-muted-foreground">부터</span>
-              </div>
-              <div className="flex items-center gap-2">
                 <input
                   type="date"
                   className={INPUT_CLASS}
@@ -225,27 +280,12 @@ export default function PortSetupForm() {
         </div>
       </div>
 
-      <div>
-        <div className="w-full max-w-xs rounded-md border">
-          <div className={SECTION_HEADER_CLASS}>수수료율</div>
-          <div className="flex items-center gap-2 p-4">
-            <input
-              type="text"
-              className={`${INPUT_CLASS} w-24`}
-              value={feeRate}
-              onChange={(e) => setFeeRate(e.target.value)}
-            />
-            <span className="text-sm text-muted-foreground">%</span>
-          </div>
-        </div>
-      </div>
-
       <div className="flex items-center justify-end gap-2 border-t pt-4">
         <Button type="button" variant="outline" onClick={() => console.log('cancel (mock)')}>
           취소
         </Button>
-        <Button type="button" onClick={handleNext}>
-          다음 단계로
+        <Button type="button" onClick={handleRun}>
+          백테스트 실행
         </Button>
       </div>
     </div>
