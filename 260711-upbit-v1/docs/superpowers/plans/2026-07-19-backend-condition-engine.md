@@ -791,7 +791,7 @@ git commit -m "feat: add GET /api/v1/markets (all Upbit KRW markets)"
 **Interfaces:**
 - Produces: `GET /api/v1/indicators/catalog` → `200` + `list[dict]`, 각 dict: `{value, label, category, params: [{key, label, default}], description, example}`. 프런트엔드 `StrategyConditionBuilder.tsx`가 하드코딩된 `INDICATOR_CATEGORIES` 대신 이 응답을 쓰도록 바꾸는 것은 이 계획 범위 밖(맨 끝 "프런트엔드 후속 작업" 참고)이지만, 응답 필드명은 그 컴포넌트가 바로 소비할 수 있도록 맞춘다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_backend.py` 끝에 추가:
 
@@ -813,12 +813,12 @@ def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp
         assert item["category"] in {"추세", "오실레이터", "거래량"}
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_backend.py::test_get_indicator_catalog_covers_all_registered_indicators -v`
 Expected: FAIL — `404 Not Found`
 
-- [ ] **Step 3: `backend/main.py`에 카탈로그 상수 + 엔드포인트 추가**
+- [x] **Step 3: `backend/main.py`에 카탈로그 상수 + 엔드포인트 추가**
 
 `backend/main.py`의 import 블록 아래(다른 상수 선언 위치)에 추가:
 
@@ -945,12 +945,12 @@ def get_indicator_catalog() -> list[dict]:
     return INDICATOR_CATALOG
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_backend.py::test_get_indicator_catalog_covers_all_registered_indicators -v`
 Expected: PASS
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
