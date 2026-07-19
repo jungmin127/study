@@ -512,7 +512,7 @@ git commit -m "feat: add condition tree evaluation and validation utilities"
 - Consumes: `INDICATOR_FACTORY`(Task 1), `collect_blocks`/`eval_group`/`indicator_key`(Task 2), `engine.runner.run_backtest`(기존), `engine.cache.run_backtest_cached`(기존, 수정 없음).
 - Produces: `ConditionTreeStrategy(bt.Strategy)` — `params=(("buy_conditions", None), ("sell_conditions", None))`. Task 6이 `run_backtest_cached(strategy_cls=ConditionTreeStrategy, strategy_params={"buy_conditions": ..., "sell_conditions": ...}, ...)`로 호출한다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_condition_strategy.py` 새로 생성:
 
@@ -564,12 +564,12 @@ def test_or_group_at_top_level_combines_with_any():
     assert len(result["trades"]) > 0 or result["final_value"] != DEFAULT_RISK_CONFIG["initial_capital"]
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_condition_strategy.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'engine.condition_strategy'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `engine/condition_strategy.py` 새로 생성:
 
@@ -631,12 +631,12 @@ class ConditionTreeStrategy(bt.Strategy):
 __all__ = ["ConditionTreeStrategy"]
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_condition_strategy.py -v`
 Expected: PASS
 
-- [ ] **Step 5: 캐시 키가 트리 내용만으로 정상적으로 갈리는지 수동 확인**
+- [x] **Step 5: 캐시 키가 트리 내용만으로 정상적으로 갈리는지 수동 확인**
 
 ```bash
 python -c "
@@ -651,7 +651,7 @@ print('OK: 캐시 키가 트리 내용에 따라 정상적으로 달라짐')
 ```
 Expected: `OK: 캐시 키가 트리 내용에 따라 정상적으로 달라짐` 출력
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add engine/condition_strategy.py tests/test_condition_strategy.py
