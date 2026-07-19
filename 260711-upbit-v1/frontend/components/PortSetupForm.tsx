@@ -2,20 +2,15 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import StrategyConditionBuilder from '@/components/StrategyConditionBuilder';
+import type { ConditionGroup } from '@/lib/types/strategy';
+import { INPUT_CLASS, SELECT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 
 const MARKETS = ['KRW-BTC', 'KRW-ETH'];
 
-const DUMMY_SIGNALS = ['macd_cross', 'rsi_zone', 'sma_cross', 'bollinger_band'];
-
 const CANDLE_UNITS = ['15분', '30분', '1시간', '1일'];
 
-const INPUT_CLASS =
-  'h-10 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-ring';
-
-const SELECT_CLASS = `${INPUT_CLASS} w-full`;
-
-const SECTION_HEADER_CLASS =
-  'border-b bg-slate-50 px-4 py-2 text-sm font-medium dark:bg-slate-800';
+const EMPTY_CONDITION_GROUP: ConditionGroup = { type: 'AND', conditions: [] };
 
 function defaultDate(daysAgo: number): string {
   const d = new Date();
@@ -23,72 +18,12 @@ function defaultDate(daysAgo: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function StrategyConditionBox({
-  label,
-  selected,
-  thresholds,
-  onToggle,
-  onThresholdChange,
-}: {
-  label: string;
-  selected: string[];
-  thresholds: Record<string, string>;
-  onToggle: (key: string) => void;
-  onThresholdChange: (key: string, value: string) => void;
-}) {
-  return (
-    <div>
-      <div className={SECTION_HEADER_CLASS}>{label}</div>
-      <div className="space-y-3 p-4">
-        <div className="flex flex-wrap gap-2">
-          {DUMMY_SIGNALS.map((key) => {
-            const isSelected = selected.includes(key);
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onToggle(key)}
-                className={
-                  isSelected
-                    ? 'rounded-full border-2 border-primary bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm'
-                    : 'rounded-full border-2 border-border bg-background px-4 py-1.5 text-sm font-medium text-foreground hover:bg-muted'
-                }
-              >
-                {key}
-              </button>
-            );
-          })}
-        </div>
-        {selected.length > 0 && (
-          <div className="space-y-2 border-t pt-3">
-            {selected.map((key) => (
-              <div key={key} className="flex items-center gap-2">
-                <span className="w-32 shrink-0 text-sm text-muted-foreground">{key}</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="threshold"
-                  className={`${INPUT_CLASS} w-32`}
-                  value={thresholds[key] ?? ''}
-                  onChange={(e) => onThresholdChange(key, e.target.value)}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function PortSetupForm() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [market, setMarket] = useState(MARKETS[0]);
-  const [buySignals, setBuySignals] = useState<string[]>([DUMMY_SIGNALS[0]]);
-  const [buyThresholds, setBuyThresholds] = useState<Record<string, string>>({});
-  const [sellSignals, setSellSignals] = useState<string[]>([]);
-  const [sellThresholds, setSellThresholds] = useState<Record<string, string>>({});
+  const [buyConditions, setBuyConditions] = useState<ConditionGroup>(EMPTY_CONDITION_GROUP);
+  const [sellConditions, setSellConditions] = useState<ConditionGroup>(EMPTY_CONDITION_GROUP);
   const [capital, setCapital] = useState('1000000');
   const [candleUnit, setCandleUnit] = useState(CANDLE_UNITS[0]);
   const [tickVerification, setTickVerification] = useState(false);
@@ -97,31 +32,13 @@ export default function PortSetupForm() {
   const [endDate, setEndDate] = useState(defaultDate(0));
   const [endTime, setEndTime] = useState('00:00');
 
-  function toggleBuySignal(key: string) {
-    setBuySignals((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
-  }
-
-  function toggleSellSignal(key: string) {
-    setSellSignals((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
-  }
-
-  function updateBuyThreshold(key: string, value: string) {
-    setBuyThresholds((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function updateSellThreshold(key: string, value: string) {
-    setSellThresholds((prev) => ({ ...prev, [key]: value }));
-  }
-
   function handleRun() {
     console.log('run backtest (mock)', {
       title,
       description,
       market,
-      buySignals,
-      buyThresholds,
-      sellSignals,
-      sellThresholds,
+      buyConditions,
+      sellConditions,
       capital,
       candleUnit,
       tickVerification,
@@ -171,21 +88,13 @@ export default function PortSetupForm() {
 
       <div>
         <h2 className="mb-2 text-sm font-semibold">전략 선택</h2>
-        <div className="grid grid-cols-2 divide-x rounded-md border">
-          <StrategyConditionBox
-            label="매수 조건"
-            selected={buySignals}
-            thresholds={buyThresholds}
-            onToggle={toggleBuySignal}
-            onThresholdChange={updateBuyThreshold}
-          />
-          <StrategyConditionBox
-            label="매도 조건"
-            selected={sellSignals}
-            thresholds={sellThresholds}
-            onToggle={toggleSellSignal}
-            onThresholdChange={updateSellThreshold}
-          />
+        <div className="grid grid-cols-2 gap-4">
+          <div className="overflow-hidden rounded-md border">
+            <StrategyConditionBuilder label="매수 조건" group={buyConditions} onChange={setBuyConditions} />
+          </div>
+          <div className="overflow-hidden rounded-md border">
+            <StrategyConditionBuilder label="매도 조건" group={sellConditions} onChange={setSellConditions} />
+          </div>
         </div>
       </div>
 
