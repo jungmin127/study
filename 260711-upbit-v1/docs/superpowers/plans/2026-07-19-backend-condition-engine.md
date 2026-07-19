@@ -671,7 +671,7 @@ git commit -m "feat: add static ConditionTreeStrategy (cache-key-safe condition 
 **Interfaces:**
 - Produces: `upbit_data_service.get_krw_markets() -> list[dict]`(각 dict: `{"market": str, "korean_name": str, "english_name": str}`), `GET /api/v1/markets` → `200` + 같은 배열.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_upbit_data_service.py` 끝에 추가(기존 테스트 스타일 확인 후 동일한 monkeypatch 패턴 사용):
 
@@ -718,12 +718,12 @@ def test_get_markets_returns_krw_markets_only(monkeypatch, tmp_path):
     assert resp.json() == [{"market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"}]
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_upbit_data_service.py::test_get_krw_markets_filters_to_krw_prefix tests/test_backend.py::test_get_markets_returns_krw_markets_only -v`
 Expected: FAIL — `AttributeError: module 'upbit_data_service' has no attribute 'get_krw_markets'`
 
-- [ ] **Step 3: `upbit_data_service.py`에 구현 추가**
+- [x] **Step 3: `upbit_data_service.py`에 구현 추가**
 
 `upbit_data_service.py`의 `get_candles` 함수 뒤에 추가:
 
@@ -745,7 +745,7 @@ def get_krw_markets() -> list[dict]:
     ]
 ```
 
-- [ ] **Step 4: `backend/main.py`에 엔드포인트 추가**
+- [x] **Step 4: `backend/main.py`에 엔드포인트 추가**
 
 import 블록에 추가:
 
@@ -761,19 +761,19 @@ def get_markets() -> list[dict]:
     return get_krw_markets()
 ```
 
-- [ ] **Step 5: 테스트 통과 확인**
+- [x] **Step 5: 테스트 통과 확인**
 
 Run: `pytest tests/test_upbit_data_service.py tests/test_backend.py -v`
 Expected: 전체 PASS
 
-- [ ] **Step 6: 실제 업비트 API로 수동 확인**
+- [x] **Step 6: 실제 업비트 API로 수동 확인**
 
 ```bash
 python -c "from upbit_data_service import get_krw_markets; ms = get_krw_markets(); print(len(ms), ms[:3])"
 ```
 Expected: 100개 이상의 KRW 마켓이 출력됨(네트워크 필요)
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 git add upbit_data_service.py backend/main.py tests/test_upbit_data_service.py tests/test_backend.py
