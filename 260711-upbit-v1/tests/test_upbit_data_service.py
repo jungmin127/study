@@ -290,3 +290,29 @@ def test_timeframe_duration():
     assert uds._timeframe_duration("minutes60") == timedelta(minutes=60)
     with pytest.raises(ValueError):
         uds._timeframe_duration("weeks")
+
+
+def test_get_krw_markets_filters_to_krw_prefix(monkeypatch):
+    import upbit_data_service
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [
+                {"market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"},
+                {"market": "KRW-ETH", "korean_name": "이더리움", "english_name": "Ethereum"},
+                {"market": "BTC-ETH", "korean_name": "이더리움", "english_name": "Ethereum"},
+                {"market": "USDT-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"},
+            ]
+
+    def _fake_get(url, params=None, timeout=None):
+        assert "market/all" in url
+        return _FakeResponse()
+
+    monkeypatch.setattr(upbit_data_service.httpx, "get", _fake_get)
+
+    markets = upbit_data_service.get_krw_markets()
+    assert [m["market"] for m in markets] == ["KRW-BTC", "KRW-ETH"]
+    assert markets[0]["korean_name"] == "비트코인"

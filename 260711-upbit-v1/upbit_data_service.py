@@ -190,3 +190,20 @@ def get_candles(market: str, timeframe: str, start: datetime, end: datetime) -> 
 
     result = closed[(closed["candle_time"] >= start) & (closed["candle_time"] <= end)]
     return result.reset_index(drop=True)
+
+
+def get_krw_markets() -> list[dict]:
+    """업비트 KRW 마켓 전체 목록을 조회한다. 캐싱하지 않는다 — 가볍고 자주 바뀌지
+    않는 호출이라, 매 조회마다 최신 상장 코인을 그대로 반영하는 편이 낫다."""
+    resp = httpx.get(f"{UPBIT_BASE_URL}/market/all", params={"isDetails": "false"}, timeout=10)
+    resp.raise_for_status()
+    all_markets = resp.json()
+    return [
+        {
+            "market": m["market"],
+            "korean_name": m["korean_name"],
+            "english_name": m["english_name"],
+        }
+        for m in all_markets
+        if m["market"].startswith("KRW-")
+    ]

@@ -212,3 +212,16 @@ def test_run_backtest_rejects_empty_candle_range(monkeypatch, tmp_path):
         },
     )
     assert resp.status_code == 400
+
+
+def test_get_markets_returns_krw_markets_only(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_get_krw_markets():
+        return [{"market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"}]
+
+    monkeypatch.setattr(backend_module, "get_krw_markets", _fake_get_krw_markets)
+
+    resp = client.get("/api/v1/markets")
+    assert resp.status_code == 200
+    assert resp.json() == [{"market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"}]

@@ -23,7 +23,7 @@ from engine.cache import (
 from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
-from upbit_data_service import get_candles
+from upbit_data_service import get_candles, get_krw_markets
 
 app = FastAPI(title="Upbit Strategy EDA API", version="0.1.0")
 
@@ -59,6 +59,11 @@ def get_combos() -> list[dict]:
 @app.get("/api/v1/eda/signals")
 def get_signals() -> list[str]:
     return sorted(SIGNAL_REGISTRY.keys())
+
+
+@app.get("/api/v1/markets")
+def get_markets() -> list[dict]:
+    return get_krw_markets()
 
 
 @app.get("/api/v1/eda/history")
