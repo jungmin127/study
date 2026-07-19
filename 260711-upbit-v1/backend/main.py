@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from engine.cache import (
+    list_backtest_runs,
     list_combined_ranking,
     list_distinct_combos,
     list_latest_sweep_results,
@@ -197,6 +198,11 @@ def get_history(
     return list_sweep_history(signal_set_name, market, timeframe, is_combined)
 
 
+@app.get("/api/v1/backtests")
+def get_backtest_runs() -> list[dict]:
+    return list_backtest_runs()
+
+
 @app.get("/api/v1/backtests/{run_id}")
 def get_backtest_detail(run_id: str) -> dict:
     result = load_result(run_id)
@@ -231,6 +237,8 @@ class RunBacktestRequest(BaseModel):
     initial_capital: float
     buy_conditions: ConditionGroupRequest
     sell_conditions: ConditionGroupRequest
+    title: str | None = None
+    description: str | None = None
 
 
 def _validate_backtest_request(req: RunBacktestRequest) -> list[str]:
@@ -307,6 +315,8 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
         start=start_dt,
         end=end_dt,
         strategy_params={"buy_conditions": buy_dict, "sell_conditions": sell_dict},
+        title=req.title,
+        description=req.description,
     )
     return {"run_id": result["run_id"]}
 

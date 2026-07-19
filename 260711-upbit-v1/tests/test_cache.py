@@ -8,6 +8,7 @@ import engine.cache as cache_module
 from engine.cache import compute_cache_key, load_result, save_result
 from engine.cache import run_backtest_cached
 from engine.cache import (
+    list_backtest_runs,
     list_combined_ranking,
     list_distinct_combos,
     list_latest_sweep_results,
@@ -335,3 +336,64 @@ def test_list_distinct_combos(monkeypatch, tmp_path):
     assert combos == [
         {"signal_set_name": "rsi_zone", "is_combined": False, "market": "KRW-BTC", "timeframe": "minutes60"}
     ]
+
+
+def _save_condition_tree_run(monkeypatch, tmp_path, run_id: str, title: str | None, description: str | None,
+                              final_value: float = 11000.0, initial_capital: float = 10000.0):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id=run_id,
+        strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC",
+        timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": initial_capital},
+        result={"final_value": final_value, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title=title,
+        description=description,
+    )
+
+
+def test_save_result_stores_and_returns_title_and_description(monkeypatch, tmp_path):
+    _save_condition_tree_run(monkeypatch, tmp_path, "run-1", title="내 첫 포트", description="RSI 전략 테스트")
+
+    runs = list_backtest_runs()
+    assert len(runs) == 1
+    assert runs[0]["title"] == "내 첫 포트"
+    assert runs[0]["description"] == "RSI 전략 테스트"
+    assert runs[0]["return_rate"] == 10.0  # (11000-10000)/10000*100
+
+
+def test_list_backtest_runs_excludes_sweep_based_rows(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    # sweep 시스템이 남기는 SignalStrategy 행 (히트맵/랭킹 전용, title 없음)
+    save_result(
+        run_id="sweep-run", strategy_name="SignalStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+    _save_condition_tree_run(monkeypatch, tmp_path, "ondemand-run", title="온디맨드", description=None)
+
+    runs = list_backtest_runs()
+    assert [r["run_id"] for r in runs] == ["ondemand-run"]
+
+
+def test_list_backtest_runs_orders_by_created_at_desc(monkeypatch, tmp_path):
+    _save_condition_tree_run(monkeypatch, tmp_path, "older", title="먼저 실행", description=None)
+    _save_condition_tree_run(monkeypatch, tmp_path, "newer", title="나중 실행", description=None)
+
+    runs = list_backtest_runs()
+    assert [r["run_id"] for r in runs] == ["newer", "older"]
+
+
+def test_connect_migration_is_idempotent(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    # _connect()를 여러 번 호출해도(=ALTER TABLE을 여러 번 시도해도) 에러가 나면 안 됨
+    cache_module._connect().close()
+    cache_module._connect().close()
+    cache_module._connect().close()

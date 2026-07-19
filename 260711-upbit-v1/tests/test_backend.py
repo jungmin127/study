@@ -261,6 +261,41 @@ def test_run_backtest_uses_requested_initial_capital(monkeypatch, tmp_path):
     assert run_id != run_id2, "운용자금이 다른데 같은 run_id(캐시 hit)가 나옴 — initial_capital이 캐시 키에 반영 안 됨"
 
 
+def test_run_backtest_persists_title_and_description(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(title="내 포트", description="테스트 설명"),
+    )
+    assert resp.status_code == 200
+    run_id = resp.json()["run_id"]
+
+    list_resp = client.get("/api/v1/backtests")
+    assert list_resp.status_code == 200
+    body = list_resp.json()
+    matching = [r for r in body if r["run_id"] == run_id]
+    assert len(matching) == 1
+    assert matching[0]["title"] == "내 포트"
+    assert matching[0]["description"] == "테스트 설명"
+
+
+def test_get_backtests_omits_sweep_only_runs(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="sweep-only", strategy_name="SignalStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    resp = client.get("/api/v1/backtests")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 def test_validate_reports_multiple_errors_at_once(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
 

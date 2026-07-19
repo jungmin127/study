@@ -121,6 +121,14 @@ def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(_SCHEMA)
+    # backtest_runs에 title/description 컬럼을 추가하는 경량 마이그레이션.
+    # CREATE TABLE IF NOT EXISTS는 이미 존재하는 테이블의 컬럼을 추가해주지 않으므로,
+    # 기존 DB 파일에도 안전하게 적용되도록 ALTER TABLE을 시도하고 이미 있으면 무시한다.
+    for column in ("title", "description"):
+        try:
+            conn.execute(f"ALTER TABLE backtest_runs ADD COLUMN {column} TEXT")
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 
@@ -159,13 +167,15 @@ def save_result(
     end: datetime,
     risk_config: dict,
     result: dict,
+    title: str | None = None,
+    description: str | None = None,
 ) -> None:
     conn = _connect()
     try:
         conn.execute(
             "INSERT OR REPLACE INTO backtest_runs "
-            "(id, strategy_name, params_json, market, timeframe, start, end, risk_config_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            "(id, strategy_name, params_json, market, timeframe, start, end, risk_config_json, created_at, title, description) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)",
             (
                 run_id,
                 strategy_name,
@@ -175,6 +185,8 @@ def save_result(
                 start.isoformat(),
                 end.isoformat(),
                 json.dumps(risk_config, sort_keys=True),
+                title,
+                description,
             ),
         )
         conn.execute(
@@ -204,6 +216,8 @@ def run_backtest_cached(
     start: datetime,
     end: datetime,
     strategy_params: dict | None = None,
+    title: str | None = None,
+    description: str | None = None,
 ) -> dict:
     """
     캐시된 백테스트 결과를 반환하거나 새로 실행해 저장한다.
@@ -233,6 +247,8 @@ def run_backtest_cached(
         end=end,
         risk_config=risk_config,
         result=result,
+        title=title,
+        description=description,
     )
     result["from_cache"] = False
     result["run_id"] = run_id
@@ -343,3 +359,51 @@ def list_distinct_combos() -> list[dict]:
         {"signal_set_name": r[0], "is_combined": bool(r[1]), "market": r[2], "timeframe": r[3]}
         for r in rows
     ]
+
+
+def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int = 100) -> list[dict]:
+    """온디맨드 조건식 실행(홈 화면) 결과만 최신순으로 반환한다.
+
+    strategy_name으로 필터링해 run_sweep()이 남기는 SignalStrategy 기반 행(히트맵/랭킹
+    전용)은 섞이지 않게 한다 — 두 시스템은 의도적으로 분리되어 있다."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT r.id, r.title, r.description, r.market, r.timeframe, r.start, r.end, "
+            "       r.created_at, r.risk_config_json, res.final_value, res.sharpe, res.max_drawdown "
+            "FROM backtest_runs r "
+            "JOIN backtest_results res ON res.run_id = r.id "
+            "WHERE r.strategy_name = ? "
+            # created_at은 초 단위라 같은 초에 여러 건이 저장되면 순서가 불안정해질 수 있어,
+            # 삽입 순서를 그대로 보존하는 rowid를 보조 정렬 기준으로 둔다.
+            "ORDER BY r.created_at DESC, r.rowid DESC "
+            "LIMIT ?",
+            (strategy_name, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    runs: list[dict] = []
+    for row in rows:
+        (run_id, title, description, market, timeframe, start, end,
+         created_at, risk_config_json, final_value, sharpe, max_drawdown) = row
+        initial_capital = json.loads(risk_config_json).get("initial_capital")
+        return_rate = (
+            (final_value - initial_capital) / initial_capital * 100
+            if initial_capital else None
+        )
+        runs.append({
+            "run_id": run_id,
+            "title": title,
+            "description": description,
+            "market": market,
+            "timeframe": timeframe,
+            "start": start,
+            "end": end,
+            "created_at": created_at,
+            "final_value": final_value,
+            "return_rate": return_rate,
+            "sharpe": sharpe,
+            "max_drawdown": max_drawdown,
+        })
+    return runs
