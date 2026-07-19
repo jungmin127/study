@@ -34,7 +34,7 @@
 **Interfaces:**
 - Produces: `INDICATOR_FACTORY: dict[str, Callable[..., bt.Indicator]]` — 지표 이름 → `(data: bt.feeds.PandasData, **params) -> bt.Indicator` 생성 함수. Task 2/3이 그대로 사용한다.
 
-- [ ] **Step 1: `engine/indicators/trend.py` 작성**
+- [x] **Step 1: `engine/indicators/trend.py` 작성**
 
 ```python
 from __future__ import annotations
@@ -57,7 +57,7 @@ def create_wma(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     return bt.indicators.WeightedMovingAverage(data, period=period)
 ```
 
-- [ ] **Step 2: `engine/indicators/momentum.py` 작성**
+- [x] **Step 2: `engine/indicators/momentum.py` 작성**
 
 ```python
 from __future__ import annotations
@@ -106,7 +106,7 @@ def create_williams_r(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     return bt.indicators.WilliamsR(data, period=period)
 ```
 
-- [ ] **Step 3: `engine/indicators/volatility.py` 작성**
+- [x] **Step 3: `engine/indicators/volatility.py` 작성**
 
 ```python
 from __future__ import annotations
@@ -134,7 +134,7 @@ def create_atr(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     return bt.indicators.ATR(data, period=period)
 ```
 
-- [ ] **Step 4: `engine/indicators/volume.py` 작성**
+- [x] **Step 4: `engine/indicators/volume.py` 작성**
 
 ```python
 from __future__ import annotations
@@ -169,7 +169,7 @@ def create_volume_sma(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     return bt.indicators.SMA(data.volume, period=period)
 ```
 
-- [ ] **Step 5: `engine/indicators/__init__.py` 작성**
+- [x] **Step 5: `engine/indicators/__init__.py` 작성**
 
 ```python
 from __future__ import annotations
@@ -209,7 +209,7 @@ INDICATOR_FACTORY: dict[str, object] = {
 __all__ = ["INDICATOR_FACTORY"]
 ```
 
-- [ ] **Step 6: 실패하는 테스트 작성**
+- [x] **Step 6: 실패하는 테스트 작성**
 
 `tests/test_indicators.py` 새로 생성:
 
@@ -257,17 +257,17 @@ def test_sma_matches_manual_average():
     assert abs(values[-1] - manual) < 1e-6
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_indicators.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'engine.indicators'`
 
-- [ ] **Step 8: 위 Step 1~5의 구현 파일이 이미 작성되어 있으므로 통과 확인**
+- [x] **Step 8: 위 Step 1~5의 구현 파일이 이미 작성되어 있으므로 통과 확인**
 
 Run: `pytest tests/test_indicators.py -v`
 Expected: PASS
 
-- [ ] **Step 9: 커밋**
+- [x] **Step 9: 커밋**
 
 ```bash
 git add engine/indicators tests/test_indicators.py
