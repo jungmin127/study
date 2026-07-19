@@ -1282,7 +1282,7 @@ git commit -m "feat: rewrite POST /api/v1/backtests/run to use buy/sell conditio
 - Consumes: `_validate_backtest_request`(Task 6에서 이미 정의).
 - Produces: `POST /api/v1/backtests/validate` → `200` + `{"valid": bool, "errors": list[str]}`. 캔들 데이터 조회까지 포함한 "완전한" 사전 검증을 위해, 구조적 검증을 통과하면 실제로 `get_candles()`를 호출해 데이터 충분성까지 확인한다(어차피 `run`을 이어서 호출하면 parquet 캐시로 즉시 응답되므로 중복 호출 비용은 낮다).
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_backend.py` 끝에 추가:
 
@@ -1332,12 +1332,12 @@ def test_validate_flags_insufficient_candle_count(monkeypatch, tmp_path):
     assert any("200" in e for e in body["errors"])
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_backend.py -k validate -v`
 Expected: FAIL — `404 Not Found`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `backend/main.py`의 `run_backtest_endpoint` 함수 아래에 추가:
 
@@ -1376,12 +1376,12 @@ def validate_backtest_endpoint(req: RunBacktestRequest) -> dict:
     return {"valid": True, "errors": []}
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_backend.py -v`
 Expected: 전체 PASS
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
