@@ -6,17 +6,15 @@ export const metadata: Metadata = {
 };
 
 const STEPS = [
-  { title: 'Step 1. 기본 설정', subtitle: '기본 조건들을 설정하세요.' },
-  { title: 'Step 2. 매매대상 설정', subtitle: '매매할 대상들을 설정하세요.' },
-  { title: 'Step 3. 매매조건 설정', subtitle: '매수/매도조건을 설정하세요.' },
-  { title: 'Step 4. 포트 실행', subtitle: '백테스트 포트가 완성되었습니다.' },
+  { title: '백테스트 설정', subtitle: '코인/전략/기간을 설정하세요.' },
+  { title: '백테스트 결과', subtitle: '실행한 백테스트 결과가 저장됩니다.' },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
       <body>
-        <header className="grid grid-cols-4 border-b">
+        <header className="grid grid-cols-2 border-b">
           {STEPS.map((step, i) => (
             <div
               key={step.title}

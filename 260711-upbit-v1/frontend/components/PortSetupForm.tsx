@@ -3,6 +3,10 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
+const MARKETS = ['KRW-BTC', 'KRW-ETH'];
+
+const DUMMY_SIGNALS = ['macd_cross', 'rsi_zone', 'sma_cross', 'bollinger_band'];
+
 const CANDLE_UNITS = ['15분', '30분', '1시간', '1일'];
 
 const INPUT_CLASS =
@@ -22,6 +26,8 @@ function defaultDate(daysAgo: number): string {
 export default function PortSetupForm() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [market, setMarket] = useState(MARKETS[0]);
+  const [selectedSignals, setSelectedSignals] = useState<string[]>([DUMMY_SIGNALS[0]]);
   const [capital, setCapital] = useState('1000000');
   const [candleUnit, setCandleUnit] = useState(CANDLE_UNITS[0]);
   const [tickVerification, setTickVerification] = useState(false);
@@ -31,10 +37,18 @@ export default function PortSetupForm() {
   const [endTime, setEndTime] = useState('00:00');
   const [feeRate, setFeeRate] = useState('0.100');
 
+  function toggleSignal(key: string) {
+    setSelectedSignals((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  }
+
   function handleNext() {
     console.log('next step (mock)', {
       title,
       description,
+      market,
+      selectedSignals,
       capital,
       candleUnit,
       tickVerification,
@@ -70,6 +84,51 @@ export default function PortSetupForm() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
+        </div>
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-sm font-semibold">매매 대상</h2>
+        <div className="grid grid-cols-2 divide-x rounded-md border">
+          <div>
+            <div className={SECTION_HEADER_CLASS}>코인 선택</div>
+            <div className="p-4">
+              <select
+                className={SELECT_CLASS}
+                value={market}
+                onChange={(e) => setMarket(e.target.value)}
+              >
+                {MARKETS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <div className={SECTION_HEADER_CLASS}>전략 선택</div>
+            <div className="flex flex-wrap gap-2 p-4">
+              {DUMMY_SIGNALS.map((key) => {
+                const selected = selectedSignals.includes(key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => toggleSignal(key)}
+                    className={
+                      selected
+                        ? 'rounded-full border-2 border-primary bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm'
+                        : 'rounded-full border-2 border-border bg-background px-4 py-1.5 text-sm font-medium text-foreground hover:bg-muted'
+                    }
+                  >
+                    {key}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
