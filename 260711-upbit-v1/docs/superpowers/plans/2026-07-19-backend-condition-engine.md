@@ -970,7 +970,7 @@ git commit -m "feat: add GET /api/v1/indicators/catalog with description and exa
 - Produces: `RunBacktestRequest`(재정의, 기존 `signal_keys` 필드 제거) → `POST /api/v1/backtests/run` → `200` + `{"run_id": str}` 또는 `400` + `{"detail": str}`.
 - **주의(Breaking Change):** 기존 `signal_keys: list[str]` 요청 필드와 그 필드를 검증하던 테스트 5개(`test_run_backtest_returns_run_id_and_is_retrievable` 등)를 이번 Task에서 새 스키마에 맞게 **교체**한다. `signal_keys` 기반 실행 경로 자체가 없어진다 — `signals.py`/`SIGNAL_REGISTRY`는 sweep 시스템 전용으로만 계속 쓰인다.
 
-- [ ] **Step 1: 기존 관련 테스트 삭제**
+- [x] **Step 1: 기존 관련 테스트 삭제**
 
 `tests/test_backend.py`에서 아래 5개 테스트와 `_patch_get_candles` 헬퍼를 삭제한다(모두 `signal_keys`를 사용하므로 새 스키마와 맞지 않음):
 - `test_run_backtest_returns_run_id_and_is_retrievable`
@@ -980,7 +980,7 @@ git commit -m "feat: add GET /api/v1/indicators/catalog with description and exa
 - `test_run_backtest_rejects_empty_candle_range`
 - `_patch_get_candles` 헬퍼
 
-- [ ] **Step 2: 새 실패하는 테스트 작성**
+- [x] **Step 2: 새 실패하는 테스트 작성**
 
 `tests/test_backend.py` 상단 import 블록에 추가(없다면):
 
@@ -1109,12 +1109,12 @@ def test_run_backtest_uses_requested_initial_capital(monkeypatch, tmp_path):
     assert run_id != run_id2, "운용자금이 다른데 같은 run_id(캐시 hit)가 나옴 — initial_capital이 캐시 키에 반영 안 됨"
 ```
 
-- [ ] **Step 3: 테스트 실패 확인**
+- [x] **Step 3: 테스트 실패 확인**
 
 Run: `pytest tests/test_backend.py -k run_backtest -v`
 Expected: FAIL — 기존 `signal_keys` 스키마와 새 테스트가 요구하는 필드가 달라 422/실패
 
-- [ ] **Step 4: `backend/main.py` 구현 교체**
+- [x] **Step 4: `backend/main.py` 구현 교체**
 
 import 블록을 아래로 교체:
 
@@ -1253,17 +1253,17 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
     return {"run_id": result["run_id"]}
 ```
 
-- [ ] **Step 5: 테스트 통과 확인**
+- [x] **Step 5: 테스트 통과 확인**
 
 Run: `pytest tests/test_backend.py -v`
 Expected: 전체 PASS
 
-- [ ] **Step 6: 전체 스위트 확인**
+- [x] **Step 6: 전체 스위트 확인**
 
 Run: `pytest -v`
 Expected: 전체 PASS(sweep/signals 관련 기존 테스트도 영향 없어야 함)
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
