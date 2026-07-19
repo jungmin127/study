@@ -74,6 +74,8 @@ export default function PortSetupForm() {
       initial_capital: Number(capital),
       buy_conditions: buyConditions,
       sell_conditions: sellConditions,
+      title: title || null,
+      description: description || null,
     };
 
     setSubmitting(true);

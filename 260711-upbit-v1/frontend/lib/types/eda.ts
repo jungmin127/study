@@ -74,6 +74,8 @@ export interface RunBacktestRequest {
   initial_capital: number;
   buy_conditions: ConditionGroup;
   sell_conditions: ConditionGroup;
+  title?: string | null;
+  description?: string | null;
 }
 
 export interface RunBacktestResponse {
@@ -83,4 +85,19 @@ export interface RunBacktestResponse {
 export interface ValidateBacktestResponse {
   valid: boolean;
   errors: string[];
+}
+
+export interface BacktestRunSummary {
+  run_id: string;
+  title: string | null;
+  description: string | null;
+  market: string;
+  timeframe: string;
+  start: string;
+  end: string;
+  created_at: string;
+  final_value: number;
+  return_rate: number | null;
+  sharpe: number | null;
+  max_drawdown: number | null;
 }

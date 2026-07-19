@@ -1,6 +1,7 @@
 import { apiFetch } from './client';
 import type {
   BacktestDetail,
+  BacktestRunSummary,
   Combo,
   IndicatorCatalogItem,
   Market,
@@ -34,6 +35,10 @@ export function getHistory(combo: Combo): Promise<SweepResult[]> {
 
 export function getBacktestDetail(runId: string): Promise<BacktestDetail> {
   return apiFetch<BacktestDetail>(`/api/v1/backtests/${runId}`);
+}
+
+export function getBacktestRuns(): Promise<BacktestRunSummary[]> {
+  return apiFetch<BacktestRunSummary[]>('/api/v1/backtests');
 }
 
 export function getMarkets(): Promise<Market[]> {
