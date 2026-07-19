@@ -1390,17 +1390,17 @@ git commit -m "feat: add POST /api/v1/backtests/validate pre-flight validation e
 
 ---
 
-## 프런트엔드 후속 연동 체크리스트 (이번 계획 범위 밖 — 별도 작업으로 진행)
+## 프런트엔드 후속 연동 체크리스트 — 완료 (2026-07-19, 커밋 `45ac489`)
 
-이번 계획은 백엔드만 다룬다. 아래는 위 엔드포인트들이 준비된 뒤 `PortSetupForm`/`StrategyConditionBuilder`를 실제로 연결하기 위해 필요한 프런트엔드 작업 목록이다(별도 스펙/플랜으로 다룰 것):
+원래는 "이번 계획 범위 밖, 별도 작업"으로 남겨뒀으나, 백엔드 Task 1~7 완료 직후 같은 세션에서 이어서 전부 구현하고 Playwright로 실제 백엔드(업비트 실제 API 포함) 대상 end-to-end 확인까지 마쳤다.
 
-- `코인 선택` 드롭다운: 하드코딩된 `MARKETS = ['KRW-BTC', 'KRW-ETH']` 대신 `GET /api/v1/markets`를 호출해 채운다(요청 사항 2번, "바로 필요").
-- `StrategyConditionBuilder`의 `INDICATOR_CATEGORIES` 하드코딩 대신 `GET /api/v1/indicators/catalog`를 호출해 지표 목록 + `description`/`example`을 채운다(요청 사항 1, 5번).
-- 지표 select 옆에 `description`/`example`을 보여주는 툴팁 UI 추가(요청 사항 5번, 백엔드 데이터는 Task 5로 이미 준비됨).
-- 매수/매도 조건 트리를 사람이 읽을 수 있는 한 줄 요약("(A and B) or (C and D)")으로 렌더링하는 함수 추가(요청 사항 6번) — 트리 구조만 있으면 되므로 순수 프런트엔드 작업, 백엔드 변경 불필요.
-- `봉데이터 선택`(15분/30분/1시간/1일) → 백엔드 `timeframe` 문자열(`minutes15`/`minutes30`/`minutes60`/`days`) 매핑 유틸 추가.
-- `백테스트 실행` 클릭 시: 먼저 `POST /api/v1/backtests/validate` 호출 → `valid: false`면 사유 목록을 팝업(Dialog)으로 표시(요청 사항 7번) → `valid: true`면 `POST /api/v1/backtests/run` 호출 후 결과 페이지로 이동.
-- `운용기간` UI가 좁은 화면에서 줄바꿈되는 문제(요청 사항 4번) 확인 — 현재 `flex flex-wrap`으로 되어 있어 컨테이너 폭이 좁으면 자동 줄바꿈됨. 필요하면 `기본 조건` 그리드의 운용기간 칼럼 비율을 더 늘리거나(`grid-cols-[1fr_1fr_2fr]` → 비율 조정), 날짜/시간 입력 폭을 줄인다.
+- [x] `코인 선택` 드롭다운: `GET /api/v1/markets`로 채움 — 실제 269개 KRW 마켓 정상 표시 확인.
+- [x] `StrategyConditionBuilder`의 `INDICATOR_CATEGORIES` 하드코딩 제거, `catalog` prop으로 `GET /api/v1/indicators/catalog` 데이터를 받아 렌더링.
+- [x] 지표 select 옆 ⓘ 아이콘에 `title` 속성으로 `description`/`example` 툴팁 추가(네이티브 브라우저 툴팁, 별도 컴포넌트 없이 구현) — 실제 텍스트 노출 확인.
+- [x] 조건 트리 요약 함수(`summarizeGroup`) 추가, 각 조건 박스 하단에 "조건식: RSI<30" 같은 한 줄 요약 표시.
+- [x] `봉데이터 선택` 값 자체를 백엔드 `timeframe` 문자열로 직접 관리(`CANDLE_UNITS = [{label, timeframe}]`), 별도 매핑 유틸 불필요하게 단순화.
+- [x] `백테스트 실행` → `POST /validate` 먼저 호출 → 실패 시 사유 목록 팝업(커스텀 모달, Dialog 컴포넌트 없이 구현) → 통과 시 `POST /run` → `/backtests/{run_id}`로 이동. 성공/실패 두 경로 모두 실제 백엔드로 확인(성공 시 자산곡선+거래 2000여 건 렌더링, 실패 시 "매수 조건이 없습니다"/"매도 조건이 없습니다" 팝업 정상 표시).
+- [x] `운용기간` 한 줄 정리: 컨테이너 `max-w-4xl`→`max-w-5xl`, 기간 칼럼 비율 `2fr`→`3fr`, "부터"/"까지" 텍스트를 "~" 하나로 축소. 실제 화면에서 줄바꿈 없이 한 줄에 표시됨을 확인.
 
 ## 향후 확장 메모 (이번 작업에서 구현하지 않음)
 
