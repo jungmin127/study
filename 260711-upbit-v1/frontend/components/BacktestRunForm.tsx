@@ -15,6 +15,9 @@ const TIMEFRAMES = [
 
 const DUMMY_SIGNALS = ['macd_cross', 'rsi_zone', 'sma_cross', 'bollinger_band'];
 
+const SELECT_CLASS =
+  'h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-ring';
+
 function defaultDate(daysAgo: number): string {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
@@ -35,19 +38,15 @@ export default function BacktestRunForm() {
   }
 
   return (
-    <div className="max-w-xl space-y-4">
-      <Card>
-        <CardHeader className="bg-primary/10">
-          <CardTitle>기본 설정</CardTitle>
+    <div className="max-w-2xl space-y-6">
+      <Card className="shadow-sm">
+        <CardHeader className="border-b bg-slate-50 py-3 dark:bg-slate-800">
+          <CardTitle className="text-sm font-semibold">기본 설정</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-4">
+        <CardContent className="grid grid-cols-2 gap-4 pt-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">코인</label>
-            <select
-              className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
-              value={market}
-              onChange={(e) => setMarket(e.target.value)}
-            >
+            <label className="mb-1.5 block text-sm font-medium">코인</label>
+            <select className={SELECT_CLASS} value={market} onChange={(e) => setMarket(e.target.value)}>
               {MARKETS.map((m) => (
                 <option key={m} value={m}>
                   {m}
@@ -56,9 +55,9 @@ export default function BacktestRunForm() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">봉타입</label>
+            <label className="mb-1.5 block text-sm font-medium">봉타입</label>
             <select
-              className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+              className={SELECT_CLASS}
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
             >
@@ -72,11 +71,11 @@ export default function BacktestRunForm() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="bg-primary/10">
-          <CardTitle>전략 선택</CardTitle>
+      <Card className="shadow-sm">
+        <CardHeader className="border-b bg-slate-50 py-3 dark:bg-slate-800">
+          <CardTitle className="text-sm font-semibold">전략 선택</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
+        <CardContent className="flex flex-wrap gap-2 pt-4">
           {DUMMY_SIGNALS.map((key) => {
             const selected = selectedSignals.includes(key);
             return (
@@ -86,8 +85,8 @@ export default function BacktestRunForm() {
                 onClick={() => toggleSignal(key)}
                 className={
                   selected
-                    ? 'rounded-full border border-primary bg-primary px-3 py-1 text-xs font-medium text-primary-foreground'
-                    : 'rounded-full border border-input bg-background px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-muted'
+                    ? 'rounded-full border-2 border-primary bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow-sm'
+                    : 'rounded-full border-2 border-border bg-background px-4 py-1.5 text-sm font-medium text-foreground hover:bg-muted'
                 }
               >
                 {key}
@@ -97,22 +96,22 @@ export default function BacktestRunForm() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="bg-primary/10">
-          <CardTitle>운용 기간</CardTitle>
+      <Card className="shadow-sm">
+        <CardHeader className="border-b bg-slate-50 py-3 dark:bg-slate-800">
+          <CardTitle className="text-sm font-semibold">운용 기간</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-2 pt-4">
           <div className="flex items-center gap-2">
             <input
               type="date"
-              className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-ring"
               value={start}
               onChange={(e) => setStart(e.target.value)}
             />
             <span className="text-sm text-muted-foreground">~</span>
             <input
               type="date"
-              className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-ring"
               value={end}
               onChange={(e) => setEnd(e.target.value)}
             />
@@ -129,6 +128,8 @@ export default function BacktestRunForm() {
         </p>
         <Button
           type="button"
+          size="lg"
+          className="px-6 shadow-sm"
           onClick={() =>
             console.log('run backtest (mock)', { market, timeframe, selectedSignals, start, end })
           }
