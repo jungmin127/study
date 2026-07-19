@@ -309,3 +309,37 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
         strategy_params={"buy_conditions": buy_dict, "sell_conditions": sell_dict},
     )
     return {"run_id": result["run_id"]}
+
+
+@app.post("/api/v1/backtests/validate")
+def validate_backtest_endpoint(req: RunBacktestRequest) -> dict:
+    errors = _validate_backtest_request(req)
+    if errors:
+        return {"valid": False, "errors": errors}
+
+    start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt = datetime.strptime(req.end, "%Y-%m-%d").replace(
+        hour=23, minute=59, second=59, tzinfo=timezone.utc
+    )
+
+    try:
+        df = get_candles(req.market, req.timeframe, start_dt, end_dt)
+    except (ValueError, RuntimeError) as exc:
+        return {"valid": False, "errors": [str(exc)]}
+
+    if df.empty:
+        return {"valid": False, "errors": ["해당 기간에 캔들 데이터가 없습니다."]}
+
+    buy_dict = req.buy_conditions.model_dump()
+    sell_dict = req.sell_conditions.model_dump()
+    required_bars = max(max_required_period(buy_dict), max_required_period(sell_dict))
+    if len(df) < required_bars:
+        return {
+            "valid": False,
+            "errors": [
+                f"선택한 지표가 최소 {required_bars}개의 봉을 필요로 하지만, "
+                f"해당 기간에는 {len(df)}개의 봉만 있습니다. 기간을 늘리거나 지표 파라미터를 줄이세요."
+            ],
+        }
+
+    return {"valid": True, "errors": []}

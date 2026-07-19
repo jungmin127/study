@@ -259,3 +259,48 @@ def test_run_backtest_uses_requested_initial_capital(monkeypatch, tmp_path):
     run_id2 = resp2.json()["run_id"]
 
     assert run_id != run_id2, "운용자금이 다른데 같은 run_id(캐시 hit)가 나옴 — initial_capital이 캐시 키에 반영 안 됨"
+
+
+def test_validate_reports_multiple_errors_at_once(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.post(
+        "/api/v1/backtests/validate",
+        json=_run_request(
+            buy_conditions={"type": "AND", "conditions": []},
+            sell_conditions={"type": "AND", "conditions": []},
+            start="2026-03-01",
+            end="2026-01-01",
+        ),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is False
+    assert any("매수 조건" in e for e in body["errors"])
+    assert any("매도 조건" in e for e in body["errors"])
+    assert any("시작일" in e for e in body["errors"])
+
+
+def test_validate_passes_for_well_formed_request(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post("/api/v1/backtests/validate", json=_run_request())
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True, "errors": []}
+
+
+def test_validate_flags_insufficient_candle_count(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    short_df = make_oscillating_df(n=5)
+    _patch_get_candles(monkeypatch, df=short_df)
+
+    long_period_buy = {
+        "type": "AND",
+        "conditions": [{"indicator": "SMA", "params": {"period": 200}, "operator": ">", "threshold": 0}],
+    }
+    resp = client.post("/api/v1/backtests/validate", json=_run_request(buy_conditions=long_period_buy))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is False
+    assert any("200" in e for e in body["errors"])
