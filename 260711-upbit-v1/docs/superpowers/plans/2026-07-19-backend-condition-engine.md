@@ -286,7 +286,7 @@ git commit -m "feat: add raw indicator factory (SMA/EMA/RSI/MACD/BB/ATR/OBV/...)
 - Consumes: `INDICATOR_FACTORY`(Task 1).
 - Produces: `collect_blocks(group: dict) -> list[dict]`, `indicator_key(indicator: str, params: dict) -> str`, `get_indicator_value(indicator_name: str, obj: bt.Indicator) -> float`, `apply_operator(value: float, operator: str, threshold: float) -> bool`, `eval_group(group: dict, indicators: dict) -> bool`, `find_unknown_indicators(group: dict) -> list[str]`, `is_empty(group: dict) -> bool`, `max_required_period(group: dict) -> int`. Task 3(전략 클래스)과 Task 7(검증 엔드포인트)이 그대로 사용한다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_condition_tree.py` 새로 생성:
 
@@ -348,12 +348,12 @@ def test_max_required_period_takes_largest_param_value():
     assert max_required_period(tree) == 200
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `pytest tests/test_condition_tree.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'engine.condition_tree'`
 
-- [ ] **Step 3: 구현 작성**
+- [x] **Step 3: 구현 작성**
 
 `engine/condition_tree.py` 새로 생성:
 
@@ -488,12 +488,12 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_condition_tree.py -v`
 Expected: PASS
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add engine/condition_tree.py tests/test_condition_tree.py
