@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Market } from '@/lib/types/eda';
+import { getMarkets } from '@/lib/api/eda';
 import { INPUT_CLASS } from '@/lib/ui-classes';
 
 export type MarketSortKey = 'change_rate' | 'trade_price_24h';
@@ -56,12 +57,18 @@ interface CoinSelectProps {
 
 export default function CoinSelect({ markets, value, onChange }: CoinSelectProps) {
   const [open, setOpen] = useState(false);
+  const [liveMarkets, setLiveMarkets] = useState(markets);
+  const [refreshing, setRefreshing] = useState(false);
   const [sortKey, setSortKey] = useState<MarketSortKey>('change_rate');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const sorted = useMemo(() => sortMarkets(markets, sortKey, sortDir), [markets, sortKey, sortDir]);
-  const selected = markets.find((m) => m.market === value) ?? null;
+  useEffect(() => {
+    setLiveMarkets(markets);
+  }, [markets]);
+
+  const sorted = useMemo(() => sortMarkets(liveMarkets, sortKey, sortDir), [liveMarkets, sortKey, sortDir]);
+  const selected = liveMarkets.find((m) => m.market === value) ?? null;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -72,6 +79,18 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  function handleToggleOpen() {
+    const willOpen = !open;
+    setOpen(willOpen);
+    if (willOpen) {
+      setRefreshing(true);
+      getMarkets()
+        .then(setLiveMarkets)
+        .catch(() => {})
+        .finally(() => setRefreshing(false));
+    }
+  }
 
   function toggleSort(key: MarketSortKey) {
     if (sortKey === key) {
@@ -92,8 +111,8 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
       <button
         type="button"
         className={`${INPUT_CLASS} flex w-full items-center justify-between gap-3`}
-        onClick={() => setOpen((o) => !o)}
-        disabled={markets.length === 0}
+        onClick={handleToggleOpen}
+        disabled={liveMarkets.length === 0}
       >
         {selected ? (
           <>
@@ -115,7 +134,7 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
       {open && (
         <div className="absolute z-20 mt-1 w-full rounded-md border bg-background shadow-lg">
           <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 border-b bg-slate-50 px-3 py-2 text-xs font-medium text-muted-foreground dark:bg-slate-800">
-            <span>한글명</span>
+            <span>{refreshing ? '새로고침 중...' : '한글명'}</span>
             <span className="text-right">현재가</span>
             <button
               type="button"
