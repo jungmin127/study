@@ -318,7 +318,7 @@ def test_get_krw_markets_filters_to_krw_prefix(monkeypatch):
     assert markets[0]["korean_name"] == "비트코인"
 
 
-def test_get_krw_markets_with_ticker_merges_change_rate_and_volume(monkeypatch):
+def test_get_krw_markets_with_ticker_merges_price_change_and_trade_value(monkeypatch):
     import upbit_data_service
 
     class _FakeResponse:
@@ -340,14 +340,24 @@ def test_get_krw_markets_with_ticker_merges_change_rate_and_volume(monkeypatch):
         assert "ticker" in url
         assert params == {"markets": "KRW-BTC,KRW-ETH"}
         return _FakeResponse([
-            {"market": "KRW-BTC", "signed_change_rate": 0.0235, "acc_trade_volume_24h": 123.4},
+            {
+                "market": "KRW-BTC",
+                "trade_price": 150_000_000.0,
+                "signed_change_rate": 0.0235,
+                "signed_change_price": 3_500_000.0,
+                "acc_trade_price_24h": 123_400_000_000.0,
+            },
             # KRW-ETH intentionally missing from the ticker response
         ])
 
     monkeypatch.setattr(upbit_data_service.httpx, "get", _fake_get)
 
     markets = upbit_data_service.get_krw_markets_with_ticker()
+    assert markets[0]["price"] == 150_000_000.0
     assert markets[0]["change_rate"] == 0.0235
-    assert markets[0]["trade_volume"] == 123.4
+    assert markets[0]["change_price"] == 3_500_000.0
+    assert markets[0]["trade_price_24h"] == 123_400_000_000.0
+    assert markets[1]["price"] is None
     assert markets[1]["change_rate"] is None
-    assert markets[1]["trade_volume"] is None
+    assert markets[1]["change_price"] is None
+    assert markets[1]["trade_price_24h"] is None

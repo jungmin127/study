@@ -49,8 +49,10 @@ export interface Market {
   market: string;
   korean_name: string;
   english_name: string;
+  price: number | null;
   change_rate: number | null;
-  trade_volume: number | null;
+  change_price: number | null;
+  trade_price_24h: number | null;
 }
 
 export interface IndicatorParamDef {

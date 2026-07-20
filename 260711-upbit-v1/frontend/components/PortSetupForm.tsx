@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import CoinSelect, { sortMarkets } from '@/components/CoinSelect';
 import StrategyConditionBuilder from '@/components/StrategyConditionBuilder';
 import type { ConditionGroup } from '@/lib/types/strategy';
 import type { IndicatorCatalogItem, Market } from '@/lib/types/eda';
@@ -30,40 +31,6 @@ function formatCapital(digits: string): string {
   return Number(digits).toLocaleString('ko-KR');
 }
 
-type MarketSortKey = 'change_rate' | 'trade_volume';
-type SortDir = 'asc' | 'desc';
-
-const MARKET_SORT_BUTTONS: { key: MarketSortKey; dir: SortDir; label: string }[] = [
-  { key: 'change_rate', dir: 'desc', label: '등락률▼' },
-  { key: 'change_rate', dir: 'asc', label: '등락률▲' },
-  { key: 'trade_volume', dir: 'desc', label: '거래량▼' },
-  { key: 'trade_volume', dir: 'asc', label: '거래량▲' },
-];
-
-function sortMarkets(list: Market[], key: MarketSortKey, dir: SortDir): Market[] {
-  const factor = dir === 'asc' ? 1 : -1;
-  return [...list].sort((a, b) => {
-    const av = a[key];
-    const bv = b[key];
-    if (av === null && bv === null) return 0;
-    if (av === null) return 1;
-    if (bv === null) return -1;
-    return (av - bv) * factor;
-  });
-}
-
-function formatChangeRate(rate: number | null): string {
-  if (rate === null) return '-';
-  const pct = rate * 100;
-  const sign = pct > 0 ? '+' : '';
-  return `${sign}${pct.toFixed(2)}%`;
-}
-
-function formatTradeVolume(volume: number | null): string {
-  if (volume === null) return '-';
-  return volume.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
-}
-
 export default function PortSetupForm() {
   const router = useRouter();
 
@@ -73,8 +40,6 @@ export default function PortSetupForm() {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [marketsError, setMarketsError] = useState<string | null>(null);
   const [market, setMarket] = useState('');
-  const [marketSortKey, setMarketSortKey] = useState<MarketSortKey>('change_rate');
-  const [marketSortDir, setMarketSortDir] = useState<SortDir>('desc');
 
   const [catalog, setCatalog] = useState<IndicatorCatalogItem[]>([]);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -105,11 +70,6 @@ export default function PortSetupForm() {
       .then(setCatalog)
       .catch((err) => setCatalogError(err instanceof ApiError ? err.message : '지표 목록을 불러오지 못했습니다.'));
   }, []);
-
-  const sortedMarkets = useMemo(
-    () => sortMarkets(markets, marketSortKey, marketSortDir),
-    [markets, marketSortKey, marketSortDir],
-  );
 
   async function handleRun() {
     const request = {
@@ -143,7 +103,7 @@ export default function PortSetupForm() {
 
   return (
     <div className="max-w-5xl space-y-6 rounded-xl border p-6 shadow-sm">
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-[1fr_1fr_4fr] gap-6">
         <div>
           <label className="mb-1.5 block text-sm font-medium">포트 제목</label>
           <input
@@ -168,41 +128,7 @@ export default function PortSetupForm() {
         </div>
         <div>
           <label className="mb-1.5 block text-sm font-medium">코인 선택</label>
-          <select
-            className={SELECT_CLASS}
-            value={market}
-            onChange={(e) => setMarket(e.target.value)}
-            disabled={markets.length === 0}
-          >
-            {markets.length === 0 && <option value="">불러오는 중...</option>}
-            {sortedMarkets.map((m) => (
-              <option key={m.market} value={m.market}>
-                {m.korean_name} ({m.market}) · {formatChangeRate(m.change_rate)} · {formatTradeVolume(m.trade_volume)}
-              </option>
-            ))}
-          </select>
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {MARKET_SORT_BUTTONS.map((btn) => {
-              const active = marketSortKey === btn.key && marketSortDir === btn.dir;
-              return (
-                <button
-                  key={`${btn.key}-${btn.dir}`}
-                  type="button"
-                  className={
-                    active
-                      ? 'whitespace-nowrap rounded-md border border-input bg-primary px-2 py-1 text-xs text-primary-foreground'
-                      : 'whitespace-nowrap rounded-md border border-input bg-background px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-800'
-                  }
-                  onClick={() => {
-                    setMarketSortKey(btn.key);
-                    setMarketSortDir(btn.dir);
-                  }}
-                >
-                  {btn.label}
-                </button>
-              );
-            })}
-          </div>
+          <CoinSelect markets={markets} value={market} onChange={setMarket} />
           {marketsError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{marketsError}</p>}
         </div>
       </div>

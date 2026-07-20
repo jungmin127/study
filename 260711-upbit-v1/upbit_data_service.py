@@ -210,7 +210,9 @@ def get_krw_markets() -> list[dict]:
 
 
 def get_krw_markets_with_ticker() -> list[dict]:
-    """코인 선택 UI의 등락률/거래량 정렬을 위해 시세 정보를 포함한 KRW 마켓 목록을 반환한다."""
+    """코인 선택 UI(현재가/전일대비 등락률·등락폭/거래대금)를 위해 시세 정보를 포함한 KRW 마켓 목록을 반환한다.
+
+    signed_change_rate/signed_change_price는 업비트 기준 그대로 prev_closing_price(전일 종가) 대비 값이다."""
     markets = get_krw_markets()
     if not markets:
         return markets
@@ -223,8 +225,10 @@ def get_krw_markets_with_ticker() -> list[dict]:
     return [
         {
             **m,
+            "price": tickers[m["market"]]["trade_price"] if m["market"] in tickers else None,
             "change_rate": tickers[m["market"]]["signed_change_rate"] if m["market"] in tickers else None,
-            "trade_volume": tickers[m["market"]]["acc_trade_volume_24h"] if m["market"] in tickers else None,
+            "change_price": tickers[m["market"]]["signed_change_price"] if m["market"] in tickers else None,
+            "trade_price_24h": tickers[m["market"]]["acc_trade_price_24h"] if m["market"] in tickers else None,
         }
         for m in markets
     ]

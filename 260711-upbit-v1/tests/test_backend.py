@@ -146,7 +146,8 @@ def test_get_markets_returns_krw_markets_with_ticker(monkeypatch, tmp_path):
     def _fake_get_krw_markets_with_ticker():
         return [{
             "market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin",
-            "change_rate": 0.0235, "trade_volume": 123.4,
+            "price": 150_000_000.0, "change_rate": 0.0235, "change_price": 3_500_000.0,
+            "trade_price_24h": 123_400_000_000.0,
         }]
 
     monkeypatch.setattr(backend_module, "get_krw_markets_with_ticker", _fake_get_krw_markets_with_ticker)
@@ -155,7 +156,8 @@ def test_get_markets_returns_krw_markets_with_ticker(monkeypatch, tmp_path):
     assert resp.status_code == 200
     assert resp.json() == [{
         "market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin",
-        "change_rate": 0.0235, "trade_volume": 123.4,
+        "price": 150_000_000.0, "change_rate": 0.0235, "change_price": 3_500_000.0,
+        "trade_price_24h": 123_400_000_000.0,
     }]
 
 
