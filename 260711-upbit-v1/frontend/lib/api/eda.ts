@@ -62,3 +62,9 @@ export function runBacktest(req: RunBacktestRequest): Promise<RunBacktestRespons
     body: JSON.stringify(req),
   });
 }
+
+export function deleteBacktestRun(runId: string): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>(`/api/v1/backtests/${runId}`, {
+    method: 'DELETE',
+  });
+}

@@ -25,6 +25,11 @@ function defaultDate(daysAgo: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function formatCapital(digits: string): string {
+  if (!digits) return '';
+  return Number(digits).toLocaleString('ko-KR');
+}
+
 export default function PortSetupForm() {
   const router = useRouter();
 
@@ -172,8 +177,8 @@ export default function PortSetupForm() {
                 type="text"
                 inputMode="numeric"
                 className={`${INPUT_CLASS} w-full`}
-                value={capital}
-                onChange={(e) => setCapital(e.target.value)}
+                value={formatCapital(capital)}
+                onChange={(e) => setCapital(e.target.value.replace(/[^0-9]/g, ''))}
               />
               <span className="text-sm text-muted-foreground">원</span>
             </div>

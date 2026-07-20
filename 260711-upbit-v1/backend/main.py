@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from engine.cache import (
+    delete_backtest_run,
     list_backtest_runs,
     list_combined_ranking,
     list_distinct_combos,
@@ -209,6 +210,14 @@ def get_backtest_detail(run_id: str) -> dict:
     if result is None:
         raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 결과를 찾을 수 없습니다")
     return result
+
+
+@app.delete("/api/v1/backtests/{run_id}")
+def delete_backtest(run_id: str) -> dict:
+    deleted = delete_backtest_run(run_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 결과를 찾을 수 없습니다")
+    return {"deleted": True}
 
 
 ComparisonOperator = Literal[">", "<", ">=", "<=", "=="]

@@ -106,6 +106,31 @@ def test_backtest_detail_returns_result_for_known_run(monkeypatch, tmp_path):
     assert resp.json()["final_value"] == 10500.0
 
 
+def test_delete_backtest_removes_run_from_list(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="삭제될 포트",
+    )
+
+    resp = client.delete("/api/v1/backtests/r1")
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": True}
+
+    list_resp = client.get("/api/v1/backtests")
+    assert list_resp.json() == []
+
+
+def test_delete_backtest_returns_404_for_missing_run(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.delete("/api/v1/backtests/does-not-exist")
+    assert resp.status_code == 404
+
+
 def test_get_signals_returns_registered_signal_keys():
     from signals import SIGNAL_REGISTRY
 

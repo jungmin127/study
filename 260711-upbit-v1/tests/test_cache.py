@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 import engine.cache as cache_module
-from engine.cache import compute_cache_key, load_result, save_result
+from engine.cache import compute_cache_key, delete_backtest_run, load_result, save_result
 from engine.cache import run_backtest_cached
 from engine.cache import (
     list_backtest_runs,
@@ -389,6 +389,19 @@ def test_list_backtest_runs_orders_by_created_at_desc(monkeypatch, tmp_path):
 
     runs = list_backtest_runs()
     assert [r["run_id"] for r in runs] == ["newer", "older"]
+
+
+def test_delete_backtest_run_removes_run_and_result(monkeypatch, tmp_path):
+    _save_condition_tree_run(monkeypatch, tmp_path, "run-1", title="삭제 대상", description=None)
+
+    assert delete_backtest_run("run-1") is True
+    assert list_backtest_runs() == []
+    assert load_result("run-1") is None
+
+
+def test_delete_backtest_run_returns_false_for_missing_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    assert delete_backtest_run("does-not-exist") is False
 
 
 def test_connect_migration_is_idempotent(monkeypatch, tmp_path):

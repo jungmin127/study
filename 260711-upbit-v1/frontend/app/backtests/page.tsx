@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getBacktestRuns } from '@/lib/api/eda';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import DeleteRunButton from '@/components/DeleteRunButton';
 
 function returnRateColor(rate: number | null): string {
   if (rate === null) return '';
@@ -30,6 +31,7 @@ export default async function BacktestResultsPage() {
               <TableHead>수익률(%)</TableHead>
               <TableHead>실행 시각</TableHead>
               <TableHead>상세</TableHead>
+              <TableHead>삭제</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -57,6 +59,9 @@ export default async function BacktestResultsPage() {
                   >
                     보기
                   </Link>
+                </TableCell>
+                <TableCell>
+                  <DeleteRunButton runId={run.run_id} />
                 </TableCell>
               </TableRow>
             ))}

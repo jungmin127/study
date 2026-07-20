@@ -157,6 +157,18 @@ def load_result(run_id: str) -> dict | None:
     }
 
 
+def delete_backtest_run(run_id: str) -> bool:
+    """run_id에 해당하는 백테스트 결과를 삭제한다. 삭제된 행이 있었으면 True를 반환한다."""
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM backtest_results WHERE run_id = ?", (run_id,))
+        cur = conn.execute("DELETE FROM backtest_runs WHERE id = ?", (run_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def save_result(
     run_id: str,
     strategy_name: str,
