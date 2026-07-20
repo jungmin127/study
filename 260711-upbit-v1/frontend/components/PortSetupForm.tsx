@@ -48,7 +48,6 @@ export default function PortSetupForm() {
   const [sellConditions, setSellConditions] = useState<ConditionGroup>(EMPTY_CONDITION_GROUP);
   const [capital, setCapital] = useState('1000000');
   const [timeframe, setTimeframe] = useState(CANDLE_UNITS[0].timeframe);
-  const [tickVerification, setTickVerification] = useState(false);
   const [startDate, setStartDate] = useState(defaultDate(90));
   const [startTime, setStartTime] = useState('00:00');
   const [endDate, setEndDate] = useState(defaultDate(0));
@@ -187,14 +186,6 @@ export default function PortSetupForm() {
                   </option>
                 ))}
               </select>
-              <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={tickVerification}
-                  onChange={(e) => setTickVerification(e.target.checked)}
-                />
-                틱 데이터 검증
-              </label>
             </div>
           </div>
 
