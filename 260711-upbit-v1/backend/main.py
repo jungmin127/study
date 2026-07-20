@@ -28,7 +28,7 @@ from engine.condition_tree import find_unknown_indicators, is_empty, max_require
 from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
-from upbit_data_service import get_candles, get_krw_markets
+from upbit_data_service import get_candles, get_krw_markets, get_krw_markets_with_ticker
 
 app = FastAPI(title="Upbit Strategy EDA API", version="0.1.0")
 
@@ -181,7 +181,7 @@ def get_signals() -> list[str]:
 
 @app.get("/api/v1/markets")
 def get_markets() -> list[dict]:
-    return get_krw_markets()
+    return get_krw_markets_with_ticker()
 
 
 @app.get("/api/v1/indicators/catalog")

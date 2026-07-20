@@ -140,17 +140,23 @@ def test_get_signals_returns_registered_signal_keys():
     assert resp.json() == sorted(SIGNAL_REGISTRY.keys())
 
 
-def test_get_markets_returns_krw_markets_only(monkeypatch, tmp_path):
+def test_get_markets_returns_krw_markets_with_ticker(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
 
-    def _fake_get_krw_markets():
-        return [{"market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"}]
+    def _fake_get_krw_markets_with_ticker():
+        return [{
+            "market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin",
+            "change_rate": 0.0235, "trade_volume": 123.4,
+        }]
 
-    monkeypatch.setattr(backend_module, "get_krw_markets", _fake_get_krw_markets)
+    monkeypatch.setattr(backend_module, "get_krw_markets_with_ticker", _fake_get_krw_markets_with_ticker)
 
     resp = client.get("/api/v1/markets")
     assert resp.status_code == 200
-    assert resp.json() == [{"market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"}]
+    assert resp.json() == [{
+        "market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin",
+        "change_rate": 0.0235, "trade_volume": 123.4,
+    }]
 
 
 def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp_path):

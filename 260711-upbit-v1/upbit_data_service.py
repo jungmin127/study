@@ -207,3 +207,24 @@ def get_krw_markets() -> list[dict]:
         for m in all_markets
         if m["market"].startswith("KRW-")
     ]
+
+
+def get_krw_markets_with_ticker() -> list[dict]:
+    """코인 선택 UI의 등락률/거래량 정렬을 위해 시세 정보를 포함한 KRW 마켓 목록을 반환한다."""
+    markets = get_krw_markets()
+    if not markets:
+        return markets
+
+    market_codes = ",".join(m["market"] for m in markets)
+    resp = httpx.get(f"{UPBIT_BASE_URL}/ticker", params={"markets": market_codes}, timeout=10)
+    resp.raise_for_status()
+    tickers = {t["market"]: t for t in resp.json()}
+
+    return [
+        {
+            **m,
+            "change_rate": tickers[m["market"]]["signed_change_rate"] if m["market"] in tickers else None,
+            "trade_volume": tickers[m["market"]]["acc_trade_volume_24h"] if m["market"] in tickers else None,
+        }
+        for m in markets
+    ]
