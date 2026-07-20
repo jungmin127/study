@@ -42,18 +42,52 @@ function defaultParamsFor(item: IndicatorCatalogItem | undefined): Record<string
   return Object.fromEntries(item.params.map((p) => [p.key, p.default]));
 }
 
-function createDefaultBlock(catalog: IndicatorCatalogItem[]): ConditionBlock {
+// 오실레이터류는 흔히 쓰는 과매도/과매수 경계값, 나머지는 코인 시세 기반 추천값을 1차로 채워준다.
+// 이용자가 직접 수정하는 것을 전제로 한 초기값일 뿐, 정답값이 아니다.
+const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
+  RSI: { low: 30, high: 70 },
+  STOCH_K: { low: 20, high: 80 },
+  STOCH_D: { low: 20, high: 80 },
+  CCI: { low: -100, high: 100 },
+  WILLIAMS_R: { low: -80, high: -20 },
+};
+
+const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal']);
+const PRICE_SCALE_INDICATORS = new Set(['SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower']);
+
+function recommendedThreshold(
+  indicator: string,
+  operator: ComparisonOperator,
+  currentPrice: number | null,
+): number {
+  if (PRICE_SCALE_INDICATORS.has(indicator)) return currentPrice ?? 0;
+  if (ZERO_CROSS_INDICATORS.has(indicator)) return 0;
+  if (indicator === 'ATR') return currentPrice ? Math.round(currentPrice * 0.01) : 1;
+
+  const bounds = OSCILLATOR_BOUNDS[indicator];
+  if (bounds) {
+    if (operator === '<' || operator === '<=') return bounds.low;
+    if (operator === '>' || operator === '>=') return bounds.high;
+    return Math.round((bounds.low + bounds.high) / 2);
+  }
+
+  return 0; // OBV, VOLUME_SMA 등 코인마다 스케일이 제각각인 지표는 안전한 자리표시자만 채운다.
+}
+
+function createDefaultBlock(catalog: IndicatorCatalogItem[], currentPrice: number | null): ConditionBlock {
   const first = catalog.find((i) => i.value === 'RSI') ?? catalog[0];
+  const indicator = first?.value ?? 'RSI';
+  const operator: ComparisonOperator = '<';
   return {
-    indicator: first?.value ?? 'RSI',
+    indicator,
     params: defaultParamsFor(first),
-    operator: '<',
-    threshold: 30,
+    operator,
+    threshold: recommendedThreshold(indicator, operator, currentPrice),
   };
 }
 
-function createDefaultGroup(catalog: IndicatorCatalogItem[]): ConditionGroup {
-  return { type: 'AND', conditions: [createDefaultBlock(catalog)] };
+function createDefaultGroup(catalog: IndicatorCatalogItem[], currentPrice: number | null): ConditionGroup {
+  return { type: 'AND', conditions: [createDefaultBlock(catalog, currentPrice)] };
 }
 
 function isConditionBlock(item: ConditionBlock | ConditionGroup): item is ConditionBlock {
@@ -99,11 +133,12 @@ function InfoTooltip({ text }: { text: string }) {
 interface ConditionBlockEditorProps {
   block: ConditionBlock;
   catalog: IndicatorCatalogItem[];
+  currentPrice: number | null;
   onChange: (updated: ConditionBlock) => void;
   onDelete: () => void;
 }
 
-function ConditionBlockEditor({ block, catalog, onChange, onDelete }: ConditionBlockEditorProps) {
+function ConditionBlockEditor({ block, catalog, currentPrice, onChange, onDelete }: ConditionBlockEditorProps) {
   const categories = groupByCategory(catalog);
   const catalogItem = catalog.find((i) => i.value === block.indicator);
   const dotColor = catalogItem ? (CATEGORY_DOT_COLOR[catalogItem.category] ?? 'bg-slate-400') : 'bg-slate-400';
@@ -111,7 +146,12 @@ function ConditionBlockEditor({ block, catalog, onChange, onDelete }: ConditionB
 
   function handleIndicatorChange(value: string) {
     const found = catalog.find((i) => i.value === value);
-    onChange({ ...block, indicator: value, params: defaultParamsFor(found) });
+    onChange({
+      ...block,
+      indicator: value,
+      params: defaultParamsFor(found),
+      threshold: recommendedThreshold(value, block.operator, currentPrice),
+    });
   }
 
   return (
@@ -198,21 +238,22 @@ function ConditionBlockEditor({ block, catalog, onChange, onDelete }: ConditionB
 interface ConditionGroupEditorProps {
   group: ConditionGroup;
   catalog: IndicatorCatalogItem[];
+  currentPrice: number | null;
   onChange: (updated: ConditionGroup) => void;
   depth: number;
 }
 
-function ConditionGroupEditor({ group, catalog, onChange, depth }: ConditionGroupEditorProps) {
+function ConditionGroupEditor({ group, catalog, currentPrice, onChange, depth }: ConditionGroupEditorProps) {
   function toggleOperator() {
     onChange({ ...group, type: group.type === 'AND' ? 'OR' : 'AND' });
   }
 
   function addBlock() {
-    onChange({ ...group, conditions: [...group.conditions, createDefaultBlock(catalog)] });
+    onChange({ ...group, conditions: [...group.conditions, createDefaultBlock(catalog, currentPrice)] });
   }
 
   function addGroup() {
-    onChange({ ...group, conditions: [...group.conditions, createDefaultGroup(catalog)] });
+    onChange({ ...group, conditions: [...group.conditions, createDefaultGroup(catalog, currentPrice)] });
   }
 
   function updateCondition(index: number, updated: ConditionBlock | ConditionGroup) {
@@ -258,6 +299,7 @@ function ConditionGroupEditor({ group, catalog, onChange, depth }: ConditionGrou
             <ConditionBlockEditor
               block={condition}
               catalog={catalog}
+              currentPrice={currentPrice}
               onChange={(updated) => updateCondition(index, updated)}
               onDelete={() => deleteCondition(index)}
             />
@@ -278,6 +320,7 @@ function ConditionGroupEditor({ group, catalog, onChange, depth }: ConditionGrou
               <ConditionGroupEditor
                 group={condition}
                 catalog={catalog}
+                currentPrice={currentPrice}
                 onChange={(updated) => updateCondition(index, updated)}
                 depth={depth + 1}
               />
@@ -312,18 +355,20 @@ export default function StrategyConditionBuilder({
   label,
   group,
   catalog,
+  currentPrice,
   onChange,
 }: {
   label: string;
   group: ConditionGroup;
   catalog: IndicatorCatalogItem[];
+  currentPrice: number | null;
   onChange: (updated: ConditionGroup) => void;
 }) {
   return (
     <div>
       <div className={`rounded-t-md ${SECTION_HEADER_CLASS}`}>{label}</div>
       <div className="p-4">
-        <ConditionGroupEditor group={group} catalog={catalog} onChange={onChange} depth={0} />
+        <ConditionGroupEditor group={group} catalog={catalog} currentPrice={currentPrice} onChange={onChange} depth={0} />
       </div>
       <div className="rounded-b-md border-t bg-slate-50 px-4 py-2 text-xs dark:bg-slate-800">
         <span className="font-medium text-foreground">조건식: </span>

@@ -100,6 +100,8 @@ export default function PortSetupForm() {
     }
   }
 
+  const selectedMarketPrice = markets.find((m) => m.market === market)?.price ?? null;
+
   return (
     <div className="max-w-5xl space-y-6 rounded-xl border p-6 shadow-sm">
       <div className="grid grid-cols-[1fr_1fr_4fr] gap-6">
@@ -141,6 +143,7 @@ export default function PortSetupForm() {
               label="매수 조건"
               group={buyConditions}
               catalog={catalog}
+              currentPrice={selectedMarketPrice}
               onChange={setBuyConditions}
             />
           </div>
@@ -149,6 +152,7 @@ export default function PortSetupForm() {
               label="매도 조건"
               group={sellConditions}
               catalog={catalog}
+              currentPrice={selectedMarketPrice}
               onChange={setSellConditions}
             />
           </div>
