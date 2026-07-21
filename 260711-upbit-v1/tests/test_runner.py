@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import backtrader as bt
 import pandas as pd
 
-from engine.runner import run_backtest
+from engine.runner import _build_forced_close_trade, run_backtest
 
 
 class BuyAndHoldOnce(bt.Strategy):
@@ -55,3 +55,20 @@ def test_run_backtest_buy_and_hold_once():
     assert result["trades"][0]["forceClosed"] is True
     assert "sharpe" in result
     assert "max_drawdown" in result
+
+
+def test_forced_close_trade_deducts_entry_and_exit_commission():
+    trade = _build_forced_close_trade(
+        entry_time="2026-01-01T00:00:00", entry_price=100.0, size=2.0,
+        baropen=0, last_close=110.0, last_dt="2026-01-10T00:00:00",
+        total_bars=10, commission_rate=0.01,
+    )
+    pnl_gross = (110.0 - 100.0) * 2.0
+    entry_commission = 100.0 * 2.0 * 0.01
+    exit_commission = 110.0 * 2.0 * 0.01
+    expected_pnl = pnl_gross - entry_commission - exit_commission
+    assert trade["pnl"] == round(expected_pnl, 4)
+    assert trade["forceClosed"] is True
+    assert trade["holdingPeriod"] == 9
+    assert trade["entryPrice"] == 100.0
+    assert trade["exitPrice"] == 110.0

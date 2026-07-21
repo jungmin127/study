@@ -98,6 +98,38 @@ class TradeLogger(bt.Analyzer):
         return list(self._open.values())
 
 
+def _build_forced_close_trade(
+    entry_time: str,
+    entry_price: float,
+    size: float,
+    baropen: int,
+    last_close: float,
+    last_dt: str,
+    total_bars: int,
+    commission_rate: float,
+) -> dict:
+    """백테스트 종료 시점까지 매도 조건을 만족하지 못한 포지션을, 리포팅을 위해
+    마지막 봉 종가로 강제 청산 처리한 거래 기록을 만든다. 진입/청산 양쪽 수수료를
+    모두 차감해야 정상 청산 거래(trade.pnlcomm)와 계산 방식이 일치한다."""
+    pnl_gross = (last_close - entry_price) * size
+    entry_commission = entry_price * size * commission_rate
+    exit_commission = last_close * size * commission_rate
+    pnlcomm = pnl_gross - entry_commission - exit_commission
+    return_rate = (pnlcomm / (entry_price * size) * 100) if (entry_price and size) else 0.0
+    holding_period = max(total_bars - 1 - baropen, 0)
+
+    return {
+        "entryTime": entry_time,
+        "exitTime": last_dt,
+        "entryPrice": round(entry_price, 8),
+        "exitPrice": round(last_close, 8),
+        "returnRate": round(return_rate, 4),
+        "holdingPeriod": holding_period,
+        "pnl": round(pnlcomm, 4),
+        "forceClosed": True,
+    }
+
+
 def run_backtest(
     df: pd.DataFrame,
     strategy_cls: type[bt.Strategy],
@@ -178,24 +210,16 @@ def run_backtest(
         total_bars = len(df_bt)
 
         for ot in open_trades:
-            entry_price = ot["entryPrice"]
-            size = ot["size"]
-            pnl_gross = (last_close - entry_price) * size
-            commission_cost = last_close * size * commission_rate
-            pnlcomm = pnl_gross - commission_cost
-            return_rate = (pnlcomm / (entry_price * size) * 100) if (entry_price and size) else 0.0
-            holding_period = max(total_bars - 1 - ot["baropen"], 0)
-
-            trades.append({
-                "entryTime": ot["entryTime"],
-                "exitTime": last_dt,
-                "entryPrice": round(entry_price, 8),
-                "exitPrice": round(last_close, 8),
-                "returnRate": round(return_rate, 4),
-                "holdingPeriod": holding_period,
-                "pnl": round(pnlcomm, 4),
-                "forceClosed": True,
-            })
+            trades.append(_build_forced_close_trade(
+                entry_time=ot["entryTime"],
+                entry_price=ot["entryPrice"],
+                size=ot["size"],
+                baropen=ot["baropen"],
+                last_close=last_close,
+                last_dt=last_dt,
+                total_bars=total_bars,
+                commission_rate=commission_rate,
+            ))
 
     return {
         "equity_curve": equity_curve,
