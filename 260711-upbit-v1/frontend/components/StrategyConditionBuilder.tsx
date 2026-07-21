@@ -5,12 +5,13 @@ import type { ComparisonOperator, ConditionBlock, ConditionGroup } from '@/lib/t
 import type { IndicatorCatalogItem } from '@/lib/types/eda';
 import { INPUT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 
-const CATEGORY_ORDER = ['추세', '오실레이터', '거래량', '시장 심리'];
+const CATEGORY_ORDER = ['추세', '오실레이터', '거래량', '손익', '시장 심리'];
 
 const CATEGORY_DOT_COLOR: Record<string, string> = {
   추세: 'bg-blue-500',
   오실레이터: 'bg-violet-500',
   거래량: 'bg-teal-500',
+  손익: 'bg-orange-500',
   '시장 심리': 'bg-rose-500',
 };
 
@@ -55,11 +56,17 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
 const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal']);
 const PRICE_SCALE_INDICATORS = new Set(['SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower']);
 
+const POSITION_RELATIVE_DEFAULTS: Record<string, number> = {
+  STOP_LOSS_PCT: -5,
+  TAKE_PROFIT_PCT: 10,
+};
+
 function recommendedThreshold(
   indicator: string,
   operator: ComparisonOperator,
   currentPrice: number | null,
 ): number {
+  if (indicator in POSITION_RELATIVE_DEFAULTS) return POSITION_RELATIVE_DEFAULTS[indicator];
   if (PRICE_SCALE_INDICATORS.has(indicator)) return currentPrice ?? 0;
   if (ZERO_CROSS_INDICATORS.has(indicator)) return 0;
   if (indicator === 'ATR') return currentPrice ? Math.round(currentPrice * 0.01) : 1;
@@ -146,11 +153,13 @@ function ConditionBlockEditor({ block, catalog, currentPrice, onChange, onDelete
 
   function handleIndicatorChange(value: string) {
     const found = catalog.find((i) => i.value === value);
+    const operator = found?.fixedOperator ?? block.operator;
     onChange({
       ...block,
       indicator: value,
       params: defaultParamsFor(found),
-      threshold: recommendedThreshold(value, block.operator, currentPrice),
+      operator,
+      threshold: recommendedThreshold(value, operator, currentPrice),
     });
   }
 
@@ -209,17 +218,23 @@ function ConditionBlockEditor({ block, catalog, currentPrice, onChange, onDelete
         <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-muted-foreground dark:bg-slate-800">
           {block.indicator}
         </span>
-        <select
-          value={block.operator}
-          onChange={(e) => onChange({ ...block, operator: e.target.value as ComparisonOperator })}
-          className="h-7 rounded border border-input bg-background px-1 text-xs"
-        >
-          {OPERATORS.map((op) => (
-            <option key={op.value} value={op.value}>
-              {op.label}
-            </option>
-          ))}
-        </select>
+        {catalogItem?.fixedOperator ? (
+          <span className="flex h-7 shrink-0 items-center rounded border border-input bg-slate-100 px-2 font-mono text-xs text-muted-foreground dark:bg-slate-800">
+            {OPERATOR_SYMBOLS[catalogItem.fixedOperator]} 고정
+          </span>
+        ) : (
+          <select
+            value={block.operator}
+            onChange={(e) => onChange({ ...block, operator: e.target.value as ComparisonOperator })}
+            className="h-7 rounded border border-input bg-background px-1 text-xs"
+          >
+            {OPERATORS.map((op) => (
+              <option key={op.value} value={op.value}>
+                {op.label}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           type="number"
           value={block.threshold}

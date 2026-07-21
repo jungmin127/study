@@ -162,6 +162,7 @@ def test_get_markets_returns_krw_markets_with_ticker(monkeypatch, tmp_path):
 
 
 def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp_path):
+    from engine.condition_tree import POSITION_RELATIVE_INDICATORS
     from engine.indicators import INDICATOR_FACTORY
 
     client = _client(monkeypatch, tmp_path)
@@ -170,12 +171,29 @@ def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp
     body = resp.json()
 
     catalog_values = {item["value"] for item in body}
-    assert catalog_values == set(INDICATOR_FACTORY.keys())
+    assert catalog_values == set(INDICATOR_FACTORY.keys()) | POSITION_RELATIVE_INDICATORS
 
     for item in body:
         assert item["description"], f"{item['value']}에 description이 없음"
         assert item["example"], f"{item['value']}에 example이 없음"
-        assert item["category"] in {"추세", "오실레이터", "거래량"}
+        assert item["category"] in {"추세", "오실레이터", "거래량", "손익"}
+
+
+def test_stop_loss_and_take_profit_catalog_items_are_sell_only_with_fixed_operator(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/indicators/catalog")
+    body = resp.json()
+    by_value = {item["value"]: item for item in body}
+
+    stop_loss = by_value["STOP_LOSS_PCT"]
+    assert stop_loss["category"] == "손익"
+    assert stop_loss["sellOnly"] is True
+    assert stop_loss["fixedOperator"] == "<="
+
+    take_profit = by_value["TAKE_PROFIT_PCT"]
+    assert take_profit["category"] == "손익"
+    assert take_profit["sellOnly"] is True
+    assert take_profit["fixedOperator"] == ">="
 
 
 def _patch_get_candles(monkeypatch, df: pd.DataFrame | None = None):

@@ -1,4 +1,4 @@
-import type { ConditionGroup } from './strategy';
+import type { ComparisonOperator, ConditionGroup } from './strategy';
 
 export interface SweepResult {
   run_id: string;
@@ -68,6 +68,8 @@ export interface IndicatorCatalogItem {
   params: IndicatorParamDef[];
   description: string;
   example: string;
+  fixedOperator?: ComparisonOperator; // 있으면 연산자 select 대신 고정 배지로 표시
+  sellOnly?: boolean; // true면 매수 조건 카탈로그에서 제외
 }
 
 export interface RunBacktestRequest {

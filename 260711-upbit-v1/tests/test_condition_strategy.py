@@ -43,3 +43,19 @@ def test_or_group_at_top_level_combines_with_any():
     result = _run(buy, sell)
     # SMA > 0 조건이 항상 참이므로 OR 그룹은 항상 참 -> 첫 봉 이후 즉시 매수되어야 함
     assert len(result["trades"]) > 0 or result["final_value"] != DEFAULT_RISK_CONFIG["initial_capital"]
+
+
+def test_stop_loss_pct_exits_position_on_drawdown():
+    buy = {"type": "AND", "conditions": [{"indicator": "SMA", "params": {"period": 1}, "operator": ">", "threshold": 0}]}  # 항상 참
+    sell = {"type": "AND", "conditions": [{"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -2}]}
+    result = _run(buy, sell)
+    assert len(result["trades"]) > 0
+    assert any(t["returnRate"] < 0 for t in result["trades"])
+
+
+def test_take_profit_pct_exits_position_on_gain():
+    buy = {"type": "AND", "conditions": [{"indicator": "SMA", "params": {"period": 1}, "operator": ">", "threshold": 0}]}  # 항상 참
+    sell = {"type": "AND", "conditions": [{"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 2}]}
+    result = _run(buy, sell)
+    assert len(result["trades"]) > 0
+    assert any(t["returnRate"] > 0 for t in result["trades"])

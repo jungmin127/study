@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import backtrader as bt
 
-from engine.condition_tree import collect_blocks, eval_group, indicator_key
+from engine.condition_tree import POSITION_RELATIVE_INDICATORS, collect_blocks, eval_group, indicator_key
 from engine.indicators import INDICATOR_FACTORY
 
 _EMPTY_GROUP: dict = {"type": "AND", "conditions": []}
@@ -35,6 +35,8 @@ class ConditionTreeStrategy(bt.Strategy):
             self._ensure_indicator(self._sell_inds, block)
 
     def _ensure_indicator(self, store: dict[str, bt.Indicator], block: dict) -> None:
+        if block["indicator"] in POSITION_RELATIVE_INDICATORS:
+            return
         key = indicator_key(block["indicator"], block.get("params", {}))
         if key in store:
             return
@@ -48,7 +50,11 @@ class ConditionTreeStrategy(bt.Strategy):
             if eval_group(self._buy_cond, self._buy_inds):
                 self.buy()
         else:
-            if eval_group(self._sell_cond, self._sell_inds):
+            entry_price = self.position.price
+            position_return_pct = (
+                (self.data.close[0] - entry_price) / entry_price * 100 if entry_price else None
+            )
+            if eval_group(self._sell_cond, self._sell_inds, position_return_pct=position_return_pct):
                 self.sell()
 
 

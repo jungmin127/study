@@ -1,6 +1,7 @@
 from engine.condition_tree import (
     apply_operator,
     collect_blocks,
+    eval_group,
     find_unknown_indicators,
     is_empty,
     max_required_period,
@@ -53,3 +54,25 @@ def test_max_required_period_takes_largest_param_value():
         ],
     }
     assert max_required_period(tree) == 200
+
+
+def test_eval_group_evaluates_stop_loss_pct_against_position_return():
+    tree = {"type": "AND", "conditions": [{"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5}]}
+    assert eval_group(tree, {}, position_return_pct=-6) is True
+    assert eval_group(tree, {}, position_return_pct=-3) is False
+
+
+def test_eval_group_position_relative_indicator_false_without_position():
+    tree = {"type": "AND", "conditions": [{"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 10}]}
+    assert eval_group(tree, {}) is False
+
+
+def test_find_unknown_indicators_allows_position_relative_indicators():
+    tree = {
+        "type": "OR",
+        "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+            {"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 10},
+        ],
+    }
+    assert find_unknown_indicators(tree) == []

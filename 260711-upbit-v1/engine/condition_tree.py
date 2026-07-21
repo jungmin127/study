@@ -18,6 +18,10 @@ import backtrader as bt
 
 from engine.indicators import INDICATOR_FACTORY
 
+# 캔들 데이터로 미리 계산하는 bt.Indicator가 아니라, 포지션이 열려야만 알 수 있는
+# 진입가 대비 수익률(%)을 값으로 쓰는 지표. eval_group에 position_return_pct로 전달된다.
+POSITION_RELATIVE_INDICATORS = {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT"}
+
 
 def indicator_key(indicator: str, params: dict) -> str:
     """지표 이름 + 파라미터 조합의 고유 키 생성 (같은 지표를 여러 블록이 참조해도 한 번만 생성)."""
@@ -70,8 +74,14 @@ def apply_operator(value: float, operator: str, threshold: float) -> bool:
     return False
 
 
-def eval_group(group: dict, indicators: dict[str, bt.Indicator]) -> bool:
-    """ConditionGroup을 재귀적으로 평가해 bool 반환. indicators는 indicator_key -> bt.Indicator 매핑."""
+def eval_group(
+    group: dict,
+    indicators: dict[str, bt.Indicator],
+    position_return_pct: float | None = None,
+) -> bool:
+    """ConditionGroup을 재귀적으로 평가해 bool 반환. indicators는 indicator_key -> bt.Indicator 매핑.
+    position_return_pct는 포지션 진입가 대비 현재 수익률(%)로, STOP_LOSS_PCT/TAKE_PROFIT_PCT
+    평가에 쓰인다. 포지션이 없어 None이면 그 블록은 False로 처리한다."""
     group_type = group.get("type", "AND")
     conditions = group.get("conditions", [])
 
@@ -81,6 +91,12 @@ def eval_group(group: dict, indicators: dict[str, bt.Indicator]) -> bool:
     results: list[bool] = []
     for item in conditions:
         if "indicator" in item:
+            if item["indicator"] in POSITION_RELATIVE_INDICATORS:
+                if position_return_pct is None:
+                    results.append(False)
+                else:
+                    results.append(apply_operator(position_return_pct, item["operator"], float(item["threshold"])))
+                continue
             key = indicator_key(item["indicator"], item.get("params", {}))
             if key not in indicators:
                 results.append(False)
@@ -88,14 +104,18 @@ def eval_group(group: dict, indicators: dict[str, bt.Indicator]) -> bool:
             value = get_indicator_value(item["indicator"], indicators[key])
             results.append(apply_operator(value, item["operator"], float(item["threshold"])))
         elif "type" in item:
-            results.append(eval_group(item, indicators))
+            results.append(eval_group(item, indicators, position_return_pct))
 
     return all(results) if group_type == "AND" else any(results)
 
 
 def find_unknown_indicators(group: dict) -> list[str]:
-    """INDICATOR_FACTORY에 없는 지표 키를 모두 찾아 반환(중복 제거, 정렬)."""
-    unknown = {b["indicator"] for b in collect_blocks(group) if b["indicator"] not in INDICATOR_FACTORY}
+    """INDICATOR_FACTORY와 POSITION_RELATIVE_INDICATORS 어디에도 없는 지표 키를 찾아 반환(중복 제거, 정렬)."""
+    unknown = {
+        b["indicator"]
+        for b in collect_blocks(group)
+        if b["indicator"] not in INDICATOR_FACTORY and b["indicator"] not in POSITION_RELATIVE_INDICATORS
+    }
     return sorted(unknown)
 
 
@@ -117,6 +137,7 @@ def max_required_period(group: dict) -> int:
 
 
 __all__ = [
+    "POSITION_RELATIVE_INDICATORS",
     "indicator_key",
     "collect_blocks",
     "get_indicator_value",

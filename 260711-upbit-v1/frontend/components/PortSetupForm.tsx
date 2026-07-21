@@ -142,7 +142,7 @@ export default function PortSetupForm() {
             <StrategyConditionBuilder
               label="매수 조건"
               group={buyConditions}
-              catalog={catalog}
+              catalog={catalog.filter((c) => !c.sellOnly)}
               currentPrice={selectedMarketPrice}
               onChange={setBuyConditions}
             />
