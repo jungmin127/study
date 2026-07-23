@@ -1349,12 +1349,12 @@ EOF
 
 **Files:** 없음(검증만)
 
-- [ ] **Step 1: 백엔드 전체 테스트 재실행**
+- [x] **Step 1: 백엔드 전체 테스트 재실행**
 
 Run: `python -m pytest`
 Expected: 전부 PASS
 
-- [ ] **Step 2: 백엔드 서버 재시작**
+- [x] **Step 2: 백엔드 서버 재시작**
 
 `uvicorn --reload`가 이번 세션 초반에 파일 변경을 놓친 전례가 있으므로, 기존 uvicorn 프로세스를 완전히 종료 후 재시작:
 
@@ -1362,7 +1362,7 @@ Expected: 전부 PASS
 uvicorn backend.main:app --reload --port 8000
 ```
 
-- [ ] **Step 3: 브라우저에서 실제 백테스트 실행 후 상세 페이지 확인**
+- [x] **Step 3: 브라우저에서 실제 백테스트 실행 후 상세 페이지 확인**
 
 Next.js dev 서버(`npm run dev`, 3000번 포트)가 이미 떠 있지 않으면 `frontend` 디렉토리에서 `npm run dev` 실행. 그 다음 Playwright MCP로:
 1. `http://localhost:3000` 접속, 코인 선택 + 매수/매도 조건 설정(예: SMA/RSI 등 기존 지표) 후 "백테스트 실행" 클릭
@@ -1375,6 +1375,6 @@ Next.js dev 서버(`npm run dev`, 3000번 포트)가 이미 떠 있지 않으면
    - `forceClosed`인 거래가 있다면 "보유중(기간종료)" 배지로 표시되는지
 3. `/backtests`(목록), `/heatmap`, `/ranking` 페이지에서도 수익률 색상이 플러스=빨강/마이너스=파랑인지 확인
 
-- [ ] **Step 4: 문제 발견 시 해당 Task로 돌아가 수정, 문제 없으면 완료**
+- [x] **Step 4: 문제 발견 시 해당 Task로 돌아가 수정, 문제 없으면 완료**
 
 이 태스크는 커밋 없음(검증 전용). 브라우저 확인 중 버그 발견 시 원인이 된 Task의 파일을 수정하고 새 커밋을 추가한다.
