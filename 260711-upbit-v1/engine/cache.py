@@ -136,8 +136,11 @@ def load_result(run_id: str) -> dict | None:
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT final_value, sharpe, max_drawdown, equity_curve_json, trades_json "
-            "FROM backtest_results WHERE run_id = ?",
+            "SELECT res.final_value, res.sharpe, res.max_drawdown, res.equity_curve_json, res.trades_json, "
+            "       r.market, r.timeframe, r.start, r.end, r.risk_config_json "
+            "FROM backtest_results res "
+            "JOIN backtest_runs r ON r.id = res.run_id "
+            "WHERE res.run_id = ?",
             (run_id,),
         ).fetchone()
     finally:
@@ -146,13 +149,20 @@ def load_result(run_id: str) -> dict | None:
     if row is None:
         return None
 
-    final_value, sharpe, max_drawdown, equity_curve_json, trades_json = row
+    (final_value, sharpe, max_drawdown, equity_curve_json, trades_json,
+     market, timeframe, start, end, risk_config_json) = row
+    initial_capital = json.loads(risk_config_json).get("initial_capital")
     return {
         "final_value": final_value,
         "sharpe": sharpe,
         "max_drawdown": max_drawdown,
         "equity_curve": json.loads(equity_curve_json),
         "trades": json.loads(trades_json),
+        "market": market,
+        "timeframe": timeframe,
+        "start": start,
+        "end": end,
+        "initial_capital": initial_capital,
         "from_cache": True,
     }
 

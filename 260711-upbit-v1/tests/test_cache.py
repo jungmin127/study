@@ -410,3 +410,21 @@ def test_connect_migration_is_idempotent(monkeypatch, tmp_path):
     cache_module._connect().close()
     cache_module._connect().close()
     cache_module._connect().close()
+
+
+def test_load_result_includes_market_timeframe_and_initial_capital(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="minutes15",
+        start=datetime(2026, 4, 22, tzinfo=timezone.utc), end=datetime(2026, 7, 21, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 1_000_000},
+        result={"final_value": 1_100_000.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+    )
+
+    loaded = load_result("r1")
+    assert loaded["market"] == "KRW-BTC"
+    assert loaded["timeframe"] == "minutes15"
+    assert loaded["start"] == datetime(2026, 4, 22, tzinfo=timezone.utc).isoformat()
+    assert loaded["end"] == datetime(2026, 7, 21, tzinfo=timezone.utc).isoformat()
+    assert loaded["initial_capital"] == 1_000_000

@@ -466,7 +466,7 @@ EOF
 **Interfaces:**
 - Produces: `load_result(run_id)`가 이제 `market`, `timeframe`, `start`, `end`, `initial_capital` 키를 추가로 반환.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_cache.py` 끝에 추가:
 
@@ -489,12 +489,12 @@ def test_load_result_includes_market_timeframe_and_initial_capital(monkeypatch, 
     assert loaded["initial_capital"] == 1_000_000
 ```
 
-- [ ] **Step 2: 테스트가 실패하는지 확인**
+- [x] **Step 2: 테스트가 실패하는지 확인**
 
 Run: `python -m pytest tests/test_cache.py -v -k test_load_result_includes_market_timeframe_and_initial_capital`
 Expected: FAIL — `KeyError: 'market'`
 
-- [ ] **Step 3: `load_result()` 수정**
+- [x] **Step 3: `load_result()` 수정**
 
 `engine/cache.py:135-157`의 현재 코드:
 
@@ -562,12 +562,12 @@ def load_result(run_id: str) -> dict | None:
     }
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `python -m pytest tests/test_cache.py -v`
 Expected: 모든 테스트 PASS (기존 `test_save_then_load_round_trips` 등도 그대로 통과해야 함 — 필드 추가는 기존 assert를 깨지 않음)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add engine/cache.py tests/test_cache.py
