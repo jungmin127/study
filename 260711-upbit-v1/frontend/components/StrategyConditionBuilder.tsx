@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { ComparisonOperator, ConditionBlock, ConditionGroup } from '@/lib/types/strategy';
 import type { IndicatorCatalogItem } from '@/lib/types/eda';
 import { INPUT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
+import { OPERATOR_SYMBOLS, isConditionBlock, summarizeGroup } from '@/lib/condition-summary';
 
 const CATEGORY_ORDER = ['추세', '오실레이터', '거래량', '손익', '시장 심리'];
 
@@ -23,13 +24,6 @@ const OPERATORS: { value: ComparisonOperator; label: string }[] = [
   { value: '==', label: '같음 (=)' },
 ];
 
-const OPERATOR_SYMBOLS: Record<ComparisonOperator, string> = {
-  '>': '>',
-  '<': '<',
-  '>=': '≥',
-  '<=': '≤',
-  '==': '=',
-};
 
 function groupByCategory(catalog: IndicatorCatalogItem[]): { label: string; items: IndicatorCatalogItem[] }[] {
   return CATEGORY_ORDER.map((label) => ({
@@ -97,19 +91,6 @@ function createDefaultGroup(catalog: IndicatorCatalogItem[], currentPrice: numbe
   return { type: 'AND', conditions: [createDefaultBlock(catalog, currentPrice)] };
 }
 
-function isConditionBlock(item: ConditionBlock | ConditionGroup): item is ConditionBlock {
-  return 'indicator' in item;
-}
-
-function summarizeGroup(group: ConditionGroup): string {
-  if (group.conditions.length === 0) return '(조건 없음)';
-  const parts = group.conditions.map((c) =>
-    isConditionBlock(c)
-      ? `${c.indicator}${OPERATOR_SYMBOLS[c.operator]}${c.threshold}`
-      : `(${summarizeGroup(c)})`
-  );
-  return parts.join(group.type === 'AND' ? ' and ' : ' or ');
-}
 
 function InfoTooltip({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
