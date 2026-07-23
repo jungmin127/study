@@ -30,7 +30,7 @@ from engine.metrics import calculate_metrics
 from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
-from upbit_data_service import get_candles, get_krw_markets, get_krw_markets_with_ticker
+from upbit_data_service import get_candles, get_current_prices, get_krw_markets, get_krw_markets_with_ticker
 
 app = FastAPI(title="Upbit Strategy EDA API", version="0.1.0")
 
@@ -215,7 +215,49 @@ def get_history(
 
 @app.get("/api/v1/backtests")
 def get_backtest_runs() -> list[dict]:
-    return list_backtest_runs()
+    runs = list_backtest_runs()
+    markets_needing_price = {r["market"] for r in runs if has_revaluable_open_trade(r["trades"])}
+
+    live_prices: dict[str, float] = {}
+    if markets_needing_price:
+        try:
+            live_prices = get_current_prices(list(markets_needing_price))
+        except Exception:
+            live_prices = {}
+
+    result: list[dict] = []
+    for r in runs:
+        live_price = live_prices.get(r["market"])
+        is_live = False
+        final_value = r["final_value"]
+        return_rate = r["return_rate"]
+        if live_price is not None and has_revaluable_open_trade(r["trades"]):
+            _, delta = revalue_open_trades(
+                r["trades"], live_price, datetime.now(timezone.utc).isoformat(), r["commission_rate"],
+            )
+            if delta != 0.0:
+                final_value = round(r["final_value"] + delta, 4)
+                initial_capital = r["initial_capital"]
+                return_rate = (final_value - initial_capital) / initial_capital * 100 if initial_capital else None
+                is_live = True
+        result.append({
+            "run_id": r["run_id"],
+            "title": r["title"],
+            "description": r["description"],
+            "market": r["market"],
+            "timeframe": r["timeframe"],
+            "start": r["start"],
+            "end": r["end"],
+            "created_at": r["created_at"],
+            "final_value": final_value,
+            "return_rate": return_rate,
+            "sharpe": r["sharpe"],
+            "max_drawdown": r["max_drawdown"],
+            "is_live": is_live,
+            "buy_conditions": r["buy_conditions"],
+            "sell_conditions": r["sell_conditions"],
+        })
+    return result
 
 
 @app.get("/api/v1/backtests/{run_id}")

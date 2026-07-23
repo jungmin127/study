@@ -327,6 +327,7 @@ def test_run_backtest_uses_requested_initial_capital(monkeypatch, tmp_path):
 def test_run_backtest_persists_title_and_description(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _patch_get_candles(monkeypatch)
+    _patch_get_current_prices(monkeypatch)
 
     resp = client.post(
         "/api/v1/backtests/run",
@@ -498,3 +499,97 @@ def test_backtest_detail_falls_back_when_extended_candle_fetch_fails(monkeypatch
     resp = client.get("/api/v1/backtests/r-fallback")
     assert resp.status_code == 200
     assert call_count["n"] == 2  # 확장 조회 실패 → 원래 end_dt로 재시도
+
+
+def _patch_get_current_prices(monkeypatch, prices: dict[str, float] | None = None):
+    monkeypatch.setattr(
+        backend_module, "get_current_prices",
+        lambda markets: prices if prices is not None else {},
+    )
+
+
+def test_get_backtests_marks_is_live_and_updates_return_rate_for_open_position(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_current_prices(monkeypatch, {"KRW-BTC": 120.0})
+
+    save_result(
+        run_id="r-open", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000, "commission_rate": 0.001},
+        result={
+            "final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [],
+            "trades": [{
+                "entryTime": "2026-01-01T00:00:00", "exitTime": "2026-01-10T00:00:00",
+                "entryPrice": 100.0, "exitPrice": 105.0, "returnRate": 4.9,
+                "holdingPeriod": 9, "pnl": 500.0, "forceClosed": True, "size": 100.0,
+            }],
+        },
+    )
+
+    resp = client.get("/api/v1/backtests")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["is_live"] is True
+    assert body[0]["final_value"] != 10500.0
+    assert body[0]["return_rate"] != 5.0
+
+
+def test_get_backtests_includes_strategy_condition_summaries(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy",
+        strategy_params={
+            "buy_conditions": {
+                "type": "AND",
+                "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}],
+            },
+            "sell_conditions": {
+                "type": "AND",
+                "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}],
+            },
+        },
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    resp = client.get("/api/v1/backtests")
+    body = resp.json()
+    assert body[0]["buy_conditions"]["conditions"][0]["indicator"] == "RSI"
+    assert body[0]["sell_conditions"]["conditions"][0]["threshold"] == 70
+    assert body[0]["is_live"] is False
+
+
+def test_get_backtests_falls_back_when_ticker_fetch_fails(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def failing_get_current_prices(markets):
+        raise RuntimeError("업비트 ticker 오류")
+
+    monkeypatch.setattr(backend_module, "get_current_prices", failing_get_current_prices)
+
+    save_result(
+        run_id="r-open", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000, "commission_rate": 0.001},
+        result={
+            "final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [],
+            "trades": [{
+                "entryTime": "2026-01-01T00:00:00", "exitTime": "2026-01-10T00:00:00",
+                "entryPrice": 100.0, "exitPrice": 105.0, "returnRate": 4.9,
+                "holdingPeriod": 9, "pnl": 500.0, "forceClosed": True, "size": 100.0,
+            }],
+        },
+    )
+
+    resp = client.get("/api/v1/backtests")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["is_live"] is False
+    assert body[0]["final_value"] == 10500.0
