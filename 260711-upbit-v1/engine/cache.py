@@ -151,7 +151,9 @@ def load_result(run_id: str) -> dict | None:
 
     (final_value, sharpe, max_drawdown, equity_curve_json, trades_json,
      market, timeframe, start, end, risk_config_json) = row
-    initial_capital = json.loads(risk_config_json).get("initial_capital")
+    risk_config = json.loads(risk_config_json)
+    initial_capital = risk_config.get("initial_capital")
+    commission_rate = risk_config.get("commission_rate", 0.0005)
     return {
         "final_value": final_value,
         "sharpe": sharpe,
@@ -163,6 +165,7 @@ def load_result(run_id: str) -> dict | None:
         "start": start,
         "end": end,
         "initial_capital": initial_capital,
+        "commission_rate": commission_rate,
         "from_cache": True,
     }
 
@@ -387,12 +390,16 @@ def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int 
     """온디맨드 조건식 실행(홈 화면) 결과만 최신순으로 반환한다.
 
     strategy_name으로 필터링해 run_sweep()이 남기는 SignalStrategy 기반 행(히트맵/랭킹
-    전용)은 섞이지 않게 한다 — 두 시스템은 의도적으로 분리되어 있다."""
+    전용)은 섞이지 않게 한다 — 두 시스템은 의도적으로 분리되어 있다.
+
+    initial_capital/commission_rate/trades/buy_conditions/sell_conditions는 클라이언트
+    응답용이 아니라 backend/main.py가 미청산 포지션 실시간 재평가 계산에 쓰는 내부 필드다."""
     conn = _connect()
     try:
         rows = conn.execute(
             "SELECT r.id, r.title, r.description, r.market, r.timeframe, r.start, r.end, "
-            "       r.created_at, r.risk_config_json, res.final_value, res.sharpe, res.max_drawdown "
+            "       r.created_at, r.risk_config_json, r.params_json, "
+            "       res.final_value, res.sharpe, res.max_drawdown, res.trades_json "
             "FROM backtest_runs r "
             "JOIN backtest_results res ON res.run_id = r.id "
             "WHERE r.strategy_name = ? "
@@ -408,12 +415,16 @@ def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int 
     runs: list[dict] = []
     for row in rows:
         (run_id, title, description, market, timeframe, start, end,
-         created_at, risk_config_json, final_value, sharpe, max_drawdown) = row
-        initial_capital = json.loads(risk_config_json).get("initial_capital")
+         created_at, risk_config_json, params_json,
+         final_value, sharpe, max_drawdown, trades_json) = row
+        risk_config = json.loads(risk_config_json)
+        initial_capital = risk_config.get("initial_capital")
+        commission_rate = risk_config.get("commission_rate", 0.0005)
         return_rate = (
             (final_value - initial_capital) / initial_capital * 100
             if initial_capital else None
         )
+        params = json.loads(params_json)
         runs.append({
             "run_id": run_id,
             "title": title,
@@ -427,5 +438,10 @@ def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int 
             "return_rate": return_rate,
             "sharpe": sharpe,
             "max_drawdown": max_drawdown,
+            "initial_capital": initial_capital,
+            "commission_rate": commission_rate,
+            "trades": json.loads(trades_json),
+            "buy_conditions": params["buy_conditions"],
+            "sell_conditions": params["sell_conditions"],
         })
     return runs

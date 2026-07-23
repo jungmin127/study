@@ -428,3 +428,50 @@ def test_load_result_includes_market_timeframe_and_initial_capital(monkeypatch, 
     assert loaded["start"] == datetime(2026, 4, 22, tzinfo=timezone.utc).isoformat()
     assert loaded["end"] == datetime(2026, 7, 21, tzinfo=timezone.utc).isoformat()
     assert loaded["initial_capital"] == 1_000_000
+
+
+def test_load_result_includes_commission_rate(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000, "commission_rate": 0.002},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+    loaded = load_result("r1")
+    assert loaded["commission_rate"] == 0.002
+
+
+def test_list_backtest_runs_includes_revaluation_fields_and_strategy_conditions(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id="run-1", strategy_name="ConditionTreeStrategy",
+        strategy_params={
+            "buy_conditions": {
+                "type": "AND",
+                "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}],
+            },
+            "sell_conditions": {
+                "type": "AND",
+                "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}],
+            },
+        },
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000, "commission_rate": 0.001},
+        result={
+            "final_value": 11000.0, "sharpe": None, "max_drawdown": None, "equity_curve": [],
+            "trades": [{"forceClosed": True, "size": 1.0, "entryPrice": 100.0, "pnl": 5.0}],
+        },
+        title="테스트",
+    )
+
+    runs = list_backtest_runs()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run["initial_capital"] == 10000
+    assert run["commission_rate"] == 0.001
+    assert run["buy_conditions"]["conditions"][0]["indicator"] == "RSI"
+    assert run["sell_conditions"]["conditions"][0]["threshold"] == 70
+    assert run["trades"][0]["size"] == 1.0
