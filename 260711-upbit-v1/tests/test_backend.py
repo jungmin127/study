@@ -402,3 +402,99 @@ def test_validate_flags_insufficient_candle_count(monkeypatch, tmp_path):
     body = resp.json()
     assert body["valid"] is False
     assert any("200" in e for e in body["errors"])
+
+
+def test_backtest_detail_revalues_open_position_with_extended_candles(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    extended_df = make_oscillating_df(n=40)
+    monkeypatch.setattr(backend_module, "get_candles", lambda market, timeframe, start, end: extended_df)
+
+    save_result(
+        run_id="r-open", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000, "commission_rate": 0.001},
+        result={
+            "final_value": 10500.0, "sharpe": None, "max_drawdown": None,
+            "equity_curve": [{"timestamp": "2026-01-01T00:00:00", "value": 10000.0}],
+            "trades": [{
+                "entryTime": "2026-01-01T00:00:00", "exitTime": "2026-01-10T00:00:00",
+                "entryPrice": 20000.0, "exitPrice": 20105.0, "returnRate": 4.9,
+                "holdingPeriod": 9, "pnl": 500.0, "forceClosed": True, "size": 1.0,
+            }],
+        },
+    )
+
+    resp = client.get("/api/v1/backtests/r-open")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["live_price_as_of"] is not None
+    last_close = float(extended_df["close"].iloc[-1])
+    assert body["trades"][0]["exitPrice"] == round(last_close, 8)
+    assert body["trades"][0]["pnl"] != 500.0
+    assert len(body["ohlcv"]) == 40
+
+
+def test_backtest_detail_skips_revaluation_for_legacy_trade_without_size(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch, df=make_oscillating_df(n=40))
+
+    save_result(
+        run_id="r-legacy", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000, "commission_rate": 0.001},
+        result={
+            "final_value": 10500.0, "sharpe": None, "max_drawdown": None,
+            "equity_curve": [{"timestamp": "2026-01-01T00:00:00", "value": 10000.0}],
+            "trades": [{
+                "entryTime": "2026-01-01T00:00:00", "exitTime": "2026-01-10T00:00:00",
+                "entryPrice": 100.0, "exitPrice": 105.0, "returnRate": 4.9,
+                "holdingPeriod": 9, "pnl": 500.0, "forceClosed": True,
+            }],
+        },
+    )
+
+    resp = client.get("/api/v1/backtests/r-legacy")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["live_price_as_of"] is None
+    assert body["trades"][0]["pnl"] == 500.0
+    assert body["trades"][0]["exitPrice"] == 105.0
+
+
+def test_backtest_detail_falls_back_when_extended_candle_fetch_fails(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    original_df = make_oscillating_df(n=30)
+    call_count = {"n": 0}
+
+    def flaky_get_candles(market, timeframe, start, end):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("업비트 API 오류")
+        return original_df
+
+    monkeypatch.setattr(backend_module, "get_candles", flaky_get_candles)
+
+    save_result(
+        run_id="r-fallback", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000, "commission_rate": 0.001},
+        result={
+            "final_value": 10500.0, "sharpe": None, "max_drawdown": None,
+            "equity_curve": [{"timestamp": "2026-01-01T00:00:00", "value": 10000.0}],
+            "trades": [{
+                "entryTime": "2026-01-01T00:00:00", "exitTime": "2026-01-10T00:00:00",
+                "entryPrice": 100.0, "exitPrice": 105.0, "returnRate": 4.9,
+                "holdingPeriod": 9, "pnl": 500.0, "forceClosed": True, "size": 100.0,
+            }],
+        },
+    )
+
+    resp = client.get("/api/v1/backtests/r-fallback")
+    assert resp.status_code == 200
+    assert call_count["n"] == 2  # 확장 조회 실패 → 원래 end_dt로 재시도

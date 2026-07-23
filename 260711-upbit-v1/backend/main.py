@@ -25,6 +25,7 @@ from engine.cache import (
 )
 from engine.condition_strategy import ConditionTreeStrategy
 from engine.condition_tree import find_unknown_indicators, is_empty, max_required_period
+from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import calculate_metrics
 from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
@@ -225,23 +226,53 @@ def get_backtest_detail(run_id: str) -> dict:
 
     start_dt = datetime.fromisoformat(result["start"])
     end_dt = datetime.fromisoformat(result["end"])
-    df = get_candles(result["market"], result["timeframe"], start_dt, end_dt)
 
-    metrics = calculate_metrics(
-        equity_curve=result["equity_curve"],
-        trades=result["trades"],
-        initial_capital=result["initial_capital"],
-        df=df,
-        timeframe=result["timeframe"],
-    )
+    # 미청산 포지션이 있고 백테스트 종료일이 이미 지났으면, 그 이후 캔들도 함께
+    # 조회해서(a) 가격 차트에 종료일 이후 흐름을 보여주고 (b) 그 마지막 종가를
+    # "현재가"로 재사용해 미청산 포지션을 재평가한다(별도 ticker 호출 불필요).
+    has_open = has_revaluable_open_trade(result["trades"])
+    fetch_end_dt = end_dt
+    now = datetime.now(timezone.utc)
+    if has_open and now > end_dt:
+        fetch_end_dt = now
+
+    try:
+        df = get_candles(result["market"], result["timeframe"], start_dt, fetch_end_dt)
+    except Exception:
+        df = get_candles(result["market"], result["timeframe"], start_dt, end_dt)
+        fetch_end_dt = end_dt
 
     # candle_time은 tz-aware(UTC)인데 trades의 entryTime/exitTime은 backtrader가
     # tz를 벗겨낸 naive 문자열이다(engine/runner.py의 df_bt.index.tz_localize(None)).
     # 프론트에서 new Date(...)로 파싱할 때 tz 표기 유무가 섞이면 로컬 타임존만큼
     # 어긋나 보이므로, 여기서도 naive로 맞춰 캔들/거래 시각의 기준을 통일한다.
     df_chart = df.copy()
-    if df_chart["candle_time"].dt.tz is not None:
+    if not df_chart.empty and df_chart["candle_time"].dt.tz is not None:
         df_chart["candle_time"] = df_chart["candle_time"].dt.tz_localize(None)
+
+    trades = result["trades"]
+    equity_curve = result["equity_curve"]
+    final_value = result["final_value"]
+    live_price_as_of = None
+
+    if has_open and fetch_end_dt > end_dt and not df_chart.empty:
+        live_close = float(df_chart["close"].iloc[-1])
+        live_time = df_chart["candle_time"].iloc[-1].isoformat()
+        revalued, delta = revalue_open_trades(trades, live_close, live_time, result["commission_rate"])
+        if delta != 0.0:
+            final_value = round(final_value + delta, 4)
+            equity_curve = equity_curve + [{"timestamp": live_time, "value": final_value}]
+            trades = revalued
+            live_price_as_of = live_time
+
+    metrics = calculate_metrics(
+        equity_curve=equity_curve,
+        trades=trades,
+        initial_capital=result["initial_capital"],
+        df=df,
+        timeframe=result["timeframe"],
+    )
+
     ohlcv = [
         {
             "time": row.candle_time.isoformat(),
@@ -259,10 +290,11 @@ def get_backtest_detail(run_id: str) -> dict:
         "start": result["start"],
         "end": result["end"],
         "initial_capital": result["initial_capital"],
-        "final_value": result["final_value"],
+        "final_value": final_value,
         "metrics": metrics,
         "ohlcv": ohlcv,
-        "trades": result["trades"],
+        "trades": trades,
+        "live_price_as_of": live_price_as_of,
     }
 
 
