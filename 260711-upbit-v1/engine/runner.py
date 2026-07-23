@@ -89,6 +89,7 @@ class TradeLogger(bt.Analyzer):
             "holdingPeriod": int(trade.barclose - trade.baropen),
             "pnl": round(trade.pnlcomm, 4),
             "forceClosed": False,
+            "size": round(size, 8),
         })
 
     def get_analysis(self) -> list[dict]:
@@ -127,6 +128,7 @@ def _build_forced_close_trade(
         "holdingPeriod": holding_period,
         "pnl": round(pnlcomm, 4),
         "forceClosed": True,
+        "size": round(size, 8),
     }
 
 

@@ -55,6 +55,7 @@ def test_run_backtest_buy_and_hold_once():
     assert result["trades"][0]["forceClosed"] is True
     assert "sharpe" in result
     assert "max_drawdown" in result
+    assert result["trades"][0]["size"] > 0
 
 
 def test_forced_close_trade_deducts_entry_and_exit_commission():
@@ -72,3 +73,4 @@ def test_forced_close_trade_deducts_entry_and_exit_commission():
     assert trade["holdingPeriod"] == 9
     assert trade["entryPrice"] == 100.0
     assert trade["exitPrice"] == 110.0
+    assert trade["size"] == 2.0
