@@ -893,7 +893,7 @@ EOF
 **Interfaces:**
 - Produces: `BacktestMetrics`, `OhlcvPoint`, 재정의된 `BacktestDetail` (Task 4의 백엔드 응답과 1:1 대응).
 
-- [ ] **Step 1: 타입 수정**
+- [x] **Step 1: 타입 수정**
 
 `frontend/lib/types/eda.ts`의 현재 코드:
 
@@ -974,12 +974,12 @@ export interface BacktestDetail {
 
 (`EquityPoint`는 삭제 — 이 타입을 쓰는 곳은 `BacktestDetail`뿐이었고 Task 8에서 `EquityCurveChart.tsx`도 삭제되므로 완전히 미사용이 됨)
 
-- [ ] **Step 2: 타입체크**
+- [x] **Step 2: 타입체크**
 
 Run (frontend 디렉토리에서): `npx tsc --noEmit`
 Expected: `frontend/app/backtests/[runId]/page.tsx`와 `frontend/components/EquityCurveChart.tsx`에서 `EquityPoint`/이전 `BacktestDetail` 필드 참조 관련 에러가 뜨는 게 정상(Task 8에서 그 파일들을 고칠 것이므로 지금은 에러 나는 게 맞음 — 여기서는 `eda.ts` 자체에 문법 에러가 없는지만 확인)
 
-- [ ] **Step 3: 커밋**
+- [x] **Step 3: 커밋**
 
 ```bash
 git add frontend/lib/types/eda.ts

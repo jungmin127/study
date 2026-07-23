@@ -21,11 +21,6 @@ export interface Combo {
   timeframe: string;
 }
 
-export interface EquityPoint {
-  timestamp: string;
-  value: number;
-}
-
 export interface Trade {
   entryTime: string;
   exitTime: string;
@@ -37,11 +32,37 @@ export interface Trade {
   forceClosed: boolean;
 }
 
+export interface BacktestMetrics {
+  total_return: number;
+  cagr: number;
+  mdd: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
+  win_rate: number;
+  profit_factor: number;
+  avg_holding_period: number;
+  max_consecutive_loss: number;
+  buy_and_hold_return: number;
+  total_trades: number;
+}
+
+export interface OhlcvPoint {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 export interface BacktestDetail {
+  market: string;
+  timeframe: string;
+  start: string;
+  end: string;
   final_value: number;
-  sharpe: number | null;
-  max_drawdown: number | null;
-  equity_curve: EquityPoint[];
+  metrics: BacktestMetrics;
+  ohlcv: OhlcvPoint[];
   trades: Trade[];
 }
 
