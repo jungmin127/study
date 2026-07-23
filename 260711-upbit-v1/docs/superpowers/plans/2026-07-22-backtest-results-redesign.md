@@ -1007,7 +1007,7 @@ EOF
 
 `C:\Users\jungm\project\backtesting_1\frontend\components\charts\PriceChart.tsx`를 포팅하되: (1) 업비트 컨벤션으로 캔들 색 반전(상승=빨강/하락=파랑), (2) 마커 색은 캔들 색과 겹치지 않게 진입=파랑/청산=주황으로, (3) 원본의 고정 다크 배경(`#0e1420`)은 빼고 이 앱의 라이트/다크 테마를 그대로 따르도록(기존 `EquityCurveChart.tsx`와 동일한 방식), (4) 타임프레임 판별을 이 프로젝트의 실제 값(`minutes15`, `days` 등)에 맞게 수정.
 
-- [ ] **Step 1: 파일 작성**
+- [x] **Step 1: 파일 작성**
 
 ```tsx
 'use client';
@@ -1146,12 +1146,12 @@ export default function PriceChart({ ohlcv, trades, timeframe }: PriceChartProps
 }
 ```
 
-- [ ] **Step 2: 타입체크**
+- [x] **Step 2: 타입체크**
 
 Run (frontend 디렉토리에서): `npx tsc --noEmit`
 Expected: `PriceChart.tsx` 관련 에러 없음(다른 파일의 기존 에러는 Task 8에서 해소)
 
-- [ ] **Step 3: 커밋**
+- [x] **Step 3: 커밋**
 
 ```bash
 git add frontend/components/PriceChart.tsx
