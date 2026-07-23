@@ -67,7 +67,12 @@ def calculate_metrics(
     except Exception:
         days = 1
     ratio = final_val / initial_capital if initial_capital > 0 else 1.0
-    cagr = (ratio ** (365.0 / days) - 1.0) * 100.0 if ratio > 0 else 0.0
+    try:
+        cagr = (ratio ** (365.0 / days) - 1.0) * 100.0 if ratio > 0 else 0.0
+    except OverflowError:
+        # 매우 짧은 기간(days) 대비 극단적인 ratio가 결합되면(예: 미청산 포지션이
+        # 크게 다른 현재가로 재평가된 직후) 지수 연산 결과가 float 범위를 넘을 수 있다.
+        cagr = 0.0
 
     cummax = values.cummax()
     drawdown = (values - cummax) / cummax * 100.0
