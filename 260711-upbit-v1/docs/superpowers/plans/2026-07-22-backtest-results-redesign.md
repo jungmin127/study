@@ -764,7 +764,7 @@ EOF
 
 이 프로젝트는 프론트엔드 테스트 러너가 없으므로(기존 관례), 이 태스크의 "테스트"는 `npx tsc --noEmit` 타입체크로 대체한다.
 
-- [ ] **Step 1: `frontend/lib/return-rate-color.ts` 작성**
+- [x] **Step 1: `frontend/lib/return-rate-color.ts` 작성**
 
 ```ts
 export function returnRateColor(rate: number | null): string {
@@ -773,7 +773,7 @@ export function returnRateColor(rate: number | null): string {
 }
 ```
 
-- [ ] **Step 2: `frontend/lib/format.ts` 작성**
+- [x] **Step 2: `frontend/lib/format.ts` 작성**
 
 ```ts
 export function formatDateTime(iso: string): string {
@@ -781,7 +781,7 @@ export function formatDateTime(iso: string): string {
 }
 ```
 
-- [ ] **Step 3: `frontend/app/backtests/page.tsx` 수정**
+- [x] **Step 3: `frontend/app/backtests/page.tsx` 수정**
 
 파일 상단의 다음 코드:
 
@@ -811,7 +811,7 @@ import { returnRateColor } from '@/lib/return-rate-color';
 
 (파일 나머지 부분은 그대로 — `returnRateColor(run.return_rate)` 호출 부분은 이미 있음)
 
-- [ ] **Step 4: `frontend/app/heatmap/page.tsx` 수정**
+- [x] **Step 4: `frontend/app/heatmap/page.tsx` 수정**
 
 파일 상단의 다음 코드:
 
@@ -839,7 +839,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { returnRateColor } from '@/lib/return-rate-color';
 ```
 
-- [ ] **Step 5: `frontend/app/ranking/page.tsx` 수정**
+- [x] **Step 5: `frontend/app/ranking/page.tsx` 수정**
 
 파일 상단의 다음 코드:
 
@@ -863,12 +863,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { returnRateColor } from '@/lib/return-rate-color';
 ```
 
-- [ ] **Step 6: 타입체크**
+- [x] **Step 6: 타입체크**
 
 Run (frontend 디렉토리에서): `npx tsc --noEmit`
 Expected: 에러 없음
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 git add frontend/lib/return-rate-color.ts frontend/lib/format.ts frontend/app/backtests/page.tsx frontend/app/heatmap/page.tsx frontend/app/ranking/page.tsx

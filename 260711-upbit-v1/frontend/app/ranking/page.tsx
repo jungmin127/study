@@ -1,12 +1,6 @@
 import { getRanking } from '@/lib/api/eda';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-
-function returnRateColor(rate: number | null): string {
-  if (rate === null) return '';
-  if (rate > 0) return 'text-green-600 dark:text-green-400';
-  if (rate < 0) return 'text-red-600 dark:text-red-400';
-  return '';
-}
+import { returnRateColor } from '@/lib/return-rate-color';
 
 export default async function RankingPage() {
   const rows = await getRanking();

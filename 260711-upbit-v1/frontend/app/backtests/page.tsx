@@ -2,13 +2,7 @@ import Link from 'next/link';
 import { getBacktestRuns } from '@/lib/api/eda';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import DeleteRunButton from '@/components/DeleteRunButton';
-
-function returnRateColor(rate: number | null): string {
-  if (rate === null) return '';
-  if (rate > 0) return 'text-green-600 dark:text-green-400';
-  if (rate < 0) return 'text-red-600 dark:text-red-400';
-  return '';
-}
+import { returnRateColor } from '@/lib/return-rate-color';
 
 export default async function BacktestResultsPage() {
   const runs = await getBacktestRuns();
