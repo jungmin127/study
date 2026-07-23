@@ -1,18 +1,19 @@
-# 성과 지표 툴팁 + 미청산 포지션 실시간 재평가 설계
+# 성과 지표 툴팁 + 미청산 포지션 실시간 재평가 + 목록 페이지 개선 설계
 
 - 작성일: 2026-07-23
-- 상태: 승인 대기 (사용자 리뷰 전)
+- 상태: 승인 완료
 - 선행 작업: `docs/superpowers/specs/2026-07-21-backtest-results-redesign-design.md` (12종 성과 지표 그리드, 캔들+마커 차트, forceClosed 배지 — 이번 설계가 그 결과물 위에 얹힌다)
 
 ## 배경 및 목적
 
-백테스트 결과 탭 리디자인 완료 후 3가지 후속 요청:
+백테스트 결과 탭 리디자인 완료 후 후속 요청:
 
 1. 성과 지표 12개 타일에 물음표 아이콘 + 설명 툴팁 추가
 2. 가격 차트가 백테스트 종료일까지만 보이는 이유 확인 (예: 종료일 7/21, 오늘 7/23)
 3. 아직 청산되지 않고 "보유중(기간종료)"인 포지션의 수익률이 실시간(현재가 기준)으로 보이는지 확인, 안 되면 구현 — 상세 페이지와 목록(`/backtests`) 탭 양쪽에
+4. (추가 요청) 목록 페이지 기간 컬럼을 `YYYY-MM-DD ~ YYYY-MM-DD`로 단순화, 매수전략/매도전략 컬럼 추가, 수익률/실행시각/코인명/봉타입 기준 정렬(오름/내림차순) 추가
 
-조사 결과 2/3은 사실 하나의 근본 원인으로 연결된다: `forceClosed: true` 거래는 "백테스트 종료 시점 종가로 강제 평가"된 스냅샷일 뿐, 그 이후의 실제 가격 변동이 전혀 반영되지 않는다. 이번 설계는 이 스냅샷을 요청 시점의 최신 데이터로 다시 평가하는 기능을 추가한다.
+조사 결과 2/3은 사실 하나의 근본 원인으로 연결된다: `forceClosed: true` 거래는 "백테스트 종료 시점 종가로 강제 평가"된 스냅샷일 뿐, 그 이후의 실제 가격 변동이 전혀 반영되지 않는다. 이번 설계는 이 스냅샷을 요청 시점의 최신 데이터로 다시 평가하는 기능을 추가한다. 4번은 같은 목록 페이지를 다루는 별개의 UI 개선 요청이라 같은 설계 문서/구현 계획에 함께 담는다.
 
 ## 결정된 사항 (사용자 승인)
 
@@ -240,6 +241,35 @@ def get_backtest_runs() -> list[dict]:
 - `frontend/app/backtests/[runId]/page.tsx`: `live_price_as_of`가 있으면 상단 요약 근처에 캡션 표시: `현재가 기준으로 재평가됨 (HH:MM:SS 기준)`. forceClosed 배지 title에도 "현재가로 재평가됨" 문구 보강.
 - `frontend/app/backtests/page.tsx`: `return_rate` 셀 옆에 `is_live`면 작은 회색 텍스트 `(실시간)` 표시.
 
+## 4. 목록 페이지(`/backtests`) 표시 개선: 기간 포맷 + 전략 요약 + 정렬
+
+이 섹션은 3번(실시간 재평가)과 별개로 사용자가 추가 요청한 항목이며, 같은 페이지(`frontend/app/backtests/page.tsx`, `engine/cache.py::list_backtest_runs()`, `backend/main.py::get_backtest_runs()`)를 다루므로 같은 구현 계획에 포함한다.
+
+### 4-1. 기간 컬럼 포맷
+
+`run.start`/`run.end`는 `"2026-04-22T00:00:00+00:00"` 같은 전체 ISO 문자열이다. 상세 페이지(`[runId]/page.tsx`)가 이미 `detail.start.slice(0, 10)`로 날짜만 잘라 쓰는 것과 동일하게, 목록 페이지도 `${run.start.slice(0, 10)} ~ ${run.end.slice(0, 10)}`로 변경한다. 백엔드 변경 없음.
+
+### 4-2. 매수전략/매도전략 컬럼 추가
+
+**백엔드:**
+- `engine/cache.py::list_backtest_runs()`: SELECT에 `r.params_json`을 추가하고, 반환 dict에 `"buy_conditions": json.loads(params_json)["buy_conditions"]`, `"sell_conditions": json.loads(params_json)["sell_conditions"]`를 추가한다(이 함수는 `strategy_name = 'ConditionTreeStrategy'`로 필터링되므로 두 키가 항상 존재함이 보장됨).
+- `backend/main.py::get_backtest_runs()`: 3번 설계에서 이미 `list_backtest_runs()` 결과를 가공해 최종 응답을 조립하므로, 그 조립 블록(`result.append({...})`)에 `buy_conditions`/`sell_conditions`도 그대로 포함시킨다.
+
+**프론트엔드:**
+- `summarizeGroup`/`isConditionBlock`/`OPERATOR_SYMBOLS`를 `frontend/components/StrategyConditionBuilder.tsx`에서 새 공용 파일 `frontend/lib/condition-summary.ts`로 옮기고 export한다. `StrategyConditionBuilder.tsx`는 이 파일에서 import하도록 수정(중복 제거, 동작 변경 없음).
+- `frontend/lib/types/eda.ts`의 `BacktestRunSummary`에 `buy_conditions: ConditionGroup`, `sell_conditions: ConditionGroup` 추가.
+- `frontend/app/backtests/page.tsx`(또는 4-3에서 분리되는 `BacktestRunsTable.tsx`): "매수전략"/"매도전략" 컬럼 추가, 각 셀에 `summarizeGroup(run.buy_conditions)`/`summarizeGroup(run.sell_conditions)`를 표시. 셀은 `whitespace-normal max-w-[240px]`로 줄바꿈을 허용해(테이블 기본값인 `whitespace-nowrap` 오버라이드) 조건식이 길어도 셀 안에서 줄바꿈되게 한다(사용자 선택: "셀에 요약문 그대로 줄바꿈 표시").
+
+### 4-3. 정렬 (수익률/실행시각/코인명/봉타입, 각 오름차순/내림차순)
+
+**설계 방향:** 서버는 지금처럼 기본 정렬(`created_at DESC, rowid DESC`)로 전체 목록을 한 번에 반환하고(최대 100건, 페이지네이션 없음 — 기존과 동일), 정렬 자체는 클라이언트에서 처리한다. 이미 전체 목록을 한 번에 fetch하므로 서버 왕복 없이 즉시 재정렬 가능하고, `frontend/components/CoinSelect.tsx`의 "정렬 가능한 컬럼 헤더 클릭" 패턴을 그대로 재사용할 수 있어 새 UI 패턴을 만들 필요가 없다.
+
+- `frontend/app/backtests/page.tsx`(서버 컴포넌트)는 지금처럼 `getBacktestRuns()`로 데이터만 가져오고, 실제 테이블 렌더링은 새 클라이언트 컴포넌트 `frontend/components/BacktestRunsTable.tsx`(`'use client'`, `runs: BacktestRunSummary[]` prop)로 위임한다. `DeleteRunButton`은 이미 별도 클라이언트 컴포넌트라 그대로 이 안에서 쓰인다.
+- `BacktestRunsTable.tsx` 내부 정렬 상태: `{ key: 'return_rate' | 'created_at' | 'market' | 'timeframe' | null, direction: 'asc' | 'desc' }`, 초기값 `key: null`(서버가 준 순서 그대로 = 실행시각 내림차순과 결과적으로 동일).
+- 정렬 가능한 4개 컬럼("수익률(%)", "실행 시각", "코인", "봉타입") 헤더를 클릭 가능한 버튼으로 바꾸고, 현재 정렬 중인 컬럼에 ▲/▼ 표시. 같은 컬럼을 다시 클릭하면 방향 토글, 다른 컬럼을 클릭하면 그 컬럼의 내림차순부터 시작.
+- `return_rate`/`sharpe`/`max_drawdown`처럼 값이 `null`일 수 있는 컬럼은 정렬 방향과 무관하게 항상 맨 뒤로 보낸다.
+- 제목/설명/매수전략/매도전략/상세/삭제 컬럼은 정렬 대상 아님(클릭 불가 헤더 그대로).
+
 ## 에러 처리 요약
 
 - 캔들 확장 조회 실패 → 원래 `end_dt` 기준으로 폴백, `live_price_as_of: null`.
@@ -251,6 +281,6 @@ def get_backtest_runs() -> list[dict]:
 - `tests/test_live_valuation.py` (신규): `revalue_open_trades`/`has_revaluable_open_trade` 순수 함수 단위 테스트 — 수수료 계산, delta 부호, size 없는 거래 무시, forceClosed 아닌 거래 무시.
 - `tests/test_runner.py`: 기존 `test_forced_close_trade_deducts_entry_and_exit_commission`에 `trade["size"] == 2.0` assert 추가. `test_run_backtest_buy_and_hold_once`에 `result["trades"][0]["size"]` 존재 assert 추가.
 - `tests/test_upbit_data_service.py`: `get_current_prices` 신규 테스트(httpx 목킹, 빈 리스트 입력 시 빈 dict 등).
-- `tests/test_cache.py`: `load_result`가 `commission_rate` 포함하는지, `list_backtest_runs`가 `trades`/`commission_rate`/`initial_capital` 포함하는지 테스트 추가.
-- `tests/test_backend.py`: 상세/목록 엔드포인트 각각에 대해 (a) 미청산+size 있음 → 재평가 발생 시나리오, (b) size 없는 레거시 거래 → 재평가 건너뜀, (c) 캔들/ticker 조회 실패 시 폴백 시나리오. 기존 `_patch_get_candles` 패턴 재사용 + 신규 `_patch_get_current_prices` 헬퍼 추가.
-- 프론트: `npx tsc --noEmit` + Playwright로 실제 미청산 포지션이 있는 런을 상세/목록 페이지에서 확인(현재 DB에 이미 그런 런이 하나 있음 — `KRW-ERA`, run_id `e9cc29d9...`, 단 `size` 필드가 없어 재실행 필요).
+- `tests/test_cache.py`: `load_result`가 `commission_rate` 포함하는지, `list_backtest_runs`가 `trades`/`commission_rate`/`initial_capital`/`buy_conditions`/`sell_conditions` 포함하는지 테스트 추가.
+- `tests/test_backend.py`: 상세/목록 엔드포인트 각각에 대해 (a) 미청산+size 있음 → 재평가 발생 시나리오, (b) size 없는 레거시 거래 → 재평가 건너뜀, (c) 캔들/ticker 조회 실패 시 폴백 시나리오, (d) 목록 응답에 `buy_conditions`/`sell_conditions`가 포함되는지. 기존 `_patch_get_candles` 패턴 재사용 + 신규 `_patch_get_current_prices` 헬퍼 추가.
+- 프론트: `npx tsc --noEmit` + Playwright로 실제 미청산 포지션이 있는 런을 상세/목록 페이지에서 확인(현재 DB에 이미 그런 런이 하나 있음 — `KRW-ERA`, run_id `e9cc29d9...`, 단 `size` 필드가 없어 재실행 필요). 목록 페이지 정렬(4개 컬럼 × 2방향), 기간 포맷, 매수/매도전략 컬럼 표시도 Playwright로 확인.
