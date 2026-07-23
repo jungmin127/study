@@ -1177,7 +1177,7 @@ EOF
 **Interfaces:**
 - Consumes: `BacktestDetail`/`BacktestMetrics` (Task 6), `PriceChart` (Task 7), `returnRateColor`/`formatDateTime` (Task 5).
 
-- [ ] **Step 1: 페이지 전체 교체**
+- [x] **Step 1: 페이지 전체 교체**
 
 `frontend/app/backtests/[runId]/page.tsx`의 현재 전체 내용을 다음으로 교체:
 
@@ -1316,18 +1316,18 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
 }
 ```
 
-- [ ] **Step 2: `EquityCurveChart.tsx` 삭제**
+- [x] **Step 2: `EquityCurveChart.tsx` 삭제**
 
 ```bash
 rm frontend/components/EquityCurveChart.tsx
 ```
 
-- [ ] **Step 3: 타입체크**
+- [x] **Step 3: 타입체크**
 
 Run (frontend 디렉토리에서): `npx tsc --noEmit`
 Expected: 에러 없음
 
-- [ ] **Step 4: 커밋**
+- [x] **Step 4: 커밋**
 
 ```bash
 git add -A frontend/app/backtests/[runId]/page.tsx frontend/components/EquityCurveChart.tsx
