@@ -33,8 +33,10 @@ def test_revalue_open_trades_recomputes_pnl_and_return_rate():
     entry_commission = 100.0 * 100.0 * 0.001
     exit_commission = 120.0 * 100.0 * 0.001
     expected_pnl = round((120.0 - 100.0) * 100.0 - entry_commission - exit_commission, 4)
+    expected_return_rate = round(expected_pnl / (100.0 * 100.0) * 100, 4)
 
     assert updated[0]["pnl"] == expected_pnl
+    assert updated[0]["returnRate"] == expected_return_rate
     assert updated[0]["exitPrice"] == 120.0
     assert updated[0]["exitTime"] == "2026-01-15T00:00:00"
     assert updated[0]["holdingPeriod"] == 9  # 갱신 안 함(알려진 제약)
