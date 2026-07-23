@@ -232,3 +232,16 @@ def get_krw_markets_with_ticker() -> list[dict]:
         }
         for m in markets
     ]
+
+
+def get_current_prices(markets: list[str]) -> dict[str, float]:
+    """주어진 마켓들의 현재가(ticker trade_price)를 한 번에 조회한다.
+
+    미청산 포지션이 있는 백테스트 목록의 수익률을 실시간에 준하게 재계산할 때,
+    관련된 마켓들을 한 번에 배치 조회하기 위해 쓴다."""
+    if not markets:
+        return {}
+    market_codes = ",".join(markets)
+    resp = httpx.get(f"{UPBIT_BASE_URL}/ticker", params={"markets": market_codes}, timeout=10)
+    resp.raise_for_status()
+    return {t["market"]: t["trade_price"] for t in resp.json()}

@@ -361,3 +361,33 @@ def test_get_krw_markets_with_ticker_merges_price_change_and_trade_value(monkeyp
     assert markets[1]["change_rate"] is None
     assert markets[1]["change_price"] is None
     assert markets[1]["trade_price_24h"] is None
+
+
+def test_get_current_prices_returns_empty_dict_for_empty_input():
+    import upbit_data_service
+
+    assert upbit_data_service.get_current_prices([]) == {}
+
+
+def test_get_current_prices_maps_market_to_trade_price(monkeypatch):
+    import upbit_data_service
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [
+                {"market": "KRW-BTC", "trade_price": 150_000_000.0},
+                {"market": "KRW-ETH", "trade_price": 5_000_000.0},
+            ]
+
+    def _fake_get(url, params=None, timeout=None):
+        assert "ticker" in url
+        assert params == {"markets": "KRW-BTC,KRW-ETH"}
+        return _FakeResponse()
+
+    monkeypatch.setattr(upbit_data_service.httpx, "get", _fake_get)
+
+    prices = upbit_data_service.get_current_prices(["KRW-BTC", "KRW-ETH"])
+    assert prices == {"KRW-BTC": 150_000_000.0, "KRW-ETH": 5_000_000.0}
