@@ -65,6 +65,7 @@ export interface BacktestDetail {
   metrics: BacktestMetrics;
   ohlcv: OhlcvPoint[];
   trades: Trade[];
+  live_price_as_of: string | null;
 }
 
 export interface Market {
@@ -128,4 +129,7 @@ export interface BacktestRunSummary {
   return_rate: number | null;
   sharpe: number | null;
   max_drawdown: number | null;
+  is_live: boolean;
+  buy_conditions: ConditionGroup;
+  sell_conditions: ConditionGroup;
 }
