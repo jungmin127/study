@@ -258,6 +258,7 @@ def get_backtest_detail(run_id: str) -> dict:
         "timeframe": result["timeframe"],
         "start": result["start"],
         "end": result["end"],
+        "initial_capital": result["initial_capital"],
         "final_value": result["final_value"],
         "metrics": metrics,
         "ohlcv": ohlcv,

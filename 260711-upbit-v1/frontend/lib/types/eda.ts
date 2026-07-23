@@ -60,6 +60,7 @@ export interface BacktestDetail {
   timeframe: string;
   start: string;
   end: string;
+  initial_capital: number;
   final_value: number;
   metrics: BacktestMetrics;
   ohlcv: OhlcvPoint[];

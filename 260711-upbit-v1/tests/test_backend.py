@@ -108,6 +108,7 @@ def test_backtest_detail_returns_result_for_known_run(monkeypatch, tmp_path):
     assert body["final_value"] == 10500.0
     assert body["market"] == "KRW-BTC"
     assert body["timeframe"] == "days"
+    assert body["initial_capital"] == 10000
     assert body["metrics"]["total_trades"] == 0
     assert isinstance(body["ohlcv"], list)
     assert len(body["ohlcv"]) > 0

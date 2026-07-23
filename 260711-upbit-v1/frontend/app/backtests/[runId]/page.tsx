@@ -38,7 +38,7 @@ function MetricsGrid({ metrics }: { metrics: BacktestMetrics }) {
   return (
     <div>
       <h2 className="mb-2 text-sm font-semibold">성과 지표</h2>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-6 gap-3">
         {tiles.map((tile) => (
           <MetricTile key={tile.label} label={tile.label} value={tile.value} colorClass={tile.colorClass} />
         ))}
@@ -74,6 +74,14 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
           <p className="text-xs text-muted-foreground">총 거래</p>
           <p className="text-lg font-semibold">{detail.metrics.total_trades}건</p>
         </div>
+        <div>
+          <p className="text-xs text-muted-foreground">최초 투입금</p>
+          <p className="text-lg font-semibold">{Math.round(detail.initial_capital).toLocaleString()}원</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">최종 금액</p>
+          <p className="text-lg font-semibold">{Math.round(detail.final_value).toLocaleString()}원</p>
+        </div>
       </div>
 
       <div className="mb-6">
@@ -108,7 +116,7 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
                 <TableCell className={returnRateColor(t.returnRate)}>{t.returnRate.toFixed(2)}</TableCell>
                 <TableCell>{t.entryPrice.toLocaleString()}</TableCell>
                 <TableCell>{t.exitPrice.toLocaleString()}</TableCell>
-                <TableCell className={returnRateColor(t.pnl)}>{t.pnl.toLocaleString()}</TableCell>
+                <TableCell className={returnRateColor(t.pnl)}>{Math.round(t.pnl).toLocaleString()}</TableCell>
                 <TableCell>{t.holdingPeriod}</TableCell>
                 <TableCell>
                   {t.forceClosed ? (
