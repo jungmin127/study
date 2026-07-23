@@ -89,6 +89,7 @@ def test_backtest_detail_returns_404_for_missing_run(monkeypatch, tmp_path):
 
 def test_backtest_detail_returns_result_for_known_run(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
     save_result(
         run_id="r1", strategy_name="SignalStrategy", strategy_params={},
         market="KRW-BTC", timeframe="days",
@@ -103,7 +104,17 @@ def test_backtest_detail_returns_result_for_known_run(monkeypatch, tmp_path):
 
     resp = client.get("/api/v1/backtests/r1")
     assert resp.status_code == 200
-    assert resp.json()["final_value"] == 10500.0
+    body = resp.json()
+    assert body["final_value"] == 10500.0
+    assert body["market"] == "KRW-BTC"
+    assert body["timeframe"] == "days"
+    assert body["metrics"]["total_trades"] == 0
+    assert isinstance(body["ohlcv"], list)
+    assert len(body["ohlcv"]) > 0
+    # candle_time이 naive로 정규화됐는지 확인 — tz-aware면 "+00:00" 같은 오프셋이 붙어있다.
+    # trades의 entryTime/exitTime(backtrader가 tz를 벗겨낸 naive 문자열)과 기준을 맞춰야
+    # 프론트에서 new Date(...)로 파싱할 때 캔들과 마커 위치가 어긋나지 않는다.
+    assert "+00:00" not in body["ohlcv"][0]["time"]
 
 
 def test_delete_backtest_removes_run_from_list(monkeypatch, tmp_path):

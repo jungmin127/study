@@ -594,7 +594,7 @@ EOF
 - Consumes: `calculate_metrics(equity_curve, trades, initial_capital, df, timeframe)` (Task 1), `load_result(run_id)`가 반환하는 `market/timeframe/start/end/initial_capital` (Task 3), `get_candles(market, timeframe, start_dt, end_dt) -> pd.DataFrame`(이미 존재, `upbit_data_service.py`).
 - Produces: `GET /api/v1/backtests/{run_id}`가 `{market, timeframe, start, end, final_value, metrics, ohlcv, trades}` 반환.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_backend.py`의 기존 `test_backtest_detail_returns_result_for_known_run`(90~106행)을 다음으로 교체:
 
@@ -631,12 +631,12 @@ def test_backtest_detail_returns_result_for_known_run(monkeypatch, tmp_path):
 
 주의: `_patch_get_candles`(199~203행 부근)는 이미 파일에 있으며 `backend_module.get_candles`를 패치한다 — 새로 만들 필요 없음.
 
-- [ ] **Step 2: 테스트가 실패하는지 확인**
+- [x] **Step 2: 테스트가 실패하는지 확인**
 
 Run: `python -m pytest tests/test_backend.py -v -k test_backtest_detail_returns_result_for_known_run`
 Expected: FAIL — `KeyError: 'metrics'` (또는 `assert 'KRW-BTC' == ...` 관련 실패 — 지금 `get_backtest_detail`은 `load_result` 결과를 그대로 반환하기만 함)
 
-- [ ] **Step 3: import 추가**
+- [x] **Step 3: import 추가**
 
 `backend/main.py` 상단의 다음 import 블록:
 
@@ -659,7 +659,7 @@ from engine.cache import (
 from engine.metrics import calculate_metrics
 ```
 
-- [ ] **Step 4: 엔드포인트 재구성**
+- [x] **Step 4: 엔드포인트 재구성**
 
 `backend/main.py`의 현재 코드(219~224행):
 
@@ -723,17 +723,17 @@ def get_backtest_detail(run_id: str) -> dict:
     }
 ```
 
-- [ ] **Step 5: 테스트 통과 확인**
+- [x] **Step 5: 테스트 통과 확인**
 
 Run: `python -m pytest tests/test_backend.py -v`
 Expected: 모든 테스트 PASS (특히 `test_backtest_detail_returns_result_for_known_run`, `test_run_backtest_returns_run_id_and_is_retrievable`)
 
-- [ ] **Step 6: 전체 백엔드 테스트 스위트 실행**
+- [x] **Step 6: 전체 백엔드 테스트 스위트 실행**
 
 Run: `python -m pytest`
 Expected: 전부 PASS (기존 96개 + Task 1~4에서 추가한 테스트)
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
