@@ -61,13 +61,22 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
   const [refreshing, setRefreshing] = useState(false);
   const [sortKey, setSortKey] = useState<MarketSortKey>('change_rate');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [query, setQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLiveMarkets(markets);
   }, [markets]);
 
   const sorted = useMemo(() => sortMarkets(liveMarkets, sortKey, sortDir), [liveMarkets, sortKey, sortDir]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter(
+      (m) => m.korean_name.toLowerCase().includes(q) || m.market.replace('KRW-', '').toLowerCase().includes(q)
+    );
+  }, [sorted, query]);
   const selected = liveMarkets.find((m) => m.market === value) ?? null;
 
   useEffect(() => {
@@ -79,6 +88,14 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      searchInputRef.current?.focus();
+    } else {
+      setQuery('');
+    }
+  }, [open]);
 
   function handleToggleOpen() {
     const willOpen = !open;
@@ -133,6 +150,17 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
 
       {open && (
         <div className="absolute z-20 mt-1 w-full rounded-md border bg-background shadow-lg">
+          <div className="border-b p-2">
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="한글명 또는 티커로 검색 (예: 비트코인, BTC)"
+              className={`${INPUT_CLASS} w-full`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
           <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 border-b bg-slate-50 px-3 py-2 text-xs font-medium text-muted-foreground dark:bg-slate-800">
             <span>{refreshing ? '새로고침 중...' : '한글명'}</span>
             <span className="text-right">현재가</span>
@@ -152,7 +180,10 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
             </button>
           </div>
           <div className="max-h-80 overflow-y-auto">
-            {sorted.map((m) => (
+            {filtered.length === 0 && (
+              <p className="px-3 py-6 text-center text-sm text-muted-foreground">검색 결과가 없습니다.</p>
+            )}
+            {filtered.map((m) => (
               <button
                 key={m.market}
                 type="button"
