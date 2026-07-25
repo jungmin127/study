@@ -6,6 +6,7 @@ Run: uvicorn backend.main:app --reload --port 8000  (저장소 루트에서 실�
 """
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from typing import Literal, Union
 
@@ -19,6 +20,7 @@ from engine.cache import (
     list_combined_ranking,
     list_distinct_combos,
     list_latest_sweep_results,
+    list_segment_classification,
     list_sweep_history,
     load_result,
     run_backtest_cached,
@@ -27,10 +29,22 @@ from engine.condition_strategy import ConditionTreeStrategy
 from engine.condition_tree import find_unknown_indicators, is_empty, max_required_period
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import calculate_metrics
+from engine.segment_analysis import run_segment_batch
 from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
 from upbit_data_service import get_candles, get_current_prices, get_krw_markets, get_krw_markets_with_ticker
+
+def _to_utc_iso(value: str) -> str:
+    """naive 문자열(오프셋 표기 없이 UTC 값만 담고 있는 경우가 대부분)에도 항상
+    UTC 오프셋이 붙은 ISO 문자열을 반환한다. 프론트가 new Date(...)로 파싱할 때
+    오프셋 없는 문자열은 브라우저 로컬 시간대로 잘못 해석되므로(예: KST 환경에서
+    9시간 어긋남), API 경계에서 한 번에 명시적으로 맞춰준다."""
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
 
 app = FastAPI(title="Upbit Strategy EDA API", version="0.1.0")
 
@@ -41,6 +55,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _start_segment_batch() -> None:
+    """세그먼트(규모) 분류 배치를 백그라운드 스레드로 실행한다.
+
+    코인마다 캔들 조회가 필요해 271개 KRW 마켓 기준 1~2분 걸린다(요청당 rate-limit
+    딜레이 0.15초). 서버 기동을 이 시간만큼 막지 않기 위해 별도 스레드로 돌린다."""
+    threading.Thread(target=run_segment_batch, daemon=True).start()
 
 INDICATOR_CATALOG: list[dict] = [
     {
@@ -198,6 +221,11 @@ def get_markets() -> list[dict]:
     return get_krw_markets_with_ticker()
 
 
+@app.get("/api/v1/analysis/segments/size")
+def get_segment_size_analysis() -> list[dict]:
+    return list_segment_classification()
+
+
 @app.get("/api/v1/indicators/catalog")
 def get_indicator_catalog() -> list[dict]:
     return INDICATOR_CATALOG
@@ -248,7 +276,7 @@ def get_backtest_runs() -> list[dict]:
             "timeframe": r["timeframe"],
             "start": r["start"],
             "end": r["end"],
-            "created_at": r["created_at"],
+            "created_at": _to_utc_iso(r["created_at"]),
             "final_value": final_value,
             "return_rate": return_rate,
             "sharpe": r["sharpe"],
@@ -317,13 +345,18 @@ def get_backtest_detail(run_id: str) -> dict:
 
     ohlcv = [
         {
-            "time": row.candle_time.isoformat(),
+            "time": _to_utc_iso(row.candle_time.isoformat()),
             "open": float(row.open),
             "high": float(row.high),
             "low": float(row.low),
             "close": float(row.close),
         }
         for row in df_chart.itertuples()
+    ]
+
+    trades_out = [
+        {**t, "entryTime": _to_utc_iso(t["entryTime"]), "exitTime": _to_utc_iso(t["exitTime"])}
+        for t in trades
     ]
 
     return {
@@ -335,8 +368,8 @@ def get_backtest_detail(run_id: str) -> dict:
         "final_value": final_value,
         "metrics": metrics,
         "ohlcv": ohlcv,
-        "trades": trades,
-        "live_price_as_of": live_price_as_of,
+        "trades": trades_out,
+        "live_price_as_of": _to_utc_iso(live_price_as_of) if live_price_as_of else None,
     }
 
 

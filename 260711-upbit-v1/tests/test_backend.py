@@ -7,6 +7,7 @@ import backend.main as backend_module
 import engine.cache as cache_module
 from backend.main import app
 from engine.cache import save_result, save_sweep_result
+from engine.cache import save_segment_classification
 from tests.signal_fixtures import make_oscillating_df
 
 
@@ -112,10 +113,11 @@ def test_backtest_detail_returns_result_for_known_run(monkeypatch, tmp_path):
     assert body["metrics"]["total_trades"] == 0
     assert isinstance(body["ohlcv"], list)
     assert len(body["ohlcv"]) > 0
-    # candle_time이 naive로 정규화됐는지 확인 — tz-aware면 "+00:00" 같은 오프셋이 붙어있다.
-    # trades의 entryTime/exitTime(backtrader가 tz를 벗겨낸 naive 문자열)과 기준을 맞춰야
-    # 프론트에서 new Date(...)로 파싱할 때 캔들과 마커 위치가 어긋나지 않는다.
-    assert "+00:00" not in body["ohlcv"][0]["time"]
+    # candle_time에 UTC 오프셋이 명시돼야 프론트의 new Date(...)가 이를 로컬 시간대로
+    # 잘못 해석하지 않는다(naive 문자열은 브라우저 로컬 시간대로 파싱되어 캔들이
+    # 엉뚱한 날짜/시간에 그려지는 버그가 있었다). trades의 entryTime/exitTime에도
+    # 동일하게 오프셋을 붙여, 캔들과 거래 마커가 같은 기준으로 파싱되게 한다.
+    assert body["ohlcv"][0]["time"].endswith("+00:00")
 
 
 def test_delete_backtest_removes_run_from_list(monkeypatch, tmp_path):
@@ -435,6 +437,11 @@ def test_backtest_detail_revalues_open_position_with_extended_candles(monkeypatc
     assert body["trades"][0]["exitPrice"] == round(last_close, 8)
     assert body["trades"][0]["pnl"] != 500.0
     assert len(body["ohlcv"]) == 40
+    # 저장된(naive) entryTime과 재평가로 새로 채워진 exitTime 모두 UTC 오프셋이
+    # 붙어서 나가야 프론트가 new Date(...)로 둘 다 같은 기준으로 파싱한다.
+    assert body["trades"][0]["entryTime"].endswith("+00:00")
+    assert body["trades"][0]["exitTime"].endswith("+00:00")
+    assert body["live_price_as_of"].endswith("+00:00")
 
 
 def test_backtest_detail_skips_revaluation_for_legacy_trade_without_size(monkeypatch, tmp_path):
@@ -464,6 +471,10 @@ def test_backtest_detail_skips_revaluation_for_legacy_trade_without_size(monkeyp
     assert body["live_price_as_of"] is None
     assert body["trades"][0]["pnl"] == 500.0
     assert body["trades"][0]["exitPrice"] == 105.0
+    # 재평가 대상이 아니어도(레거시 거래) 저장된 naive 시각에는 여전히 UTC
+    # 오프셋을 붙여 내보내야 한다.
+    assert body["trades"][0]["entryTime"].endswith("+00:00")
+    assert body["trades"][0]["exitTime"].endswith("+00:00")
 
 
 def test_backtest_detail_falls_back_when_extended_candle_fetch_fails(monkeypatch, tmp_path):
@@ -564,6 +575,25 @@ def test_get_backtests_includes_strategy_condition_summaries(monkeypatch, tmp_pa
     assert body[0]["is_live"] is False
 
 
+def test_get_backtests_created_at_has_utc_offset(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    resp = client.get("/api/v1/backtests")
+    body = resp.json()
+    # created_at은 SQLite datetime('now')로 저장되는 "YYYY-MM-DD HH:MM:SS" naive
+    # UTC 문자열이다. 프론트가 이를 로컬 시간대로 잘못 해석하지 않도록 오프셋을
+    # 붙여 내보내야 한다.
+    assert body[0]["created_at"].endswith("+00:00")
+
+
 def test_get_backtests_falls_back_when_ticker_fetch_fails(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
 
@@ -593,3 +623,55 @@ def test_get_backtests_falls_back_when_ticker_fetch_fails(monkeypatch, tmp_path)
     body = resp.json()
     assert body[0]["is_live"] is False
     assert body[0]["final_value"] == 10500.0
+
+
+def test_get_segment_size_analysis_returns_saved_rows(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_segment_classification([
+        {
+            "market": "KRW-BTC",
+            "korean_name": "비트코인",
+            "segment": "large",
+            "trade_value_24h": 45_700_000_000.0,
+            "volatility_30d": 0.012,
+            "trade_value_percentile": 99.0,
+            "volatility_percentile": 10.0,
+            "is_caution": False,
+            "computed_at": "2026-07-25T00:00:00+00:00",
+        },
+    ])
+
+    resp = client.get("/api/v1/analysis/segments/size")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["market"] == "KRW-BTC"
+    assert body[0]["segment"] == "large"
+    assert body[0]["is_caution"] is False
+
+
+def test_get_segment_size_analysis_returns_empty_list_before_first_batch(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.get("/api/v1/analysis/segments/size")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_startup_event_spawns_segment_batch_as_daemon_thread(monkeypatch):
+    calls = []
+
+    class _FakeThread:
+        def __init__(self, target=None, daemon=None):
+            calls.append((target, daemon))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(backend_module.threading, "Thread", _FakeThread)
+
+    with TestClient(app):
+        pass
+
+    assert calls == [(backend_module.run_segment_batch, True)]
