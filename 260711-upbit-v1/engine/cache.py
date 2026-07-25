@@ -60,6 +60,20 @@ CREATE TABLE IF NOT EXISTS sweep_history (
 );
 """
 
+_SCHEMA += """
+CREATE TABLE IF NOT EXISTS segment_classification (
+    market TEXT PRIMARY KEY,
+    korean_name TEXT NOT NULL,
+    segment TEXT NOT NULL,
+    trade_value_24h REAL,
+    volatility_30d REAL,
+    trade_value_percentile REAL,
+    volatility_percentile REAL,
+    is_caution INTEGER NOT NULL,
+    computed_at TEXT NOT NULL
+);
+"""
+
 
 _JSON_PRIMITIVES = (str, int, float, bool, type(None))
 
@@ -445,3 +459,49 @@ def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int 
             "sell_conditions": params["sell_conditions"],
         })
     return runs
+
+
+def save_segment_classification(rows: list[dict]) -> None:
+    """세그먼트(규모) 분류 결과를 저장한다. 배치 실행마다 테이블을 통째로 교체한다
+    (과거 분류 이력은 보관하지 않고 항상 최신 1회분만 유지)."""
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM segment_classification")
+        conn.executemany(
+            "INSERT INTO segment_classification "
+            "(market, korean_name, segment, trade_value_24h, volatility_30d, "
+            " trade_value_percentile, volatility_percentile, is_caution, computed_at) "
+            "VALUES (:market, :korean_name, :segment, :trade_value_24h, :volatility_30d, "
+            " :trade_value_percentile, :volatility_percentile, :is_caution, :computed_at)",
+            [{**r, "is_caution": int(r["is_caution"])} for r in rows],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_segment_classification() -> list[dict]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT market, korean_name, segment, trade_value_24h, volatility_30d, "
+            "       trade_value_percentile, volatility_percentile, is_caution, computed_at "
+            "FROM segment_classification "
+            "ORDER BY trade_value_24h DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            "market": r[0],
+            "korean_name": r[1],
+            "segment": r[2],
+            "trade_value_24h": r[3],
+            "volatility_30d": r[4],
+            "trade_value_percentile": r[5],
+            "volatility_percentile": r[6],
+            "is_caution": bool(r[7]),
+            "computed_at": r[8],
+        }
+        for r in rows
+    ]

@@ -12,7 +12,9 @@ from engine.cache import (
     list_combined_ranking,
     list_distinct_combos,
     list_latest_sweep_results,
+    list_segment_classification,
     list_sweep_history,
+    save_segment_classification,
     save_sweep_result,
 )
 
@@ -475,3 +477,49 @@ def test_list_backtest_runs_includes_revaluation_fields_and_strategy_conditions(
     assert run["buy_conditions"]["conditions"][0]["indicator"] == "RSI"
     assert run["sell_conditions"]["conditions"][0]["threshold"] == 70
     assert run["trades"][0]["size"] == 1.0
+
+
+def _sample_segment_row(**overrides) -> dict:
+    row = {
+        "market": "KRW-BTC",
+        "korean_name": "비트코인",
+        "segment": "large",
+        "trade_value_24h": 45_700_000_000.0,
+        "volatility_30d": 0.012,
+        "trade_value_percentile": 99.0,
+        "volatility_percentile": 10.0,
+        "is_caution": False,
+        "computed_at": "2026-07-25T00:00:00+00:00",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_save_and_list_segment_classification_round_trips(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    save_segment_classification([
+        _sample_segment_row(),
+        _sample_segment_row(
+            market="KRW-XXX", korean_name="잡코인", segment="junk",
+            trade_value_24h=1_000_000.0, volatility_30d=0.09,
+            trade_value_percentile=2.0, volatility_percentile=95.0, is_caution=True,
+        ),
+    ])
+
+    rows = list_segment_classification()
+    assert [r["market"] for r in rows] == ["KRW-BTC", "KRW-XXX"]
+    assert rows[0]["segment"] == "large"
+    assert rows[0]["is_caution"] is False
+    assert rows[1]["is_caution"] is True
+    assert rows[1]["trade_value_percentile"] == 2.0
+
+
+def test_save_segment_classification_replaces_previous_batch(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    save_segment_classification([_sample_segment_row(market="KRW-OLD")])
+    save_segment_classification([_sample_segment_row(market="KRW-NEW")])
+
+    rows = list_segment_classification()
+    assert [r["market"] for r in rows] == ["KRW-NEW"]
