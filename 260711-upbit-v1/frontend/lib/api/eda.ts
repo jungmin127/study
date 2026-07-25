@@ -7,6 +7,7 @@ import type {
   Market,
   RunBacktestRequest,
   RunBacktestResponse,
+  SegmentSizeEntry,
   SweepResult,
   ValidateBacktestResponse,
 } from '@/lib/types/eda';
@@ -67,4 +68,8 @@ export function deleteBacktestRun(runId: string): Promise<{ deleted: boolean }> 
   return apiFetch<{ deleted: boolean }>(`/api/v1/backtests/${runId}`, {
     method: 'DELETE',
   });
+}
+
+export function getSegmentSizeAnalysis(): Promise<SegmentSizeEntry[]> {
+  return apiFetch<SegmentSizeEntry[]>('/api/v1/analysis/segments/size');
 }

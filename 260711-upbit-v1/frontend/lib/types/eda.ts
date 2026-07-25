@@ -78,6 +78,18 @@ export interface Market {
   trade_price_24h: number | null;
 }
 
+export interface SegmentSizeEntry {
+  market: string;
+  korean_name: string;
+  segment: 'large' | 'mid' | 'junk';
+  trade_value_24h: number | null;
+  volatility_30d: number | null;
+  trade_value_percentile: number | null;
+  volatility_percentile: number | null;
+  is_caution: boolean;
+  computed_at: string;
+}
+
 export interface IndicatorParamDef {
   key: string;
   label: string;
