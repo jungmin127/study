@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import DeleteRunButton from '@/components/DeleteRunButton';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { summarizeGroup } from '@/lib/condition-summary';
+import { formatDateTime } from '@/lib/format';
 import type { BacktestRunSummary } from '@/lib/types/eda';
 
 type SortKey = 'return_rate' | 'created_at' | 'market' | 'timeframe';
@@ -105,7 +106,7 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
               {run.return_rate?.toFixed(2) ?? '-'}
               {run.is_live && <span className="ml-1 text-xs text-muted-foreground">(실시간)</span>}
             </TableCell>
-            <TableCell>{run.created_at}</TableCell>
+            <TableCell>{formatDateTime(run.created_at)}</TableCell>
             <TableCell>
               <Link href={`/backtests/${run.run_id}`} className="text-blue-600 hover:underline dark:text-blue-400">
                 보기
