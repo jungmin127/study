@@ -674,4 +674,21 @@ def test_startup_event_spawns_segment_batch_as_daemon_thread(monkeypatch):
     with TestClient(app):
         pass
 
-    assert calls == [(backend_module.run_segment_batch, True)]
+    assert calls == [(backend_module._run_segment_batch_safely, True)]
+
+
+def test_run_segment_batch_safely_swallows_exceptions(monkeypatch):
+    def _raise():
+        raise RuntimeError("업비트 API 실패")
+
+    monkeypatch.setattr(backend_module, "run_segment_batch", _raise)
+
+    backend_module._run_segment_batch_safely()  # 예외가 여기서 밖으로 나오면 테스트 실패
+
+
+def test_run_segment_batch_safely_prints_count_on_success(monkeypatch, capsys):
+    monkeypatch.setattr(backend_module, "run_segment_batch", lambda: 271)
+
+    backend_module._run_segment_batch_safely()
+
+    assert "271" in capsys.readouterr().out

@@ -57,13 +57,23 @@ app.add_middleware(
 )
 
 
+def _run_segment_batch_safely() -> None:
+    try:
+        n = run_segment_batch()
+        print(f"[segment_batch] 완료: {n}개 마켓 분류")
+    except Exception as exc:
+        print(f"[segment_batch] 실패: {exc}")
+
+
 @app.on_event("startup")
 def _start_segment_batch() -> None:
     """세그먼트(규모) 분류 배치를 백그라운드 스레드로 실행한다.
 
     코인마다 캔들 조회가 필요해 271개 KRW 마켓 기준 1~2분 걸린다(요청당 rate-limit
-    딜레이 0.15초). 서버 기동을 이 시간만큼 막지 않기 위해 별도 스레드로 돌린다."""
-    threading.Thread(target=run_segment_batch, daemon=True).start()
+    딜레이 0.15초). 서버 기동을 이 시간만큼 막지 않기 위해 별도 스레드로 돌린다.
+    _run_segment_batch_safely로 감싸 실패 시에도 서버 로그에 남도록 한다(성공/실패
+    모두 조용히 사라지면 배치가 계속 도는 중인지 죽었는지 구분할 수 없다)."""
+    threading.Thread(target=_run_segment_batch_safely, daemon=True).start()
 
 INDICATOR_CATALOG: list[dict] = [
     {
