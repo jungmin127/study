@@ -245,3 +245,23 @@ def get_current_prices(markets: list[str]) -> dict[str, float]:
     resp = httpx.get(f"{UPBIT_BASE_URL}/ticker", params={"markets": market_codes}, timeout=10)
     resp.raise_for_status()
     return {t["market"]: t["trade_price"] for t in resp.json()}
+
+
+def get_market_cautions() -> dict[str, bool]:
+    """마켓별 업비트 공식 유의종목 지정 여부(warning 또는 caution 플래그 중 하나라도 True)를 반환한다.
+
+    "세력의 가격 조종 가능성" 같은 잡주 특성과 가장 가깝게 대응되는 공식 신호라, 세그먼트
+    점수 계산에는 넣지 않고(스냅샷 시점에 활성 플래그가 붙는 코인이 적어 전체 분류축으로 쓰기엔
+    약함) 화면에 별도 배지로만 보여주는 용도로 쓴다."""
+    resp = httpx.get(f"{UPBIT_BASE_URL}/market/all", params={"isDetails": "true"}, timeout=10)
+    resp.raise_for_status()
+    all_markets = resp.json()
+
+    result: dict[str, bool] = {}
+    for m in all_markets:
+        if not m["market"].startswith("KRW-"):
+            continue
+        event = m.get("market_event") or {}
+        caution = event.get("caution") or {}
+        result[m["market"]] = bool(event.get("warning")) or any(caution.values())
+    return result

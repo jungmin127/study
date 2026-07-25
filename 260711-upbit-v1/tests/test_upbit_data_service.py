@@ -391,3 +391,59 @@ def test_get_current_prices_maps_market_to_trade_price(monkeypatch):
 
     prices = upbit_data_service.get_current_prices(["KRW-BTC", "KRW-ETH"])
     assert prices == {"KRW-BTC": 150_000_000.0, "KRW-ETH": 5_000_000.0}
+
+
+def test_get_market_cautions_flags_warning_or_any_caution(monkeypatch):
+    import upbit_data_service
+
+    class _FakeResponse:
+        def __init__(self, body):
+            self._body = body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._body
+
+    def _fake_get(url, params=None, timeout=None):
+        assert "market/all" in url
+        assert params == {"isDetails": "true"}
+        return _FakeResponse([
+            {
+                "market": "KRW-BTC",
+                "market_event": {
+                    "warning": False,
+                    "caution": {
+                        "PRICE_FLUCTUATIONS": False,
+                        "TRADING_VOLUME_SOARING": False,
+                        "DEPOSIT_AMOUNT_SOARING": False,
+                        "GLOBAL_PRICE_DIFFERENCES": False,
+                        "CONCENTRATION_OF_SMALL_ACCOUNTS": False,
+                    },
+                },
+            },
+            {
+                "market": "KRW-XXX",
+                "market_event": {
+                    "warning": False,
+                    "caution": {
+                        "PRICE_FLUCTUATIONS": False,
+                        "TRADING_VOLUME_SOARING": False,
+                        "DEPOSIT_AMOUNT_SOARING": False,
+                        "GLOBAL_PRICE_DIFFERENCES": False,
+                        "CONCENTRATION_OF_SMALL_ACCOUNTS": True,
+                    },
+                },
+            },
+            {
+                "market": "KRW-WARN",
+                "market_event": {"warning": True, "caution": {}},
+            },
+            {"market": "BTC-ETH", "market_event": {"warning": True, "caution": {}}},
+        ])
+
+    monkeypatch.setattr(upbit_data_service.httpx, "get", _fake_get)
+
+    cautions = upbit_data_service.get_market_cautions()
+    assert cautions == {"KRW-BTC": False, "KRW-XXX": True, "KRW-WARN": True}
