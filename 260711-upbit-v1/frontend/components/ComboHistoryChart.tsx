@@ -65,7 +65,7 @@ export default function ComboHistoryChart() {
           <XAxis dataKey="swept_at" tick={{ fontSize: 11 }} />
           <YAxis tick={{ fontSize: 11 }} />
           <Tooltip />
-          <Line type="monotone" dataKey="return_rate" stroke="var(--color-chart-1)" name="수익률(%)" />
+          <Line type="monotone" dataKey="return_rate" stroke="var(--color-primary)" name="수익률(%)" />
         </LineChart>
       </ResponsiveContainer>
     </div>

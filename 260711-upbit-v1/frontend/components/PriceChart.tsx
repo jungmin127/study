@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import {
   createChart,
   CandlestickSeries,
+  ColorType,
   CrosshairMode,
   createSeriesMarkers,
   type UTCTimestamp,
@@ -62,13 +63,17 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
     const markerEntry = resolveColor('--marker-entry');
     const markerExit = resolveColor('--marker-exit');
     const markerBoundary = resolveColor('--marker-boundary');
+    const background = resolveColor('--background');
+    const foreground = resolveColor('--foreground');
+    const border = resolveColor('--border');
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height: 320,
+      layout: { background: { type: ColorType.Solid, color: background }, textColor: foreground },
       crosshair: { mode: CrosshairMode.Normal },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#d1d5db' },
-      rightPriceScale: { borderColor: '#d1d5db' },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: border },
+      rightPriceScale: { borderColor: border },
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
