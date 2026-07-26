@@ -57,12 +57,13 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
   WILLIAMS_R: { low: -80, high: -20 },
 };
 
-const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal']);
+const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT']);
 const PRICE_SCALE_INDICATORS = new Set(['SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower']);
 
 const POSITION_RELATIVE_DEFAULTS: Record<string, number> = {
   STOP_LOSS_PCT: -5,
   TAKE_PROFIT_PCT: 10,
+  HOLDING_PERIOD_BARS: 20,
 };
 
 function recommendedThreshold(
