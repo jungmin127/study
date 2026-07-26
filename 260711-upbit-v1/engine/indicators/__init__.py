@@ -5,6 +5,7 @@ from .momentum import (
     create_cci,
     create_macd_line,
     create_macd_signal,
+    create_momentum_pct,
     create_rsi,
     create_stoch_d,
     create_stoch_k,
@@ -32,6 +33,7 @@ INDICATOR_FACTORY: dict[str, object] = {
     "OBV": create_obv,
     "VOLUME_SMA": create_volume_sma,
     "MARKET_TREND": create_market_trend,
+    "MOMENTUM_PCT": create_momentum_pct,
 }
 
 __all__ = ["INDICATOR_FACTORY"]

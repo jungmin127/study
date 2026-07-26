@@ -42,3 +42,8 @@ def create_cci(data: bt.feeds.PandasData, **params) -> bt.Indicator:
 def create_williams_r(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     period = int(params.get("period", 14))
     return bt.indicators.WilliamsR(data, period=period)
+
+
+def create_momentum_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 5))
+    return bt.indicators.ROC100(data, period=period)

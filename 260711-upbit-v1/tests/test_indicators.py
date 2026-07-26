@@ -67,3 +67,10 @@ def test_market_trend_matches_manual_close_minus_sma_of_extra_line():
     market_close = df["close"] * 2 + 1000
     manual = (market_close - market_close.rolling(5).mean()).iloc[-1]
     assert abs(values[-1] - manual) < 1e-6
+
+
+def test_momentum_pct_matches_manual_pct_change_over_period():
+    values = _run_probe("MOMENTUM_PCT", {"period": 5})
+    df = make_oscillating_df()
+    manual = (df["close"].iloc[-1] - df["close"].iloc[-6]) / df["close"].iloc[-6] * 100
+    assert abs(values[-1] - manual) < 1e-6
