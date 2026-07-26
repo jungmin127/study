@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Copy, Eye } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import DeleteRunButton from '@/components/DeleteRunButton';
@@ -26,6 +26,20 @@ function sortRuns(runs: BacktestRunSummary[], key: SortKey | null, dir: SortDir)
     if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor;
     return String(av).localeCompare(String(bv)) * factor;
   });
+}
+
+function buildCopyHref(run: BacktestRunSummary): string {
+  const params = new URLSearchParams({
+    market: run.market,
+    timeframe: run.timeframe,
+    start: run.start.slice(0, 10),
+    startTime: run.start.slice(11, 16),
+    end: run.end.slice(0, 10),
+    endTime: run.end.slice(11, 16),
+    buy: JSON.stringify(run.buy_conditions),
+    sell: JSON.stringify(run.sell_conditions),
+  });
+  return `/?${params.toString()}`;
 }
 
 interface BacktestRunsTableProps {
@@ -81,6 +95,7 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
             </button>
           </TableHead>
           <TableHead>상세</TableHead>
+          <TableHead>복사</TableHead>
           <TableHead>삭제</TableHead>
         </TableRow>
       </TableHeader>
@@ -108,12 +123,6 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
             </TableCell>
             <TableCell>{formatDateTime(run.created_at)}</TableCell>
             <TableCell>
-              {/* base-ui's Button doesn't support Radix-style `asChild` composition — it
-                  exposes a `render` prop instead, so the Link is swapped in as the underlying
-                  element while keeping Button's variant/size styling. `nativeButton={false}`
-                  is required here: base-ui's Button assumes the `render` target is a real
-                  <button> by default and otherwise logs a console error since Link renders
-                  an <a>. */}
               <Button
                 variant="link"
                 size="sm"
@@ -124,6 +133,19 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
               >
                 <Eye className="size-3.5" />
                 보기
+              </Button>
+            </TableCell>
+            <TableCell>
+              <Button
+                variant="link"
+                size="sm"
+                className="px-0"
+                nativeButton={false}
+                role="link"
+                render={<Link href={buildCopyHref(run)} />}
+              >
+                <Copy className="size-3.5" />
+                복사
               </Button>
             </TableCell>
             <TableCell>
