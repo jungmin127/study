@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { CalendarRange, Play, TriangleAlert, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,27 +42,51 @@ function formatCapital(digits: string): string {
   return Number(digits).toLocaleString('ko-KR');
 }
 
+function parsePreset(searchParams: URLSearchParams) {
+  function parseConditionGroup(raw: string | null): ConditionGroup {
+    if (!raw) return EMPTY_CONDITION_GROUP;
+    try {
+      return JSON.parse(raw) as ConditionGroup;
+    } catch {
+      return EMPTY_CONDITION_GROUP;
+    }
+  }
+
+  return {
+    market: searchParams.get('market') ?? '',
+    timeframe: searchParams.get('timeframe') ?? CANDLE_UNITS[0].timeframe,
+    startDate: searchParams.get('start') ?? defaultDate(90),
+    startTime: searchParams.get('startTime') ?? '00:00',
+    endDate: searchParams.get('end') ?? defaultDate(0),
+    endTime: searchParams.get('endTime') ?? '00:00',
+    buyConditions: parseConditionGroup(searchParams.get('buy')),
+    sellConditions: parseConditionGroup(searchParams.get('sell')),
+  };
+}
+
 export default function PortSetupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [preset] = useState(() => parsePreset(searchParams));
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
 
   const [markets, setMarkets] = useState<Market[]>([]);
   const [marketsError, setMarketsError] = useState<string | null>(null);
-  const [market, setMarket] = useState('');
+  const [market, setMarket] = useState(preset.market);
 
   const [catalog, setCatalog] = useState<IndicatorCatalogItem[]>([]);
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
-  const [buyConditions, setBuyConditions] = useState<ConditionGroup>(EMPTY_CONDITION_GROUP);
-  const [sellConditions, setSellConditions] = useState<ConditionGroup>(EMPTY_CONDITION_GROUP);
+  const [buyConditions, setBuyConditions] = useState<ConditionGroup>(preset.buyConditions);
+  const [sellConditions, setSellConditions] = useState<ConditionGroup>(preset.sellConditions);
   const [capital, setCapital] = useState('1000000');
-  const [timeframe, setTimeframe] = useState(CANDLE_UNITS[0].timeframe);
-  const [startDate, setStartDate] = useState(defaultDate(90));
-  const [startTime, setStartTime] = useState('00:00');
-  const [endDate, setEndDate] = useState(defaultDate(0));
-  const [endTime, setEndTime] = useState('00:00');
+  const [timeframe, setTimeframe] = useState(preset.timeframe);
+  const [startDate, setStartDate] = useState(preset.startDate);
+  const [startTime, setStartTime] = useState(preset.startTime);
+  const [endDate, setEndDate] = useState(preset.endDate);
+  const [endTime, setEndTime] = useState(preset.endTime);
 
   const [submitting, setSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[] | null>(null);
