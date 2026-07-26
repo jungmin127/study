@@ -2,14 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { CalendarRange, Play, TriangleAlert, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import CoinSelect, { sortMarkets } from '@/components/CoinSelect';
 import StrategyConditionBuilder from '@/components/StrategyConditionBuilder';
 import type { ConditionGroup } from '@/lib/types/strategy';
 import type { IndicatorCatalogItem, Market } from '@/lib/types/eda';
 import { getIndicatorCatalog, getMarkets, runBacktest, validateBacktest } from '@/lib/api/eda';
 import { ApiError } from '@/lib/api/client';
-import { INPUT_CLASS, SELECT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
+import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 
 const CANDLE_UNITS = [
   { label: '15분', timeframe: 'minutes15' },
@@ -107,10 +118,9 @@ export default function PortSetupForm() {
       <div className="grid grid-cols-[1fr_1fr_4fr] gap-6">
         <div>
           <label className="mb-1.5 block text-sm font-medium">포트 제목</label>
-          <input
+          <Input
             type="text"
             placeholder="포트폴리오 제목을 입력해 주세요."
-            className={`${INPUT_CLASS} w-full`}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
@@ -119,10 +129,9 @@ export default function PortSetupForm() {
           <label className="mb-1.5 block text-sm font-medium">
             포트 설명 <span className="font-normal text-muted-foreground">(선택사항)</span>
           </label>
-          <input
+          <Input
             type="text"
             placeholder="포트폴리오에 대한 설명을 100자 이내로 남겨주세요."
-            className={`${INPUT_CLASS} w-full`}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
@@ -130,13 +139,23 @@ export default function PortSetupForm() {
         <div>
           <label className="mb-1.5 block text-sm font-medium">코인 선택</label>
           <CoinSelect markets={markets} value={market} onChange={setMarket} />
-          {marketsError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{marketsError}</p>}
+          {marketsError && (
+            <p className="mt-1 flex items-center gap-1 text-xs text-destructive">
+              <TriangleAlert className="size-3.5" />
+              {marketsError}
+            </p>
+          )}
         </div>
       </div>
 
       <div>
         <h2 className="mb-2 text-sm font-semibold">전략 선택</h2>
-        {catalogError && <p className="mb-2 text-xs text-red-600 dark:text-red-400">{catalogError}</p>}
+        {catalogError && (
+          <p className="mb-2 flex items-center gap-1 text-xs text-destructive">
+            <TriangleAlert className="size-3.5" />
+            {catalogError}
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-4">
           <div className="rounded-md border">
             <StrategyConditionBuilder
@@ -165,10 +184,9 @@ export default function PortSetupForm() {
           <div>
             <div className={SECTION_HEADER_CLASS}>운용자금</div>
             <div className="flex items-center gap-2 p-4">
-              <input
+              <Input
                 type="text"
                 inputMode="numeric"
-                className={`${INPUT_CLASS} w-full`}
                 value={formatCapital(capital)}
                 onChange={(e) => setCapital(e.target.value.replace(/[^0-9]/g, ''))}
               />
@@ -179,17 +197,20 @@ export default function PortSetupForm() {
           <div>
             <div className={SECTION_HEADER_CLASS}>봉데이터 선택</div>
             <div className="space-y-2 p-4">
-              <select
-                className={SELECT_CLASS}
-                value={timeframe}
-                onChange={(e) => setTimeframe(e.target.value)}
-              >
-                {CANDLE_UNITS.map((u) => (
-                  <option key={u.timeframe} value={u.timeframe}>
-                    {u.label}
-                  </option>
-                ))}
-              </select>
+              <Select value={timeframe} onValueChange={(value) => value !== null && setTimeframe(value)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue>
+                    {(value: string | null) => CANDLE_UNITS.find((u) => u.timeframe === value)?.label ?? ''}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {CANDLE_UNITS.map((u) => (
+                    <SelectItem key={u.timeframe} value={u.timeframe}>
+                      {u.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -197,44 +218,26 @@ export default function PortSetupForm() {
             <div className={SECTION_HEADER_CLASS}>운용기간</div>
             <div className="space-y-2 p-4">
               <div className="flex flex-nowrap items-center gap-2">
-                <input
-                  type="date"
-                  className={INPUT_CLASS}
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
-                <input
-                  type="time"
-                  className={INPUT_CLASS}
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                />
+                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
                 <span className="text-sm text-muted-foreground">~</span>
-                <input
-                  type="date"
-                  className={INPUT_CLASS}
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
-                <input
-                  type="time"
-                  className={INPUT_CLASS}
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                />
+                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <p className="text-xs text-muted-foreground">기간이 길고 봉타입이 짧을수록 최초 조회 시 시간이 걸릴 수 있습니다.</p>
-                <button
+                <Button
                   type="button"
-                  className="whitespace-nowrap rounded-md border border-input bg-background px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-800"
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     setStartDate(defaultDate(90));
                     setEndDate(defaultDate(0));
                   }}
                 >
+                  <CalendarRange className="size-3.5" />
                   최근 최대 기간 설정
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -243,32 +246,33 @@ export default function PortSetupForm() {
 
       <div className="flex items-center justify-end gap-2 border-t pt-4">
         <Button type="button" variant="outline" onClick={() => console.log('cancel (mock)')}>
+          <X className="size-4" />
           취소
         </Button>
         <Button type="button" onClick={handleRun} disabled={submitting || !market}>
+          <Play className="size-4" />
           {submitting ? '검증 중...' : '백테스트 실행'}
         </Button>
       </div>
 
-      {validationErrors && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-lg border bg-background p-6 shadow-lg">
-            <h3 className="mb-3 text-sm font-semibold text-red-600 dark:text-red-400">
+      <AlertDialog open={!!validationErrors} onOpenChange={(open) => !open && setValidationErrors(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-1.5 text-destructive">
+              <TriangleAlert className="size-4" />
               백테스트를 실행할 수 없습니다
-            </h3>
-            <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-              {validationErrors.map((error, i) => (
-                <li key={i}>{error}</li>
-              ))}
-            </ul>
-            <div className="flex justify-end">
-              <Button type="button" onClick={() => setValidationErrors(null)}>
-                확인
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {(validationErrors ?? []).map((error, i) => (
+              <li key={i}>{error}</li>
+            ))}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setValidationErrors(null)}>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

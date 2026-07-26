@@ -4,4 +4,4 @@ export const INPUT_CLASS =
 export const SELECT_CLASS = `${INPUT_CLASS} w-full`;
 
 export const SECTION_HEADER_CLASS =
-  'border-b bg-slate-50 px-4 py-2 text-sm font-medium dark:bg-slate-800';
+  'border-b bg-muted px-4 py-2 text-sm font-medium';
