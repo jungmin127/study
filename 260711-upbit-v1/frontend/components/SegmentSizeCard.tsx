@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { SegmentSizeEntry } from '@/lib/types/eda';
 
@@ -49,8 +50,9 @@ export default function SegmentSizeCard({ entries }: { entries: SegmentSizeEntry
                       <span>
                         {e.korean_name}
                         {e.is_caution && (
-                          <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">
-                            ⚠ 유의종목
+                          <span className="ml-2 inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="size-3.5" />
+                            유의종목
                           </span>
                         )}
                       </span>
