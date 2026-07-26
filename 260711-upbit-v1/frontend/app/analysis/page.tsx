@@ -1,24 +1,28 @@
-import { getSegmentSizeAnalysis } from '@/lib/api/eda';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import SegmentSizeCard from '@/components/SegmentSizeCard';
+import { getMarkets, getSegmentSizeAnalysis } from '@/lib/api/eda';
+import AnalysisSidebarView from '@/components/AnalysisSidebarView';
 
 export default async function AnalysisPage() {
-  const segmentSizeEntries = await getSegmentSizeAnalysis();
+  const [segmentSizeEntries, markets] = await Promise.all([
+    getSegmentSizeAnalysis(),
+    getMarkets(),
+  ]);
+
+  const marketByCode = new Map(markets.map((m) => [m.market, m]));
+  const segmentSizeRows = segmentSizeEntries.map((entry) => {
+    const market = marketByCode.get(entry.market);
+    return {
+      ...entry,
+      price: market?.price ?? null,
+      change_rate: market?.change_rate ?? null,
+      change_price: market?.change_price ?? null,
+      trade_price_24h: market?.trade_price_24h ?? null,
+    };
+  });
 
   return (
     <div>
       <h1 className="mb-4 text-lg font-semibold">분석</h1>
-      <div className="flex flex-col gap-4">
-        <SegmentSizeCard entries={segmentSizeEntries} />
-        <Card>
-          <CardHeader>
-            <CardTitle>세그먼트(섹터)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">준비 중입니다.</p>
-          </CardContent>
-        </Card>
-      </div>
+      <AnalysisSidebarView segmentSizeRows={segmentSizeRows} />
     </div>
   );
 }
