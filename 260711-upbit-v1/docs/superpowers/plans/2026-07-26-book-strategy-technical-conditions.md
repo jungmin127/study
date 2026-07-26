@@ -2,16 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 조건식 시스템에 두 가지 새 지표를 추가한다 — 보유기간 매도(`HOLDING_PERIOD_BARS`)와 KRW-BTC 추세 필터(`MARKET_TREND`). 가치투자 백테스트 서적을 조사한 결과, 재무제표 기반 팩터는 코인에 이식 불가능하지만 이 두 기술적 리스크관리 규칙은 이식 가능하다고 판단했다.
+**Goal:** 조건식 시스템에 세 가지 새 지표를 추가한다 — 보유기간 매도(`HOLDING_PERIOD_BARS`), KRW-BTC 추세 필터(`MARKET_TREND`), 모멘텀/역추세(`MOMENTUM_PCT`). 가치투자 백테스트 서적(`docs/book_ref/`)과 퀀트 단타 전략 서적(`docs/book_ref_v2/`)을 조사한 결과, 재무제표/기관수급 기반 팩터는 코인에 이식 불가능하지만 이 세 가지 기술적 규칙은 이식 가능하다고 판단했다.
 
-**Architecture:** `HOLDING_PERIOD_BARS`는 기존 `STOP_LOSS_PCT`/`TAKE_PROFIT_PCT`와 같은 "포지션 상태 기반" 패턴을 그대로 확장한다(`engine/condition_tree.py`의 `eval_group`, `engine/condition_strategy.py`의 봉 번호 추적). `MARKET_TREND`는 `engine/runner.py`에 이미 있지만 아무도 호출하지 않던 `PandasDataWithExtra`/`extra_column` 확장포인트를 되살려, KRW-BTC 캔들을 별도 데이터 라인으로 병합하고 그 위에서 `종가 - SMA` 지표를 계산한다. 백엔드는 조건식에 `MARKET_TREND`가 있을 때만 KRW-BTC 캔들을 추가로 조회한다.
+**Architecture:** `HOLDING_PERIOD_BARS`는 기존 `STOP_LOSS_PCT`/`TAKE_PROFIT_PCT`와 같은 "포지션 상태 기반" 패턴을 그대로 확장한다(`engine/condition_tree.py`의 `eval_group`, `engine/condition_strategy.py`의 봉 번호 추적). `MARKET_TREND`는 `engine/runner.py`에 이미 있지만 아무도 호출하지 않던 `PandasDataWithExtra`/`extra_column` 확장포인트를 되살려, KRW-BTC 캔들을 별도 데이터 라인으로 병합하고 그 위에서 `종가 - SMA` 지표를 계산한다. 백엔드는 조건식에 `MARKET_TREND`가 있을 때만 KRW-BTC 캔들을 추가로 조회한다. `MOMENTUM_PCT`는 대상 코인 자신의 종가만으로 계산되는 일반 지표라(외부 데이터도 포지션 상태도 불필요) `RSI`/`SMA`와 동일한 방식으로 `INDICATOR_FACTORY`에 등록하기만 하면 된다 — backtrader 내장 `ROC100`을 그대로 사용한다.
 
 **Tech Stack:** Python 3.11 / backtrader / pandas / FastAPI / Next.js 14 App Router / TypeScript.
 
 ## Global Constraints
 
 - `HOLDING_PERIOD_BARS`의 단위는 봉(bar) 개수다 — 캘린더 일수가 아니다.
-- `HOLDING_PERIOD_BARS`, `MARKET_TREND` 모두 카탈로그 등록만으로 프론트 조건 빌더 UI에 자동 노출된다(카탈로그를 순회하는 기존 구조 덕분) — 프론트 코드 변경은 추천 임계값/제로크로스 매핑 추가뿐이다.
+- `HOLDING_PERIOD_BARS`, `MARKET_TREND`, `MOMENTUM_PCT` 모두 카탈로그 등록만으로 프론트 조건 빌더 UI에 자동 노출된다(카탈로그를 순회하는 기존 구조 덕분) — 프론트 코드 변경은 추천 임계값/제로크로스 매핑 추가뿐이다.
+- `MOMENTUM_PCT`는 `sellOnly`/`fixedOperator` 없이 매수/매도 조건 양쪽에서 자유롭게 쓴다 — 양수 임계값+`>`는 모멘텀(상승 포착), 음수 임계값+`<`는 역추세(급락 포착)로, 지표 하나로 책의 두 전략을 표현한다. `MARKET_TREND`처럼 외부 데이터(`extra_column`)나 포지션 상태가 필요 없는 순수 가격 지표다.
 - `MARKET_TREND`은 KRW-BTC를 시장 대표 지표로 **하드코딩**한다 — 파라미터화하지 않는다.
 - `MARKET_TREND`이 조건식에 실제로 있을 때만 KRW-BTC 캔들을 추가 조회한다. 대상 마켓이 KRW-BTC 자신이면 별도 조회 없이 자기 종가를 재사용한다.
 - `GET /api/v1/backtests/validate`는 BTC 데이터를 별도로 조회하지 않는다(의도적 설계 — `max_required_period` 검증은 조건식의 숫자 파라미터만 보므로 이미 충분).
@@ -26,10 +27,11 @@
 - **Modify** `engine/condition_tree.py` — `POSITION_RELATIVE_INDICATORS`에 `HOLDING_PERIOD_BARS` 추가, `eval_group`에 `position_holding_bars` 파라미터 추가, `requires_market_data()` 헬퍼 추가.
 - **Modify** `engine/condition_strategy.py` — 진입 봉 번호 추적, `position_holding_bars` 계산 및 전달.
 - **Create** `engine/indicators/market.py` — `create_market_trend()` (KRW-BTC 종가 - SMA, `self.data.extra` 라인에서 계산).
-- **Modify** `engine/indicators/__init__.py` — `MARKET_TREND` 등록.
+- **Modify** `engine/indicators/momentum.py` — `create_momentum_pct()` (backtrader 내장 `ROC100`).
+- **Modify** `engine/indicators/__init__.py` — `MARKET_TREND`, `MOMENTUM_PCT` 등록.
 - **Modify** `engine/cache.py` — `run_backtest_cached()`에 `extra_column` 파라미터 추가, `run_backtest()`로 전달.
-- **Modify** `backend/main.py` — `INDICATOR_CATALOG`에 2개 항목 추가, `requires_market_data` import, `run_backtest_endpoint`에 KRW-BTC 캔들 조회/병합 로직 추가.
-- **Modify** `frontend/components/StrategyConditionBuilder.tsx` — `ZERO_CROSS_INDICATORS`에 `MARKET_TREND`, `POSITION_RELATIVE_DEFAULTS`에 `HOLDING_PERIOD_BARS` 추가.
+- **Modify** `backend/main.py` — `INDICATOR_CATALOG`에 3개 항목 추가, `requires_market_data` import, `run_backtest_endpoint`에 KRW-BTC 캔들 조회/병합 로직 추가.
+- **Modify** `frontend/components/StrategyConditionBuilder.tsx` — `ZERO_CROSS_INDICATORS`에 `MARKET_TREND`/`MOMENTUM_PCT`, `POSITION_RELATIVE_DEFAULTS`에 `HOLDING_PERIOD_BARS` 추가.
 - **Modify** `tests/test_condition_tree.py`, `tests/test_condition_strategy.py`, `tests/test_indicators.py`, `tests/test_runner.py`, `tests/test_cache.py`, `tests/test_backend.py` — 위 변경에 대한 테스트 추가.
 
 ---
@@ -548,7 +550,105 @@ git commit -m "feat: KRW-BTC 추세 필터(MARKET_TREND) 지표 추가"
 
 ---
 
-### Task 5: `engine/cache.py` — `extra_column` 전달
+### Task 5: `engine/indicators/momentum.py` — `MOMENTUM_PCT` 지표 (모멘텀/역추세)
+
+**Files:**
+- Modify: `engine/indicators/momentum.py`(파일 끝에 함수 추가)
+- Modify: `engine/indicators/__init__.py`(Task 4에서 만든 버전 위에 이어서 수정)
+- Test: `tests/test_indicators.py`
+
+**Interfaces:**
+- Consumes: 없음(대상 코인 자신의 `data.close`만 사용 — `MARKET_TREND`와 달리 `extra` 라인도 포지션 상태도 불필요).
+- Produces: `create_momentum_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator`, `INDICATOR_FACTORY["MOMENTUM_PCT"]`.
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/test_indicators.py` 파일 맨 아래에 추가:
+
+```python
+def test_momentum_pct_matches_manual_pct_change_over_period():
+    values = _run_probe("MOMENTUM_PCT", {"period": 5})
+    df = make_oscillating_df()
+    manual = (df["close"].iloc[-1] - df["close"].iloc[-6]) / df["close"].iloc[-6] * 100
+    assert abs(values[-1] - manual) < 1e-6
+```
+
+(이 지표는 `MARKET_TREND`와 달리 `data.extra` 라인이 필요 없으므로, 기존 `test_all_registered_indicators_produce_values` 루프에 별도 예외 처리 없이 자연스럽게 포함되어 함께 검증된다.)
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_indicators.py -v`
+Expected: `test_momentum_pct_matches_manual_pct_change_over_period` FAIL with `KeyError: 'MOMENTUM_PCT'`. `test_all_registered_indicators_produce_values`는 아직 `MOMENTUM_PCT`가 `INDICATOR_FACTORY`에 없으므로 이 시점에는 영향받지 않는다(루프가 기존 지표만 순회).
+
+- [ ] **Step 3: Write minimal implementation**
+
+`engine/indicators/momentum.py` 파일 끝에 추가:
+
+```python
+def create_momentum_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 5))
+    return bt.indicators.ROC100(data, period=period)
+```
+
+`engine/indicators/__init__.py` 전체를 아래로 교체(Task 4의 버전에 `create_momentum_pct` import와 `MOMENTUM_PCT` 등록만 추가):
+
+```python
+from __future__ import annotations
+
+from .market import create_market_trend
+from .momentum import (
+    create_cci,
+    create_macd_line,
+    create_macd_signal,
+    create_momentum_pct,
+    create_rsi,
+    create_stoch_d,
+    create_stoch_k,
+    create_williams_r,
+)
+from .trend import create_ema, create_sma, create_wma
+from .volatility import create_atr, create_bb_lower, create_bb_middle, create_bb_upper
+from .volume import create_obv, create_volume_sma
+
+INDICATOR_FACTORY: dict[str, object] = {
+    "SMA": create_sma,
+    "EMA": create_ema,
+    "WMA": create_wma,
+    "RSI": create_rsi,
+    "MACD_line": create_macd_line,
+    "MACD_signal": create_macd_signal,
+    "STOCH_K": create_stoch_k,
+    "STOCH_D": create_stoch_d,
+    "CCI": create_cci,
+    "WILLIAMS_R": create_williams_r,
+    "BB_upper": create_bb_upper,
+    "BB_lower": create_bb_lower,
+    "BB_middle": create_bb_middle,
+    "ATR": create_atr,
+    "OBV": create_obv,
+    "VOLUME_SMA": create_volume_sma,
+    "MARKET_TREND": create_market_trend,
+    "MOMENTUM_PCT": create_momentum_pct,
+}
+
+__all__ = ["INDICATOR_FACTORY"]
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_indicators.py -v`
+Expected: PASS (Task 4 이후 3개 + 신규 1개 = 4개)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add engine/indicators/momentum.py engine/indicators/__init__.py tests/test_indicators.py
+git commit -m "feat: 모멘텀/역추세 지표(MOMENTUM_PCT) 추가"
+```
+
+---
+
+### Task 6: `engine/cache.py` — `extra_column` 전달
 
 **Files:**
 - Modify: `engine/cache.py:185-280`(`run_backtest_cached` 함수)
@@ -644,22 +744,22 @@ git commit -m "feat: run_backtest_cached가 extra_column을 run_backtest로 전�
 
 ---
 
-### Task 6: `backend/main.py` — 카탈로그 등록 + KRW-BTC 캔들 병합
+### Task 7: `backend/main.py` — 카탈로그 등록 + KRW-BTC 캔들 병합
 
 **Files:**
-- Modify: `backend/main.py:29`(import), `backend/main.py:200-201`(`INDICATOR_CATALOG` 끝에 2개 항목 추가), `backend/main.py:454-501`(`run_backtest_endpoint`)
+- Modify: `backend/main.py:29`(import), `backend/main.py:200-201`(`INDICATOR_CATALOG` 끝에 3개 항목 추가), `backend/main.py:454-501`(`run_backtest_endpoint`)
 - Test: `tests/test_backend.py`
 
 **Interfaces:**
-- Consumes: `engine.condition_tree.requires_market_data(group: dict) -> bool` (Task 1), `engine.cache.run_backtest_cached(..., extra_column=None)` (Task 5), `upbit_data_service.get_candles(market, timeframe, start, end) -> pd.DataFrame` (기존).
-- Produces: `GET /api/v1/indicators/catalog` 응답에 `HOLDING_PERIOD_BARS`, `MARKET_TREND` 포함.
+- Consumes: `engine.condition_tree.requires_market_data(group: dict) -> bool` (Task 1), `engine.cache.run_backtest_cached(..., extra_column=None)` (Task 6), `upbit_data_service.get_candles(market, timeframe, start, end) -> pd.DataFrame` (기존).
+- Produces: `GET /api/v1/indicators/catalog` 응답에 `HOLDING_PERIOD_BARS`, `MARKET_TREND`, `MOMENTUM_PCT` 포함.
 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_backend.py` 파일 맨 아래에 추가:
 
 ```python
-def test_indicator_catalog_includes_holding_period_and_market_trend(monkeypatch, tmp_path):
+def test_indicator_catalog_includes_new_indicators(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
 
     resp = client.get("/api/v1/indicators/catalog")
@@ -667,6 +767,7 @@ def test_indicator_catalog_includes_holding_period_and_market_trend(monkeypatch,
 
     assert "HOLDING_PERIOD_BARS" in values
     assert "MARKET_TREND" in values
+    assert "MOMENTUM_PCT" in values
 
 
 def test_run_backtest_fetches_btc_candles_when_market_trend_used_on_other_market(monkeypatch, tmp_path):
@@ -721,8 +822,8 @@ def test_run_backtest_skips_btc_fetch_when_market_trend_not_used(monkeypatch, tm
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pytest tests/test_backend.py -k "catalog_includes_holding or market_trend or skips_btc_fetch" -v`
-Expected: `test_indicator_catalog_includes_holding_period_and_market_trend` FAIL(카탈로그에 아직 없음). 나머지 3개는 `MARKET_TREND`가 `INDICATOR_FACTORY`/카탈로그에 없어 400(알 수 없는 지표) 또는 backtrader 실행 중 `AttributeError`로 실패.
+Run: `pytest tests/test_backend.py -k "catalog_includes_new_indicators or market_trend or skips_btc_fetch" -v`
+Expected: `test_indicator_catalog_includes_new_indicators` FAIL(카탈로그에 아직 없음). 나머지 3개는 `MARKET_TREND`가 카탈로그에 없어 400(알 수 없는 지표) 또는 backtrader 실행 중 `AttributeError`로 실패.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -746,6 +847,12 @@ from engine.condition_tree import find_unknown_indicators, is_empty, max_require
         "params": [{"key": "period", "label": "기간", "default": 10}],
         "description": "대상 코인이 아니라 KRW-BTC 종가에서 KRW-BTC의 이동평균을 뺀 값입니다. 알트코인이 BTC 추세를 따라가는 경향을 이용해, 시장 전체가 약세일 때 매수를 쉬거나 매도하는 필터로 씁니다.",
         "example": "period=10이고 연산자 <, 임계값 0이면: KRW-BTC 종가가 자신의 10봉 이동평균보다 낮을 때(BTC가 하락 추세일 때) 조건이 참이 됩니다.",
+    },
+    {
+        "value": "MOMENTUM_PCT", "label": "모멘텀 (N봉 전 대비 등락률 %)", "category": "추세",
+        "params": [{"key": "period", "label": "기간", "default": 5}],
+        "description": "N봉 전 종가 대비 현재 종가의 등락률(%)입니다. 양수 임계값이면 최근 상승 흐름(모멘텀)을, 음수 임계값이면 최근 급락(눌림목)을 포착하는 조건으로 쓸 수 있습니다.",
+        "example": "period=5, 연산자 >, 임계값 3이면: 5봉 전보다 종가가 3% 이상 오른 상태(모멘텀 진입)를 포착합니다. period=5, 연산자 <, 임계값 -5면: 5봉 전보다 5% 이상 급락한 상태(눌림목/역추세 진입)를 포착합니다.",
     },
 ```
 
@@ -826,12 +933,12 @@ Expected: PASS (전체 기존 테스트 포함)
 
 ```bash
 git add backend/main.py tests/test_backend.py
-git commit -m "feat: 보유기간/BTC 추세 지표를 카탈로그에 등록하고 백테스트 실행 시 BTC 캔들 병합"
+git commit -m "feat: 보유기간/BTC 추세/모멘텀 지표를 카탈로그에 등록하고 백테스트 실행 시 BTC 캔들 병합"
 ```
 
 ---
 
-### Task 7: 프론트엔드 조건 빌더 기본값
+### Task 8: 프론트엔드 조건 빌더 기본값
 
 **Files:**
 - Modify: `frontend/components/StrategyConditionBuilder.tsx:50-56`
@@ -843,7 +950,7 @@ git commit -m "feat: 보유기간/BTC 추세 지표를 카탈로그에 등록하
 - [ ] **Step 1: `frontend/components/StrategyConditionBuilder.tsx:50-56`을 아래로 교체**
 
 ```tsx
-const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND']);
+const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT']);
 const PRICE_SCALE_INDICATORS = new Set(['SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower']);
 
 const POSITION_RELATIVE_DEFAULTS: Record<string, number> = {
@@ -853,6 +960,8 @@ const POSITION_RELATIVE_DEFAULTS: Record<string, number> = {
 };
 ```
 
+(`MOMENTUM_PCT`도 `MARKET_TREND`처럼 임계값 기본값을 0으로 두는 게 자연스럽다 — 사용자가 방향에 맞춰 양수/음수로 직접 조정한다.)
+
 - [ ] **Step 2: 타입 체크**
 
 Run: `cd frontend && npx tsc --noEmit`
@@ -861,13 +970,13 @@ Expected: 에러 없음
 - [ ] **Step 3: 브라우저로 확인**
 
 1. 백엔드(`uvicorn backend.main:app --reload --port 8000`)와 프론트(`npm run dev`)가 떠 있다면 재기동 후, `http://localhost:3000`(백테스트 설정 페이지)에서 매도 조건에 "+조건 추가"를 눌러 카탈로그를 연다.
-2. "손익" 카테고리에 "보유기간 (봉)"이 손절/익절과 나란히 보이는지, "시장 심리" 카테고리에 "시장 추세 (BTC 종가-이동평균)"가 보이는지 확인.
-3. `MARKET_TREND`를 조건에 추가했을 때 연산자가 자유롭게 선택되고(고정 연산자 아님) 기본 임계값이 0으로 채워지는지, `HOLDING_PERIOD_BARS`는 매도 조건에서만 보이고 연산자가 "≥"로 고정 표시되는지 확인.
-4. 실제로 두 조건을 하나씩 넣어 백테스트를 실행해보고, 500 에러 없이 정상적으로 결과가 나오는지 확인.
+2. "손익" 카테고리에 "보유기간 (봉)"이 손절/익절과 나란히 보이는지, "시장 심리" 카테고리에 "시장 추세 (BTC 종가-이동평균)"가, "추세" 카테고리에 "모멘텀 (N봉 전 대비 등락률 %)"가 SMA/EMA/WMA와 나란히 보이는지 확인.
+3. `MARKET_TREND`/`MOMENTUM_PCT`를 조건에 추가했을 때 연산자가 자유롭게 선택되고(고정 연산자 아님) 기본 임계값이 0으로 채워지는지, `HOLDING_PERIOD_BARS`는 매도 조건에서만 보이고 연산자가 "≥"로 고정 표시되는지 확인.
+4. 실제로 세 조건을 하나씩(그리고 `MOMENTUM_PCT`는 양수/음수 임계값 둘 다) 넣어 백테스트를 실행해보고, 500 에러 없이 정상적으로 결과가 나오는지 확인.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add frontend/components/StrategyConditionBuilder.tsx
-git commit -m "feat: 조건 빌더에 보유기간/BTC 추세 지표 추천값 추가"
+git commit -m "feat: 조건 빌더에 보유기간/BTC 추세/모멘텀 지표 추천값 추가"
 ```
