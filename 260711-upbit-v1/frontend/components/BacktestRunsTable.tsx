@@ -105,10 +105,11 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
     const results = await Promise.allSettled(ids.map((id) => deleteBacktestRun(id)));
     const failedCount = results.filter((r) => r.status === 'rejected').length;
     setBulkDeleting(false);
-    setConfirmOpen(false);
     setSelected(new Set());
     if (failedCount > 0) {
       setBulkError(`${failedCount}건 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.`);
+    } else {
+      setConfirmOpen(false);
     }
     router.refresh();
   }
