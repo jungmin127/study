@@ -516,11 +516,21 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except RuntimeError as exc:
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
+            if btc_df.empty:
+                raise HTTPException(
+                    status_code=400,
+                    detail="MARKET_TREND 조건에 필요한 KRW-BTC 캔들 데이터가 해당 기간에 없습니다",
+                )
             df = df.merge(
                 btc_df[["candle_time", "close"]].rename(columns={"close": "market_close"}),
                 on="candle_time",
                 how="left",
             )
+            if df["market_close"].isna().all():
+                raise HTTPException(
+                    status_code=400,
+                    detail="MARKET_TREND 조건에 필요한 KRW-BTC 캔들 데이터가 해당 기간에 없습니다",
+                )
             df["market_close"] = df["market_close"].ffill().bfill()
         extra_column = "market_close"
 

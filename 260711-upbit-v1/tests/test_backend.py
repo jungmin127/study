@@ -787,3 +787,100 @@ def test_run_backtest_returns_500_when_btc_fetch_raises_runtime_error(monkeypatc
 
     assert resp.status_code == 500
     assert "업비트 API 오류" in resp.json()["detail"]
+
+
+def test_run_backtest_merges_btc_close_at_correct_scale_and_fills_gaps(monkeypatch, tmp_path):
+    # target(KRW-ETH)의 close와 BTC의 close가 뒤바뀌는 버그, 그리고 candle_time이
+    # 일부 겹치지 않을 때 ffill().bfill()이 실제로 동작하는지를 함께 검증한다.
+    client = _client(monkeypatch, tmp_path)
+
+    target_df = make_oscillating_df()
+    btc_df = target_df.copy()
+    btc_df["close"] = btc_df["close"] * 2 + 1000  # target과 스케일이 다른 별도 시세임을 검증하기 위해 배율을 둠
+    gap_positions = [5, 6, 150]  # 5,6은 연속 gap, 150은 단독 gap
+    btc_df = btc_df.drop(btc_df.index[gap_positions]).reset_index(drop=True)
+
+    def _fake_get_candles(market, timeframe, start, end):
+        if market == "KRW-BTC":
+            return btc_df
+        return target_df
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    captured = {}
+    real_run_backtest_cached = backend_module.run_backtest_cached
+
+    def _capture(**kwargs):
+        captured["df"] = kwargs["df"].copy()
+        captured["extra_column"] = kwargs["extra_column"]
+        return real_run_backtest_cached(**kwargs)
+
+    monkeypatch.setattr(backend_module, "run_backtest_cached", _capture)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 5}, "operator": "<", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 200
+    assert captured["extra_column"] == "market_close"
+
+    merged = captured["df"].reset_index(drop=True)
+    expected_btc_close = target_df["close"] * 2 + 1000
+
+    # market_close는 target 자신의 close가 아니라 BTC의(스케일이 다른) close를 따라야 한다.
+    assert merged.loc[0, "market_close"] != target_df.loc[0, "close"]
+    assert abs(merged.loc[0, "market_close"] - expected_btc_close.iloc[0]) < 1e-6
+
+    # gap이 없는 행들은 정확히 BTC의 스케일된 close와 일치해야 한다.
+    for i in range(len(merged)):
+        if i in gap_positions:
+            continue
+        assert abs(merged.loc[i, "market_close"] - expected_btc_close.iloc[i]) < 1e-6
+
+    # 연속된 gap(5,6)은 이전 값(index 4)으로 ffill 되어야 한다.
+    assert abs(merged.loc[5, "market_close"] - expected_btc_close.iloc[4]) < 1e-6
+    assert abs(merged.loc[6, "market_close"] - expected_btc_close.iloc[4]) < 1e-6
+
+    # 단독 gap(150)도 이전 값(index 149)으로 ffill 되어야 한다.
+    assert abs(merged.loc[150, "market_close"] - expected_btc_close.iloc[149]) < 1e-6
+
+    # ffill/bfill 이후에는 NaN이 하나도 남아있으면 안 된다.
+    assert merged["market_close"].isna().sum() == 0
+
+
+def test_run_backtest_returns_400_when_btc_candles_are_empty_for_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_get_candles(market, timeframe, start, end):
+        if market == "KRW-BTC":
+            return make_oscillating_df(n=0)
+        return make_oscillating_df()
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 5}, "operator": "<", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 400
+    assert "MARKET_TREND 조건에 필요한 KRW-BTC 캔들 데이터가 해당 기간에 없습니다" in resp.json()["detail"]
+
+
+def test_run_backtest_returns_400_when_btc_candles_have_no_overlapping_candle_time(monkeypatch, tmp_path):
+    # btc_df에 행은 있지만 target과 candle_time이 전혀 겹치지 않는 경우 (merge 후 market_close 전체가 NaN)
+    client = _client(monkeypatch, tmp_path)
+
+    target_df = make_oscillating_df()
+    disjoint_btc_df = target_df.copy()
+    disjoint_btc_df["candle_time"] = disjoint_btc_df["candle_time"] + pd.Timedelta(days=10000)
+
+    def _fake_get_candles(market, timeframe, start, end):
+        if market == "KRW-BTC":
+            return disjoint_btc_df
+        return target_df
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 5}, "operator": "<", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 400
+    assert "MARKET_TREND 조건에 필요한 KRW-BTC 캔들 데이터가 해당 기간에 없습니다" in resp.json()["detail"]
