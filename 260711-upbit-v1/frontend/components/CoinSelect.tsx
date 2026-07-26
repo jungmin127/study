@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import type { Market } from '@/lib/types/eda';
 import { getMarkets } from '@/lib/api/eda';
 import { INPUT_CLASS } from '@/lib/ui-classes';
+import { changeColorClass, formatChangePrice, formatChangeRate, formatPrice, formatTradePrice24h } from '@/lib/market-format';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
@@ -21,35 +22,6 @@ export function sortMarkets(list: Market[], key: MarketSortKey, dir: SortDir): M
     if (bv === null) return -1;
     return (av - bv) * factor;
   });
-}
-
-function changeColorClass(rate: number | null): string {
-  if (!rate) return 'text-foreground';
-  return rate > 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400';
-}
-
-function formatPrice(price: number | null): string {
-  if (price === null) return '-';
-  if (price === 0) return '0';
-  if (price >= 100) return Math.round(price).toLocaleString('ko-KR');
-  const magnitude = Math.floor(Math.log10(Math.abs(price)));
-  const decimals = Math.max(0, 2 - magnitude);
-  return price.toLocaleString('ko-KR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-}
-
-function formatChangeRate(rate: number | null): string {
-  if (rate === null) return '-';
-  return `${(Math.abs(rate) * 100).toFixed(2)}%`;
-}
-
-function formatChangePrice(price: number | null): string {
-  if (price === null) return '-';
-  return formatPrice(Math.abs(price));
-}
-
-function formatTradePrice24h(value: number | null): string {
-  if (value === null) return '-';
-  return `${Math.round(value / 1_000_000).toLocaleString('ko-KR')}백만`;
 }
 
 interface CoinSelectProps {
