@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .market import create_market_trend
 from .momentum import (
     create_cci,
     create_macd_line,
@@ -30,6 +31,7 @@ INDICATOR_FACTORY: dict[str, object] = {
     "ATR": create_atr,
     "OBV": create_obv,
     "VOLUME_SMA": create_volume_sma,
+    "MARKET_TREND": create_market_trend,
 }
 
 __all__ = ["INDICATOR_FACTORY"]

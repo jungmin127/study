@@ -2,7 +2,7 @@ import backtrader as bt
 
 from engine.indicators import INDICATOR_FACTORY
 from tests.signal_fixtures import make_oscillating_df
-from engine.runner import run_backtest
+from engine.runner import PandasDataWithExtra, run_backtest
 
 
 class _ProbeStrategy(bt.Strategy):
@@ -30,6 +30,8 @@ def _run_probe(indicator: str, params: dict) -> list[float]:
 
 def test_all_registered_indicators_produce_values():
     for name in INDICATOR_FACTORY:
+        if name == "MARKET_TREND":
+            continue  # extra 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_extra_line 참고
         values = _run_probe(name, {})
         assert len(values) > 0, f"{name} 지표가 값을 하나도 생성하지 못함"
 
@@ -38,4 +40,30 @@ def test_sma_matches_manual_average():
     values = _run_probe("SMA", {"period": 5})
     df = make_oscillating_df()
     manual = df["close"].rolling(5).mean().iloc[-1]
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def _run_probe_with_extra(indicator: str, params: dict) -> list[float]:
+    df = make_oscillating_df()
+    df["market_close"] = df["close"] * 2 + 1000  # 대상 마켓과 스케일이 다른 별도 시세임을 검증하기 위해 배율을 둠
+    df_bt = df.set_index("candle_time")
+    df_bt.index = df_bt.index.tz_localize(None)
+    df_bt = df_bt.rename(columns={"market_close": "extra"})
+    cerebro = bt.Cerebro()
+    cerebro.adddata(
+        PandasDataWithExtra(
+            dataname=df_bt, open="open", high="high", low="low", close="close",
+            volume="volume", openinterest=-1, extra="extra",
+        )
+    )
+    cerebro.addstrategy(_ProbeStrategy, indicator=indicator, indicator_params=params)
+    results = cerebro.run()
+    return results[0].seen_values
+
+
+def test_market_trend_matches_manual_close_minus_sma_of_extra_line():
+    values = _run_probe_with_extra("MARKET_TREND", {"period": 5})
+    df = make_oscillating_df()
+    market_close = df["close"] * 2 + 1000
+    manual = (market_close - market_close.rolling(5).mean()).iloc[-1]
     assert abs(values[-1] - manual) < 1e-6
