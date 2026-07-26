@@ -190,7 +190,7 @@ def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp
     for item in body:
         assert item["description"], f"{item['value']}에 description이 없음"
         assert item["example"], f"{item['value']}에 example이 없음"
-        assert item["category"] in {"추세", "오실레이터", "거래량", "손익"}
+        assert item["category"] in {"추세", "오실레이터", "거래량", "손익", "시장 심리"}
 
 
 def test_stop_loss_and_take_profit_catalog_items_are_sell_only_with_fixed_operator(monkeypatch, tmp_path):
@@ -692,3 +692,64 @@ def test_run_segment_batch_safely_prints_count_on_success(monkeypatch, capsys):
     backend_module._run_segment_batch_safely()
 
     assert "271" in capsys.readouterr().out
+
+
+def test_indicator_catalog_includes_new_indicators(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.get("/api/v1/indicators/catalog")
+    values = {item["value"] for item in resp.json()}
+
+    assert "HOLDING_PERIOD_BARS" in values
+    assert "MARKET_TREND" in values
+    assert "MOMENTUM_PCT" in values
+
+
+def test_run_backtest_fetches_btc_candles_when_market_trend_used_on_other_market(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    calls: list[str] = []
+
+    def _fake_get_candles(market, timeframe, start, end):
+        calls.append(market)
+        return make_oscillating_df()
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 5}, "operator": "<", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 200
+    assert calls == ["KRW-ETH", "KRW-BTC"]
+
+
+def test_run_backtest_reuses_own_close_when_market_is_btc_itself(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    calls: list[str] = []
+
+    def _fake_get_candles(market, timeframe, start, end):
+        calls.append(market)
+        return make_oscillating_df()
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 5}, "operator": "<", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-BTC", buy_conditions=buy))
+
+    assert resp.status_code == 200
+    assert calls == ["KRW-BTC"]
+
+
+def test_run_backtest_skips_btc_fetch_when_market_trend_not_used(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    calls: list[str] = []
+
+    def _fake_get_candles(market, timeframe, start, end):
+        calls.append(market)
+        return make_oscillating_df()
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH"))
+
+    assert resp.status_code == 200
+    assert calls == ["KRW-ETH"]

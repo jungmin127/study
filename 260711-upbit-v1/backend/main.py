@@ -26,7 +26,7 @@ from engine.cache import (
     run_backtest_cached,
 )
 from engine.condition_strategy import ConditionTreeStrategy
-from engine.condition_tree import find_unknown_indicators, is_empty, max_required_period
+from engine.condition_tree import find_unknown_indicators, is_empty, max_required_period, requires_market_data
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import calculate_metrics
 from engine.segment_analysis import run_segment_batch
@@ -197,6 +197,24 @@ INDICATOR_CATALOG: list[dict] = [
         "params": [], "sellOnly": True, "fixedOperator": ">=",
         "description": "캔들 지표가 아니라 보유 포지션의 진입가 대비 현재 수익률(%)입니다. 이 값이 임계값 이상으로 오르면 매도합니다.",
         "example": "임계값 10을 넣으면, 진입가 대비 수익률이 +10% 이상이 되는 순간(예: 진입가 100,000원 → 현재가 110,000원 이상) 매도 조건이 참이 됩니다.",
+    },
+    {
+        "value": "HOLDING_PERIOD_BARS", "label": "보유기간 (봉)", "category": "손익",
+        "params": [], "sellOnly": True, "fixedOperator": ">=",
+        "description": "캔들 지표가 아니라 포지션을 진입한 이후 지난 봉의 개수입니다. 이 값이 임계값 이상이 되면 매도합니다(캘린더 일수가 아니라 봉 개수 기준).",
+        "example": "임계값 20을 넣으면, 진입 후 20개 봉이 지나는 순간(15분봉이면 5시간, 일봉이면 20일) 매도 조건이 참이 됩니다.",
+    },
+    {
+        "value": "MARKET_TREND", "label": "시장 추세 (BTC 종가-이동평균)", "category": "시장 심리",
+        "params": [{"key": "period", "label": "기간", "default": 10}],
+        "description": "대상 코인이 아니라 KRW-BTC 종가에서 KRW-BTC의 이동평균을 뺀 값입니다. 알트코인이 BTC 추세를 따라가는 경향을 이용해, 시장 전체가 약세일 때 매수를 쉬거나 매도하는 필터로 씁니다.",
+        "example": "period=10이고 연산자 <, 임계값 0이면: KRW-BTC 종가가 자신의 10봉 이동평균보다 낮을 때(BTC가 하락 추세일 때) 조건이 참이 됩니다.",
+    },
+    {
+        "value": "MOMENTUM_PCT", "label": "모멘텀 (N봉 전 대비 등락률 %)", "category": "추세",
+        "params": [{"key": "period", "label": "기간", "default": 5}],
+        "description": "N봉 전 종가 대비 현재 종가의 등락률(%)입니다. 양수 임계값이면 최근 상승 흐름(모멘텀)을, 음수 임계값이면 최근 급락(눌림목)을 포착하는 조건으로 쓸 수 있습니다.",
+        "example": "period=5, 연산자 >, 임계값 3이면: 5봉 전보다 종가가 3% 이상 오른 상태(모멘텀 진입)를 포착합니다. period=5, 연산자 <, 임계값 -5면: 5봉 전보다 5% 이상 급락한 상태(눌림목/역추세 진입)를 포착합니다.",
     },
 ]
 
@@ -487,6 +505,20 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
             ),
         )
 
+    extra_column = None
+    if requires_market_data(buy_dict) or requires_market_data(sell_dict):
+        if req.market == "KRW-BTC":
+            df = df.assign(market_close=df["close"])
+        else:
+            btc_df = get_candles("KRW-BTC", req.timeframe, start_dt, end_dt)
+            df = df.merge(
+                btc_df[["candle_time", "close"]].rename(columns={"close": "market_close"}),
+                on="candle_time",
+                how="left",
+            )
+            df["market_close"] = df["market_close"].ffill().bfill()
+        extra_column = "market_close"
+
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": req.initial_capital}
 
     result = run_backtest_cached(
@@ -500,6 +532,7 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
         strategy_params={"buy_conditions": buy_dict, "sell_conditions": sell_dict},
         title=req.title,
         description=req.description,
+        extra_column=extra_column,
     )
     return {"run_id": result["run_id"]}
 
