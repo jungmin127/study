@@ -115,7 +115,7 @@ export default function PortSetupForm() {
 
   return (
     <div className="max-w-5xl space-y-6 rounded-xl border p-6 shadow-sm">
-      <div className="grid grid-cols-[1fr_1fr_4fr] gap-6">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-[1fr_1fr_4fr]">
         <div>
           <label className="mb-1.5 block text-sm font-medium">포트 제목</label>
           <Input
@@ -180,7 +180,7 @@ export default function PortSetupForm() {
 
       <div>
         <h2 className="mb-2 text-sm font-semibold">기본 조건</h2>
-        <div className="grid grid-cols-[1fr_1fr_3fr] divide-x rounded-md border">
+        <div className="grid grid-cols-1 divide-y rounded-md border sm:grid-cols-[1fr_1fr_3fr] sm:divide-x sm:divide-y-0">
           <div>
             <div className={SECTION_HEADER_CLASS}>운용자금</div>
             <div className="flex items-center gap-2 p-4">
@@ -217,7 +217,7 @@ export default function PortSetupForm() {
           <div>
             <div className={SECTION_HEADER_CLASS}>운용기간</div>
             <div className="space-y-2 p-4">
-              <div className="flex flex-nowrap items-center gap-2">
+              <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
                 <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
                 <Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
                 <span className="text-sm text-muted-foreground">~</span>
