@@ -6,7 +6,7 @@ import MetricTile from '@/components/MetricTile';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { returnRateColor } from '@/lib/return-rate-color';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatHoldingPeriod } from '@/lib/format';
 import type { BacktestMetrics } from '@/lib/types/eda';
 
 function fmtPct(value: number): string {
@@ -144,7 +144,7 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
                 <TableCell>{t.entryPrice.toLocaleString()}</TableCell>
                 <TableCell>{t.exitPrice.toLocaleString()}</TableCell>
                 <TableCell className={returnRateColor(t.pnl)}>{Math.round(t.pnl).toLocaleString()}</TableCell>
-                <TableCell>{t.holdingPeriod}</TableCell>
+                <TableCell>{formatHoldingPeriod(t.holdingPeriod, detail.timeframe)}</TableCell>
                 <TableCell>
                   {t.forceClosed ? (
                     <Badge

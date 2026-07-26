@@ -278,6 +278,8 @@ def get_backtest_runs() -> list[dict]:
                 initial_capital = r["initial_capital"]
                 return_rate = (final_value - initial_capital) / initial_capital * 100 if initial_capital else None
                 is_live = True
+        trades = r["trades"]
+        last_trade_status = "open" if (trades and trades[-1].get("forceClosed")) else ("closed" if trades else "none")
         result.append({
             "run_id": r["run_id"],
             "title": r["title"],
@@ -292,6 +294,7 @@ def get_backtest_runs() -> list[dict]:
             "sharpe": r["sharpe"],
             "max_drawdown": r["max_drawdown"],
             "is_live": is_live,
+            "last_trade_status": last_trade_status,
             "buy_conditions": r["buy_conditions"],
             "sell_conditions": r["sell_conditions"],
         })

@@ -142,6 +142,7 @@ export interface BacktestRunSummary {
   sharpe: number | null;
   max_drawdown: number | null;
   is_live: boolean;
+  last_trade_status: 'open' | 'closed' | 'none';
   buy_conditions: ConditionGroup;
   sell_conditions: ConditionGroup;
 }

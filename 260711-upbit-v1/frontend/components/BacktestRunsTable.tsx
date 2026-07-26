@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowDown, ArrowUp, ArrowUpDown, Copy, Eye, Trash2 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   AlertDialog,
@@ -39,6 +40,12 @@ function sortRuns(runs: BacktestRunSummary[], key: SortKey | null, dir: SortDir)
     if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor;
     return String(av).localeCompare(String(bv)) * factor;
   });
+}
+
+function LastTradeStatusBadge({ status }: { status: BacktestRunSummary['last_trade_status'] }) {
+  if (status === 'none') return <span className="text-muted-foreground">-</span>;
+  if (status === 'open') return <Badge variant="secondary">보유중</Badge>;
+  return <Badge variant="outline">청산</Badge>;
 }
 
 function buildCopyHref(run: BacktestRunSummary): string {
@@ -180,6 +187,7 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
               </button>
             </TableHead>
             <TableHead className="text-right">MDD(%)</TableHead>
+            <TableHead>상태</TableHead>
             <TableHead>
               <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('created_at')}>
                 실행 시각 <SortIcon sortKeyOf="created_at" />
@@ -219,6 +227,9 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
                 {run.is_live && <span className="ml-1 text-xs text-muted-foreground">(실시간)</span>}
               </TableCell>
               <TableCell className="text-right tabular-nums">{run.max_drawdown?.toFixed(2) ?? '-'}</TableCell>
+              <TableCell>
+                <LastTradeStatusBadge status={run.last_trade_status} />
+              </TableCell>
               <TableCell>{formatDateTime(run.created_at)}</TableCell>
               <TableCell>
                 {/* nativeButton={false} + role="link" here and below: base-ui's Button `render`
