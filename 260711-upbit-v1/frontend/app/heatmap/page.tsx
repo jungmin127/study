@@ -15,7 +15,7 @@ export default async function HeatmapPage() {
       {rows.length === 0 ? (
         <p className="text-muted-foreground">아직 스윕 데이터가 없습니다. run_sweep()을 먼저 실행하세요.</p>
       ) : (
-        <div className="max-h-[70vh] overflow-y-auto rounded-md border [&>[data-slot=table-container]]:overflow-visible">
+        <div className="max-h-[70vh] overflow-auto rounded-md border [&>[data-slot=table-container]]:overflow-visible">
           {/* Table's own wrapper div sets overflow-x-auto (table.tsx), which per the CSS
               overflow spec forces its overflow-y to become "auto" too (an axis can't stay
               "visible" once the other is non-visible). That makes the *inner* wrapper the
