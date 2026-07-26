@@ -1,10 +1,12 @@
 'use client';
 
+import { Activity, BarChart3, DollarSign, Plus, TrendingUp, Users, X } from 'lucide-react';
 import type { ComparisonOperator, ConditionBlock, ConditionGroup } from '@/lib/types/strategy';
 import type { IndicatorCatalogItem } from '@/lib/types/eda';
 import { INPUT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 import { OPERATOR_SYMBOLS, isConditionBlock, summarizeGroup } from '@/lib/condition-summary';
 import InfoTooltip from '@/components/InfoTooltip';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const CATEGORY_ORDER = ['추세', '오실레이터', '거래량', '손익', '시장 심리'];
 
@@ -14,6 +16,14 @@ const CATEGORY_DOT_COLOR: Record<string, string> = {
   거래량: 'bg-teal-500',
   손익: 'bg-orange-500',
   '시장 심리': 'bg-rose-500',
+};
+
+const CATEGORY_ICON: Record<string, typeof TrendingUp> = {
+  추세: TrendingUp,
+  오실레이터: Activity,
+  거래량: BarChart3,
+  손익: DollarSign,
+  '시장 심리': Users,
 };
 
 const OPERATORS: { value: ComparisonOperator; label: string }[] = [
@@ -121,23 +131,33 @@ function ConditionBlockEditor({ block, catalog, currentPrice, onChange, onDelete
 
   return (
     <div className="rounded-md border">
-      <div className="flex items-center gap-2 rounded-t-md border-b bg-slate-50 px-3 py-2 dark:bg-slate-800">
+      <div className="flex items-center gap-2 rounded-t-md border-b bg-muted px-3 py-2">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
-        <select
-          className="flex-1 bg-transparent text-sm font-medium outline-none"
-          value={block.indicator}
-          onChange={(e) => handleIndicatorChange(e.target.value)}
-        >
-          {categories.map((cat) => (
-            <optgroup key={cat.label} label={cat.label}>
-              {cat.items.map((ind) => (
-                <option key={ind.value} value={ind.value}>
-                  {ind.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <Select value={block.indicator} onValueChange={(v) => { if (v) handleIndicatorChange(v); }}>
+          <SelectTrigger className="h-auto flex-1 border-0 bg-transparent p-0 text-sm font-medium shadow-none focus:ring-0">
+            <SelectValue>
+              {(value: string | null) => catalog.find((i) => i.value === value)?.label ?? value ?? ''}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {categories.map((cat) => {
+              const CategoryIcon = CATEGORY_ICON[cat.label] ?? TrendingUp;
+              return (
+                <SelectGroup key={cat.label}>
+                  <SelectLabel className="flex items-center gap-1.5">
+                    <CategoryIcon className="size-3.5" />
+                    {cat.label}
+                  </SelectLabel>
+                  {cat.items.map((ind) => (
+                    <SelectItem key={ind.value} value={ind.value}>
+                      {ind.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              );
+            })}
+          </SelectContent>
+        </Select>
         {tooltip && <InfoTooltip text={tooltip} />}
         <button
           type="button"
@@ -145,7 +165,7 @@ function ConditionBlockEditor({ block, catalog, currentPrice, onChange, onDelete
           className="shrink-0 text-muted-foreground hover:text-red-500"
           aria-label="조건 삭제"
         >
-          ✕
+          <X className="size-4" />
         </button>
       </div>
 
@@ -171,25 +191,31 @@ function ConditionBlockEditor({ block, catalog, currentPrice, onChange, onDelete
       )}
 
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-        <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-muted-foreground dark:bg-slate-800">
+        <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
           {block.indicator}
         </span>
         {catalogItem?.fixedOperator ? (
-          <span className="flex h-7 shrink-0 items-center rounded border border-input bg-slate-100 px-2 font-mono text-xs text-muted-foreground dark:bg-slate-800">
+          <span className="flex h-7 shrink-0 items-center rounded border border-input bg-muted px-2 font-mono text-xs text-muted-foreground">
             {OPERATOR_SYMBOLS[catalogItem.fixedOperator]} 고정
           </span>
         ) : (
-          <select
+          <Select
             value={block.operator}
-            onChange={(e) => onChange({ ...block, operator: e.target.value as ComparisonOperator })}
-            className="h-7 rounded border border-input bg-background px-1 text-xs"
+            onValueChange={(v) => { if (v) onChange({ ...block, operator: v as ComparisonOperator }); }}
           >
-            {OPERATORS.map((op) => (
-              <option key={op.value} value={op.value}>
-                {op.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="h-7 w-auto border-input bg-background px-1 text-xs">
+              <SelectValue>
+                {(value: string | null) => OPERATORS.find((op) => op.value === value)?.label ?? value ?? ''}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {OPERATORS.map((op) => (
+                <SelectItem key={op.value} value={op.value}>
+                  {op.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
         <input
           type="number"
@@ -284,8 +310,9 @@ function ConditionGroupEditor({ group, catalog, currentPrice, onChange, depth }:
                   type="button"
                   onClick={() => deleteCondition(index)}
                   className="text-xs text-muted-foreground hover:text-red-500"
+                  aria-label="괄호 묶음 삭제"
                 >
-                  ✕
+                  <X className="size-3.5" />
                 </button>
               </div>
               <ConditionGroupEditor
@@ -304,17 +331,19 @@ function ConditionGroupEditor({ group, catalog, currentPrice, onChange, depth }:
         <button
           type="button"
           onClick={addBlock}
-          className={`flex-1 ${INPUT_CLASS} bg-background text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800`}
+          className={`flex flex-1 items-center justify-center gap-1 ${INPUT_CLASS} bg-background text-xs font-medium hover:bg-muted`}
         >
-          + 조건 추가
+          <Plus className="size-3.5" />
+          조건 추가
         </button>
         {depth < 2 && (
           <button
             type="button"
             onClick={addGroup}
-            className="flex-1 rounded-md border border-primary px-2 py-1.5 text-xs font-medium text-primary hover:bg-slate-50 dark:hover:bg-slate-800"
+            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-primary px-2 py-1.5 text-xs font-medium text-primary hover:bg-muted"
           >
-            + 괄호 묶음 추가
+            <Plus className="size-3.5" />
+            괄호 묶음 추가
           </button>
         )}
       </div>
@@ -341,7 +370,7 @@ export default function StrategyConditionBuilder({
       <div className="p-4">
         <ConditionGroupEditor group={group} catalog={catalog} currentPrice={currentPrice} onChange={onChange} depth={0} />
       </div>
-      <div className="rounded-b-md border-t bg-slate-50 px-4 py-2 text-xs dark:bg-slate-800">
+      <div className="rounded-b-md border-t bg-muted px-4 py-2 text-xs">
         <span className="font-medium text-foreground">조건식: </span>
         <span className="font-mono text-muted-foreground">{summarizeGroup(group)}</span>
       </div>
