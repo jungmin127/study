@@ -28,6 +28,7 @@ class ConditionTreeStrategy(bt.Strategy):
         self._sell_cond: dict = self.p.sell_conditions or _EMPTY_GROUP
         self._buy_inds: dict[str, bt.Indicator] = {}
         self._sell_inds: dict[str, bt.Indicator] = {}
+        self._entry_bar: int | None = None
 
         for block in collect_blocks(self._buy_cond):
             self._ensure_indicator(self._buy_inds, block)
@@ -47,14 +48,23 @@ class ConditionTreeStrategy(bt.Strategy):
 
     def next(self) -> None:
         if not self.position:
+            self._entry_bar = None
             if eval_group(self._buy_cond, self._buy_inds):
                 self.buy()
         else:
+            if self._entry_bar is None:
+                self._entry_bar = len(self)
             entry_price = self.position.price
             position_return_pct = (
                 (self.data.close[0] - entry_price) / entry_price * 100 if entry_price else None
             )
-            if eval_group(self._sell_cond, self._sell_inds, position_return_pct=position_return_pct):
+            position_holding_bars = len(self) - self._entry_bar
+            if eval_group(
+                self._sell_cond,
+                self._sell_inds,
+                position_return_pct=position_return_pct,
+                position_holding_bars=position_holding_bars,
+            ):
                 self.sell()
 
 

@@ -59,3 +59,11 @@ def test_take_profit_pct_exits_position_on_gain():
     result = _run(buy, sell)
     assert len(result["trades"]) > 0
     assert any(t["returnRate"] > 0 for t in result["trades"])
+
+
+def test_holding_period_bars_forces_exit_after_n_bars():
+    buy = {"type": "AND", "conditions": [{"indicator": "SMA", "params": {"period": 1}, "operator": ">", "threshold": 0}]}  # 항상 참
+    sell = {"type": "AND", "conditions": [{"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">=", "threshold": 3}]}
+    result = _run(buy, sell)
+    assert len(result["trades"]) > 10
+    assert all(t["holdingPeriod"] <= 5 for t in result["trades"])
