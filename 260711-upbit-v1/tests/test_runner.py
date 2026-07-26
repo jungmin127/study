@@ -74,3 +74,29 @@ def test_forced_close_trade_deducts_entry_and_exit_commission():
     assert trade["entryPrice"] == 100.0
     assert trade["exitPrice"] == 110.0
     assert trade["size"] == 2.0
+
+
+def test_run_backtest_with_extra_column_exposes_data_extra_line():
+    df = _make_synthetic_df()
+    df["market_close"] = [50000 + i * 10 for i in range(len(df))]
+
+    captured: list[float] = []
+
+    class _CapturesExtraLine(bt.Strategy):
+        def next(self):
+            captured.append(float(self.data.extra[0]))
+
+    run_backtest(
+        df=df,
+        strategy_cls=_CapturesExtraLine,
+        risk_config={
+            "initial_capital": 10000,
+            "commission_rate": 0.001,
+            "position_sizing": "percent",
+            "position_size": 100,
+        },
+        extra_column="market_close",
+    )
+
+    assert captured[0] == 50000.0
+    assert captured[-1] == 50000 + (len(df) - 1) * 10
