@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 import DeleteRunButton from '@/components/DeleteRunButton';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { summarizeGroup } from '@/lib/condition-summary';
@@ -45,9 +47,9 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
     }
   }
 
-  function sortIndicator(key: SortKey): string {
-    if (sortKey !== key) return '⇅';
-    return sortDir === 'desc' ? '▼' : '▲';
+  function SortIcon({ sortKeyOf }: { sortKeyOf: SortKey }) {
+    if (sortKey !== sortKeyOf) return <ArrowUpDown className="size-3.5" />;
+    return sortDir === 'desc' ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />;
   }
 
   return (
@@ -57,12 +59,12 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
           <TableHead>제목</TableHead>
           <TableHead>
             <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('market')}>
-              코인 {sortIndicator('market')}
+              코인 <SortIcon sortKeyOf="market" />
             </button>
           </TableHead>
           <TableHead>
             <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('timeframe')}>
-              봉타입 {sortIndicator('timeframe')}
+              봉타입 <SortIcon sortKeyOf="timeframe" />
             </button>
           </TableHead>
           <TableHead>기간</TableHead>
@@ -70,12 +72,12 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
           <TableHead>매도전략</TableHead>
           <TableHead>
             <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('return_rate')}>
-              수익률(%) {sortIndicator('return_rate')}
+              수익률(%) <SortIcon sortKeyOf="return_rate" />
             </button>
           </TableHead>
           <TableHead>
             <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('created_at')}>
-              실행 시각 {sortIndicator('created_at')}
+              실행 시각 <SortIcon sortKeyOf="created_at" />
             </button>
           </TableHead>
           <TableHead>상세</TableHead>
@@ -87,9 +89,7 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
           <TableRow key={run.run_id}>
             <TableCell>
               {run.title || <span className="text-muted-foreground">(제목 없음)</span>}
-              {run.description && (
-                <p className="text-xs text-muted-foreground">{run.description}</p>
-              )}
+              {run.description && <p className="text-xs text-muted-foreground">{run.description}</p>}
             </TableCell>
             <TableCell>{run.market}</TableCell>
             <TableCell>{run.timeframe}</TableCell>
@@ -108,9 +108,22 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
             </TableCell>
             <TableCell>{formatDateTime(run.created_at)}</TableCell>
             <TableCell>
-              <Link href={`/backtests/${run.run_id}`} className="text-blue-600 hover:underline dark:text-blue-400">
+              {/* base-ui's Button doesn't support Radix-style `asChild` composition — it
+                  exposes a `render` prop instead, so the Link is swapped in as the underlying
+                  element while keeping Button's variant/size styling. `nativeButton={false}`
+                  is required here: base-ui's Button assumes the `render` target is a real
+                  <button> by default and otherwise logs a console error since Link renders
+                  an <a>. */}
+              <Button
+                variant="link"
+                size="sm"
+                className="px-0"
+                nativeButton={false}
+                render={<Link href={`/backtests/${run.run_id}`} />}
+              >
+                <Eye className="size-3.5" />
                 보기
-              </Link>
+              </Button>
             </TableCell>
             <TableCell>
               <DeleteRunButton runId={run.run_id} />
