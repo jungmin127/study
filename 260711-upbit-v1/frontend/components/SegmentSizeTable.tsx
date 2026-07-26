@@ -41,7 +41,19 @@ export default function SegmentSizeTable({ rows }: { rows: SegmentRow[] }) {
           <p className="mb-2 text-sm font-semibold">
             {SEGMENT_LABELS[segment]} ({group.length})
           </p>
-          <div className="max-h-80 overflow-y-auto rounded-md border">
+          <div className="max-h-80 overflow-auto rounded-md border [&>[data-slot=table-container]]:overflow-visible">
+            {/* Table's own wrapper div sets overflow-x-auto (table.tsx), which per the CSS
+                overflow spec forces its overflow-y to become "auto" too (an axis can't stay
+                "visible" once the other is non-visible). That makes the *inner* wrapper the
+                nearest scrolling ancestor instead of this outer div, so `sticky top-0` on
+                TableHeader binds to the inner wrapper and never actually sticks while this
+                outer div scrolls. Forcing the inner wrapper back to overflow-visible removes
+                it as a scroll container, so sticky correctly targets this outer div (which
+                itself becomes the scrollable ancestor for both axes once overflow-auto is set).
+                overflow-auto (not overflow-y-auto) is used here because this table sits in a
+                `min-w-0 flex-1` content area next to a fixed-width sidebar (AnalysisSidebarView),
+                so on narrow viewports it can be squeezed well below its natural width and needs
+                horizontal scroll too (same reasoning as heatmap/page.tsx's fix history). */}
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-background">
                 <TableRow>
