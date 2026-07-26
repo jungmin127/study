@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { getCombos, getHistory } from '@/lib/api/eda';
 import type { Combo, SweepResult } from '@/lib/types/eda';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 function comboKey(c: Combo): string {
   return `${c.signal_set_name}|${c.market}|${c.timeframe}|${c.is_combined}`;
@@ -39,17 +40,24 @@ export default function ComboHistoryChart() {
 
   return (
     <div>
-      <select
-        className="mb-4 rounded border px-2 py-1 text-sm"
-        value={selectedKey}
-        onChange={(e) => setSelectedKey(e.target.value)}
-      >
-        {combos.map((c) => (
-          <option key={comboKey(c)} value={comboKey(c)}>
-            {c.signal_set_name}{c.is_combined ? '(혼합)' : ''} / {c.market} / {c.timeframe}
-          </option>
-        ))}
-      </select>
+      <Select value={selectedKey} onValueChange={(value) => value !== null && setSelectedKey(value)}>
+        <SelectTrigger className="mb-4 w-auto min-w-64">
+          <SelectValue>
+            {(value: string | null) => {
+              const combo = combos.find((c) => comboKey(c) === value);
+              if (!combo) return value ?? '';
+              return `${combo.signal_set_name}${combo.is_combined ? '(혼합)' : ''} / ${combo.market} / ${combo.timeframe}`;
+            }}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {combos.map((c) => (
+            <SelectItem key={comboKey(c)} value={comboKey(c)}>
+              {c.signal_set_name}{c.is_combined ? '(혼합)' : ''} / {c.market} / {c.timeframe}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <ResponsiveContainer width="100%" height={320}>
         <LineChart data={history}>
@@ -57,7 +65,7 @@ export default function ComboHistoryChart() {
           <XAxis dataKey="swept_at" tick={{ fontSize: 11 }} />
           <YAxis tick={{ fontSize: 11 }} />
           <Tooltip />
-          <Line type="monotone" dataKey="return_rate" stroke="#3b82f6" name="수익률(%)" />
+          <Line type="monotone" dataKey="return_rate" stroke="var(--color-chart-1)" name="수익률(%)" />
         </LineChart>
       </ResponsiveContainer>
     </div>

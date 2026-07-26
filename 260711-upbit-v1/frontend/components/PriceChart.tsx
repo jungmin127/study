@@ -34,6 +34,35 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
   useEffect(() => {
     if (!containerRef.current || ohlcv.length === 0) return;
 
+    // getComputedStyle(...).getPropertyValue('--x') on a *custom* property returns the
+    // literal authored token stream (e.g. "oklch(0.577 0.245 27.325)") verbatim — custom
+    // properties are untyped, so the browser never resolves their color space. Even
+    // resolving through a real color-typed property (e.g. an element's `color`) doesn't
+    // help in modern Chromium: per the updated CSS Color 4 serialization rules,
+    // getComputedStyle now preserves the oklch() notation instead of converting to rgb().
+    // lightweight-charts' internal ColorParser only understands hex/rgb(a)/hsl(a)/named
+    // colors, so passing oklch() straight through throws "Failed to parse color" at
+    // runtime. Canvas 2D's fillStyle, however, *does* natively parse oklch() (it uses the
+    // browser's CSS color parser) — so painting a 1x1 rect and reading the pixel back via
+    // getImageData gives a guaranteed rgba() string that lightweight-charts can parse.
+    const resolveColor = (varName: string): string => {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return raw;
+      ctx.fillStyle = raw;
+      ctx.fillRect(0, 0, 1, 1);
+      const pixel = ctx.getImageData(0, 0, 1, 1).data;
+      const r = pixel[0], g = pixel[1], b = pixel[2], a = pixel[3];
+      return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+    };
+
+    const priceUp = resolveColor('--price-up');
+    const priceDown = resolveColor('--price-down');
+    const markerEntry = resolveColor('--marker-entry');
+    const markerExit = resolveColor('--marker-exit');
+    const markerBoundary = resolveColor('--marker-boundary');
+
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height: 320,
@@ -43,11 +72,11 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#dc2626',
-      downColor: '#2563eb',
+      upColor: priceUp,
+      downColor: priceDown,
       borderVisible: false,
-      wickUpColor: '#dc2626',
-      wickDownColor: '#2563eb',
+      wickUpColor: priceUp,
+      wickDownColor: priceDown,
     });
 
     if (intradayMode) {
@@ -65,15 +94,15 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
       const markers = [
         ...trades.map((t) => ({
           time: toUnix(t.entryTime), position: 'belowBar' as const,
-          color: '#2563eb', shape: 'arrowUp' as const, text: 'B',
+          color: markerEntry, shape: 'arrowUp' as const, text: 'B',
         })),
         ...trades.map((t) => ({
           time: toUnix(t.exitTime), position: 'aboveBar' as const,
-          color: '#d97706', shape: 'arrowDown' as const, text: 'S',
+          color: markerExit, shape: 'arrowDown' as const, text: 'S',
         })),
         ...(boundaryBar ? [{
           time: boundaryBar.time, position: 'inBar' as const,
-          color: '#9ca3af', shape: 'circle' as const, text: '종료',
+          color: markerBoundary, shape: 'circle' as const, text: '종료',
         }] : []),
       ].sort((a, b) => a.time - b.time);
       createSeriesMarkers(candleSeries, markers);
@@ -104,15 +133,15 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
       const markers = [
         ...Array.from(buysByDay.entries()).map(([day, count]) => ({
           time: day as DayString, position: 'belowBar' as const,
-          color: '#2563eb', shape: 'arrowUp' as const, text: count > 1 ? `B×${count}` : 'B',
+          color: markerEntry, shape: 'arrowUp' as const, text: count > 1 ? `B×${count}` : 'B',
         })),
         ...Array.from(sellsByDay.entries()).map(([day, count]) => ({
           time: day as DayString, position: 'aboveBar' as const,
-          color: '#d97706', shape: 'arrowDown' as const, text: count > 1 ? `S×${count}` : 'S',
+          color: markerExit, shape: 'arrowDown' as const, text: count > 1 ? `S×${count}` : 'S',
         })),
         ...(boundaryBar ? [{
           time: boundaryBar.time, position: 'inBar' as const,
-          color: '#9ca3af', shape: 'circle' as const, text: '종료',
+          color: markerBoundary, shape: 'circle' as const, text: '종료',
         }] : []),
       ].sort((a, b) => String(a.time).localeCompare(String(b.time)));
       createSeriesMarkers(candleSeries, markers);
@@ -135,15 +164,15 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
     <div className="w-full">
       <div className="mb-2 flex items-center gap-4 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--marker-entry)' }} />
           매수 (B)
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--marker-exit)' }} />
           매도 (S)
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--marker-boundary)' }} />
           백테스트 종료
         </span>
       </div>
