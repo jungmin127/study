@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
 import type { ComparisonOperator, ConditionBlock, ConditionGroup } from '@/lib/types/strategy';
 import type { IndicatorCatalogItem } from '@/lib/types/eda';
 import { INPUT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 import { OPERATOR_SYMBOLS, isConditionBlock, summarizeGroup } from '@/lib/condition-summary';
+import InfoTooltip from '@/components/InfoTooltip';
 
 const CATEGORY_ORDER = ['추세', '오실레이터', '거래량', '손익', '시장 심리'];
 
@@ -91,31 +91,6 @@ function createDefaultGroup(catalog: IndicatorCatalogItem[], currentPrice: numbe
   return { type: 'AND', conditions: [createDefaultBlock(catalog, currentPrice)] };
 }
 
-
-function InfoTooltip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <span className="relative shrink-0">
-      <button
-        type="button"
-        className="flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground text-[10px] leading-none text-muted-foreground hover:border-foreground hover:text-foreground"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        aria-label="지표 설명"
-      >
-        ?
-      </button>
-      {open && (
-        <div className="absolute left-1/2 top-full z-50 mt-1 w-64 -translate-x-1/2 whitespace-pre-line rounded-md border bg-background p-2 text-left text-xs font-normal text-foreground shadow-lg">
-          {text}
-        </div>
-      )}
-    </span>
-  );
-}
 
 // ── 조건 블록 에디터 ─────────────────────────────────────────────────────────
 interface ConditionBlockEditorProps {
