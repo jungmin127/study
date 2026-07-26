@@ -753,3 +753,37 @@ def test_run_backtest_skips_btc_fetch_when_market_trend_not_used(monkeypatch, tm
 
     assert resp.status_code == 200
     assert calls == ["KRW-ETH"]
+
+
+def test_run_backtest_returns_400_when_btc_fetch_raises_value_error(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_get_candles(market, timeframe, start, end):
+        if market == "KRW-BTC":
+            raise ValueError("BTC 캔들 데이터를 조회할 수 없습니다")
+        return make_oscillating_df()
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 5}, "operator": "<", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 400
+    assert "BTC 캔들 데이터를 조회할 수 없습니다" in resp.json()["detail"]
+
+
+def test_run_backtest_returns_500_when_btc_fetch_raises_runtime_error(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_get_candles(market, timeframe, start, end):
+        if market == "KRW-BTC":
+            raise RuntimeError("업비트 API 오류")
+        return make_oscillating_df()
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 5}, "operator": "<", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 500
+    assert "업비트 API 오류" in resp.json()["detail"]

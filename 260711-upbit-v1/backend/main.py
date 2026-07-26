@@ -510,7 +510,12 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
         if req.market == "KRW-BTC":
             df = df.assign(market_close=df["close"])
         else:
-            btc_df = get_candles("KRW-BTC", req.timeframe, start_dt, end_dt)
+            try:
+                btc_df = get_candles("KRW-BTC", req.timeframe, start_dt, end_dt)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
             df = df.merge(
                 btc_df[["candle_time", "close"]].rename(columns={"close": "market_close"}),
                 on="candle_time",
