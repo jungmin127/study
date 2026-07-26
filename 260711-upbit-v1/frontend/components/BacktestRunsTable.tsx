@@ -123,6 +123,9 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
             </TableCell>
             <TableCell>{formatDateTime(run.created_at)}</TableCell>
             <TableCell>
+              {/* nativeButton={false} + role="link" here and below: base-ui's Button `render`
+                  prop assumes a real <button> by default and otherwise auto-applies
+                  role="button" to the rendered <a>, breaking screen-reader link semantics. */}
               <Button
                 variant="link"
                 size="sm"
