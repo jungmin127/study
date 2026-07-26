@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import type { Market } from '@/lib/types/eda';
 import { getMarkets } from '@/lib/api/eda';
 import { INPUT_CLASS } from '@/lib/ui-classes';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
 export type MarketSortKey = 'change_rate' | 'trade_price_24h';
 type SortDir = 'asc' | 'desc';
@@ -62,8 +65,6 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
   const [sortKey, setSortKey] = useState<MarketSortKey>('change_rate');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [query, setQuery] = useState('');
-  const containerRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLiveMarkets(markets);
@@ -79,33 +80,16 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
   }, [sorted, query]);
   const selected = liveMarkets.find((m) => m.market === value) ?? null;
 
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (open) {
-      searchInputRef.current?.focus();
-    } else {
-      setQuery('');
-    }
-  }, [open]);
-
-  function handleToggleOpen() {
-    const willOpen = !open;
-    setOpen(willOpen);
-    if (willOpen) {
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (next) {
       setRefreshing(true);
       getMarkets()
         .then(setLiveMarkets)
         .catch(() => {})
         .finally(() => setRefreshing(false));
+    } else {
+      setQuery('');
     }
   }
 
@@ -118,17 +102,21 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
     }
   }
 
-  function sortIndicator(key: MarketSortKey): string {
-    if (sortKey !== key) return '⇅';
-    return sortDir === 'desc' ? '▼' : '▲';
+  function SortIcon({ sortKeyOf }: { sortKeyOf: MarketSortKey }) {
+    if (sortKey !== sortKeyOf) return <ArrowUpDown className="size-3.5" />;
+    return sortDir === 'desc' ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />;
   }
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      {/* base-ui's Popover.Trigger already renders a native <button> and does not support
+          Radix-style `asChild` composition (confirmed via popover.tsx / base-ui docs: Trigger
+          only exposes a `render` prop for element replacement). Since we just need a plain
+          button with our own className/disabled, we pass those props straight to
+          PopoverTrigger instead of wrapping a child button in `asChild`. */}
+      <PopoverTrigger
         type="button"
         className={`${INPUT_CLASS} flex w-full items-center justify-between gap-3`}
-        onClick={handleToggleOpen}
         disabled={liveMarkets.length === 0}
       >
         {selected ? (
@@ -146,74 +134,76 @@ export default function CoinSelect({ markets, value, onChange }: CoinSelectProps
         ) : (
           <span className="text-muted-foreground">불러오는 중...</span>
         )}
-      </button>
-
-      {open && (
-        <div className="absolute z-20 mt-1 w-full rounded-md border bg-background shadow-lg">
-          <div className="border-b p-2">
-            <input
-              ref={searchInputRef}
-              type="text"
+      </PopoverTrigger>
+      {/*
+        The brief's sample used Radix's `w-[var(--radix-popover-trigger-width)]` to sync the
+        popover width to the trigger. This project's popover.tsx is backed by @base-ui/react,
+        whose Positioner exposes the anchor's width as `--anchor-width` instead (confirmed in
+        node_modules/@base-ui/react docs: "Positioner CSS Variables" table). That variable is
+        set on the Positioner element and inherits down to the Popup, so we reference it here
+        with Tailwind v4's CSS-variable-shorthand syntax (`w-(--anchor-width)`), the same
+        convention popover.tsx itself uses for `origin-(--transform-origin)`. `min-w-80` is kept
+        as a fallback for the first paint / narrow triggers.
+      */}
+      <PopoverContent className="w-(--anchor-width) min-w-80 p-0" align="start">
+        <Command shouldFilter={false}>
+          <div className="border-b">
+            <CommandInput
               placeholder="한글명 또는 티커로 검색 (예: 비트코인, BTC)"
-              className={`${INPUT_CLASS} w-full`}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
+              onValueChange={setQuery}
             />
           </div>
-          <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 border-b bg-slate-50 px-3 py-2 text-xs font-medium text-muted-foreground dark:bg-slate-800">
+          <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
             <span>{refreshing ? '새로고침 중...' : '한글명'}</span>
             <span className="text-right">현재가</span>
-            <button
-              type="button"
-              className="flex items-center justify-end gap-1 hover:text-foreground"
-              onClick={() => toggleSort('change_rate')}
-            >
-              전일대비 {sortIndicator('change_rate')}
+            <button type="button" className="flex items-center justify-end gap-1 hover:text-foreground" onClick={() => toggleSort('change_rate')}>
+              전일대비 <SortIcon sortKeyOf="change_rate" />
             </button>
-            <button
-              type="button"
-              className="flex items-center justify-end gap-1 hover:text-foreground"
-              onClick={() => toggleSort('trade_price_24h')}
-            >
-              거래대금 {sortIndicator('trade_price_24h')}
+            <button type="button" className="flex items-center justify-end gap-1 hover:text-foreground" onClick={() => toggleSort('trade_price_24h')}>
+              거래대금 <SortIcon sortKeyOf="trade_price_24h" />
             </button>
           </div>
-          <div className="max-h-80 overflow-y-auto">
-            {filtered.length === 0 && (
-              <p className="px-3 py-6 text-center text-sm text-muted-foreground">검색 결과가 없습니다.</p>
-            )}
+          <CommandList className="max-h-80">
+            <CommandEmpty>검색 결과가 없습니다.</CommandEmpty>
             {filtered.map((m) => (
-              <button
+              <CommandItem
                 key={m.market}
-                type="button"
-                className={`grid w-full grid-cols-[2fr_1fr_1fr_1fr] items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800 ${
-                  m.market === value ? 'bg-slate-100 dark:bg-slate-800' : ''
-                }`}
-                onClick={() => {
+                value={m.market}
+                onSelect={() => {
                   onChange(m.market);
                   setOpen(false);
                 }}
+                className={m.market === value ? 'bg-muted' : ''}
               >
-                <span>
-                  <span className="block font-medium">{m.korean_name}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {m.market.replace('KRW-', '')}/KRW
+                {/*
+                  CommandItem (components/ui/command.tsx) always appends a trailing CheckIcon
+                  after its children, shown via a `data-checked` state we don't set here. That
+                  icon still participates in layout even while invisible. CommandItem's own
+                  className is a flex row by default, so nesting our 4-column grid in a single
+                  `w-full` child (instead of overriding CommandItem's own class to `grid`) keeps
+                  the hidden CheckIcon as a sibling flex item on the right rather than an
+                  overflow item that wraps onto a new implicit grid row.
+                */}
+                <div className="grid w-full grid-cols-[2fr_1fr_1fr_1fr] items-center gap-2">
+                  <span>
+                    <span className="block font-medium">{m.korean_name}</span>
+                    <span className="block text-xs text-muted-foreground">{m.market.replace('KRW-', '')}/KRW</span>
                   </span>
-                </span>
-                <span className="text-right font-semibold tabular-nums">{formatPrice(m.price)}</span>
-                <span className={`text-right tabular-nums ${changeColorClass(m.change_rate)}`}>
-                  <span className="block font-semibold">{formatChangeRate(m.change_rate)}</span>
-                  <span className="block text-xs">{formatChangePrice(m.change_price)}</span>
-                </span>
-                <span className="text-right tabular-nums text-muted-foreground">
-                  {formatTradePrice24h(m.trade_price_24h)}
-                </span>
-              </button>
+                  <span className="text-right font-semibold tabular-nums">{formatPrice(m.price)}</span>
+                  <span className={`text-right tabular-nums ${changeColorClass(m.change_rate)}`}>
+                    <span className="block font-semibold">{formatChangeRate(m.change_rate)}</span>
+                    <span className="block text-xs">{formatChangePrice(m.change_price)}</span>
+                  </span>
+                  <span className="text-right tabular-nums text-muted-foreground">
+                    {formatTradePrice24h(m.trade_price_24h)}
+                  </span>
+                </div>
+              </CommandItem>
             ))}
-          </div>
-        </div>
-      )}
-    </div>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
