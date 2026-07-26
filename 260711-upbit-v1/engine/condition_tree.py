@@ -20,7 +20,7 @@ from engine.indicators import INDICATOR_FACTORY
 
 # 캔들 데이터로 미리 계산하는 bt.Indicator가 아니라, 포지션이 열려야만 알 수 있는
 # 진입가 대비 수익률(%)을 값으로 쓰는 지표. eval_group에 position_return_pct로 전달된다.
-POSITION_RELATIVE_INDICATORS = {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT"}
+POSITION_RELATIVE_INDICATORS = {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT", "HOLDING_PERIOD_BARS"}
 
 
 def indicator_key(indicator: str, params: dict) -> str:
@@ -78,10 +78,12 @@ def eval_group(
     group: dict,
     indicators: dict[str, bt.Indicator],
     position_return_pct: float | None = None,
+    position_holding_bars: int | None = None,
 ) -> bool:
     """ConditionGroup을 재귀적으로 평가해 bool 반환. indicators는 indicator_key -> bt.Indicator 매핑.
-    position_return_pct는 포지션 진입가 대비 현재 수익률(%)로, STOP_LOSS_PCT/TAKE_PROFIT_PCT
-    평가에 쓰인다. 포지션이 없어 None이면 그 블록은 False로 처리한다."""
+    position_return_pct는 포지션 진입가 대비 현재 수익률(%)로 STOP_LOSS_PCT/TAKE_PROFIT_PCT 평가에,
+    position_holding_bars는 포지션 보유 봉수로 HOLDING_PERIOD_BARS 평가에 쓰인다. 포지션이 없어
+    해당 값이 None이면 그 블록은 False로 처리한다."""
     group_type = group.get("type", "AND")
     conditions = group.get("conditions", [])
 
@@ -91,6 +93,14 @@ def eval_group(
     results: list[bool] = []
     for item in conditions:
         if "indicator" in item:
+            if item["indicator"] == "HOLDING_PERIOD_BARS":
+                if position_holding_bars is None:
+                    results.append(False)
+                else:
+                    results.append(
+                        apply_operator(position_holding_bars, item["operator"], float(item["threshold"]))
+                    )
+                continue
             if item["indicator"] in POSITION_RELATIVE_INDICATORS:
                 if position_return_pct is None:
                     results.append(False)
@@ -104,7 +114,7 @@ def eval_group(
             value = get_indicator_value(item["indicator"], indicators[key])
             results.append(apply_operator(value, item["operator"], float(item["threshold"])))
         elif "type" in item:
-            results.append(eval_group(item, indicators, position_return_pct))
+            results.append(eval_group(item, indicators, position_return_pct, position_holding_bars))
 
     return all(results) if group_type == "AND" else any(results)
 
@@ -136,6 +146,12 @@ def max_required_period(group: dict) -> int:
     return max(periods)
 
 
+def requires_market_data(group: dict) -> bool:
+    """조건 트리가 MARKET_TREND처럼 대상 마켓이 아닌 외부 마켓(KRW-BTC) 데이터가 필요한
+    지표를 포함하는지 확인한다. backend가 이 값을 보고 KRW-BTC 캔들을 추가로 조회할지 정한다."""
+    return any(b["indicator"] == "MARKET_TREND" for b in collect_blocks(group))
+
+
 __all__ = [
     "POSITION_RELATIVE_INDICATORS",
     "indicator_key",
@@ -146,4 +162,5 @@ __all__ = [
     "find_unknown_indicators",
     "is_empty",
     "max_required_period",
+    "requires_market_data",
 ]

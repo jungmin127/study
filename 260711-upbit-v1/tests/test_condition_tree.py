@@ -5,6 +5,7 @@ from engine.condition_tree import (
     find_unknown_indicators,
     is_empty,
     max_required_period,
+    requires_market_data,
 )
 
 
@@ -76,3 +77,57 @@ def test_find_unknown_indicators_allows_position_relative_indicators():
         ],
     }
     assert find_unknown_indicators(tree) == []
+
+
+def test_eval_group_evaluates_holding_period_bars_against_position_state():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">=", "threshold": 5}],
+    }
+    assert eval_group(tree, {}, position_holding_bars=5) is True
+    assert eval_group(tree, {}, position_holding_bars=4) is False
+
+
+def test_eval_group_holding_period_bars_false_without_position():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">=", "threshold": 5}],
+    }
+    assert eval_group(tree, {}) is False
+
+
+def test_find_unknown_indicators_allows_holding_period_bars():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">=", "threshold": 5}],
+    }
+    assert find_unknown_indicators(tree) == []
+
+
+def test_requires_market_data_true_when_market_trend_present():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 10}, "operator": "<", "threshold": 0}],
+    }
+    assert requires_market_data(tree) is True
+
+
+def test_requires_market_data_false_when_market_trend_absent():
+    tree = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}]}
+    assert requires_market_data(tree) is False
+
+
+def test_requires_market_data_checks_nested_groups():
+    tree = {
+        "type": "OR",
+        "conditions": [
+            {"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30},
+            {
+                "type": "AND",
+                "conditions": [
+                    {"indicator": "MARKET_TREND", "params": {"period": 5}, "operator": "<", "threshold": 0}
+                ],
+            },
+        ],
+    }
+    assert requires_market_data(tree) is True
