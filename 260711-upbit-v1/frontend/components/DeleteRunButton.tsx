@@ -35,15 +35,26 @@ export default function DeleteRunButton({ runId }: { runId: string }) {
   }
 
   return (
-    <AlertDialog>
+    <AlertDialog
+      onOpenChange={(open) => {
+        // The dialog's content stays mounted between opens (base-ui only toggles
+        // visibility), so a failed delete's error state would otherwise survive
+        // closing ("취소", Escape, outside click) and reappear stale on reopen.
+        if (!open) {
+          setError(null);
+          setPending(false);
+        }
+      }}
+    >
       {/* base-ui's AlertDialog.Trigger already renders a native <button> and manages its own
           ref (needed for focus restoration on close), so it doesn't support Radix-style
           `asChild` composition. Wrapping it with `render={<Button .../>}` (mirroring
-          AlertDialogCancel's pattern) actually breaks here: our `Button` wrapper isn't
-          React.forwardRef-wrapped, so base-ui logs "cannot be given refs" / "expected a
-          native <button>" console errors once the ref fails to reach the DOM node. Instead,
-          apply Button's own class-variance styles directly to the Trigger (same approach as
-          PopoverTrigger in CoinSelect.tsx / TooltipTrigger in InfoTooltip.tsx). */}
+          AlertDialogCancel's pattern) would work now that `Button` is React.forwardRef-wrapped,
+          but is intentionally avoided: it would pull in Button's own ButtonPrimitive
+          native-button/disabled-handling semantics on top of AlertDialogTrigger's own
+          equivalent handling, which is redundant. Instead, apply Button's own class-variance
+          styles directly to the Trigger (same approach as PopoverTrigger in CoinSelect.tsx /
+          TooltipTrigger in InfoTooltip.tsx). */}
       <AlertDialogTrigger
         type="button"
         className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}

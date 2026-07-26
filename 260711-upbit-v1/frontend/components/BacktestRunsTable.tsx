@@ -119,6 +119,7 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
                 size="sm"
                 className="px-0"
                 nativeButton={false}
+                role="link"
                 render={<Link href={`/backtests/${run.run_id}`} />}
               >
                 <Eye className="size-3.5" />
