@@ -187,6 +187,18 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=20이면 최근 20봉 거래량의 평균. 현재 거래량이 이 값의 2배를 넘으면 거래량 급등으로 판단하는 식으로 활용합니다.",
     },
     {
+        "value": "TRADE_VALUE", "label": "거래대금 (KRW)", "category": "거래대금",
+        "params": [],
+        "description": "해당 봉에서 실제로 오간 금액(가격×거래량, KRW)입니다. 거래량(수량)과 달리 가격이 반영돼 있어, 저가 잡코인이 수량만 많이 거래된 착시 없이 진짜 큰돈이 들어온 종목을 거를 때 씁니다.",
+        "example": "임계값 5000000000(50억), 연산자 >=를 넣으면 해당 봉에서 거래대금이 50억 원 이상인 순간을 포착합니다.",
+    },
+    {
+        "value": "TRADE_VALUE_SMA", "label": "거래대금 SMA", "category": "거래대금",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "최근 N개 봉의 거래대금(KRW)을 산술평균한 값으로, 현재 거래대금이 평소보다 급증했는지 비교할 때 기준으로 씁니다.",
+        "example": "period=20이면 최근 20봉 거래대금의 평균. 현재 거래대금이 이 값의 2배를 넘으면 진짜 자금이 유입된 급증 구간으로 판단하는 식으로 활용합니다.",
+    },
+    {
         "value": "STOP_LOSS_PCT", "label": "손절라인 (%)", "category": "손익",
         "params": [], "sellOnly": True, "fixedOperator": "<=",
         "description": "캔들 지표가 아니라 보유 포지션의 진입가 대비 현재 수익률(%)입니다. 이 값이 임계값 이하로 내려가면 매도합니다.",
