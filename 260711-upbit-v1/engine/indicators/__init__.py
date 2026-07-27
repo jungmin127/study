@@ -11,9 +11,10 @@ from .momentum import (
     create_stoch_k,
     create_williams_r,
 )
+from .price_levels import create_fib_382, create_fib_500, create_fib_618
 from .trend import create_ema, create_sma, create_wma
 from .volatility import create_atr, create_bb_lower, create_bb_middle, create_bb_upper
-from .volume import create_obv, create_volume_sma
+from .volume import create_obv, create_trade_value, create_trade_value_sma, create_volume_sma
 
 INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
@@ -32,8 +33,13 @@ INDICATOR_FACTORY: dict[str, object] = {
     "ATR": create_atr,
     "OBV": create_obv,
     "VOLUME_SMA": create_volume_sma,
+    "TRADE_VALUE": create_trade_value,
+    "TRADE_VALUE_SMA": create_trade_value_sma,
     "MARKET_TREND": create_market_trend,
     "MOMENTUM_PCT": create_momentum_pct,
+    "FIB_382": create_fib_382,
+    "FIB_500": create_fib_500,
+    "FIB_618": create_fib_618,
 }
 
 __all__ = ["INDICATOR_FACTORY"]
