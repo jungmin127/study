@@ -128,3 +128,26 @@ def test_fib_618_matches_manual_swing_calculation():
     ll = df["low"].rolling(5).min().iloc[-1]
     manual = hh - (hh - ll) * 0.618
     assert abs(values[-1] - manual) < 1e-6
+
+
+def test_pivot_p_matches_manual_prev_bar_average():
+    values = _run_probe("PIVOT_P", {})
+    df = make_oscillating_df()
+    manual = (df["high"].iloc[-2] + df["low"].iloc[-2] + df["close"].iloc[-2]) / 3.0
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_pivot_r1_matches_manual_formula():
+    values = _run_probe("PIVOT_R1", {})
+    df = make_oscillating_df()
+    pivot = (df["high"].iloc[-2] + df["low"].iloc[-2] + df["close"].iloc[-2]) / 3.0
+    manual = pivot * 2 - df["low"].iloc[-2]
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_pivot_s1_matches_manual_formula():
+    values = _run_probe("PIVOT_S1", {})
+    df = make_oscillating_df()
+    pivot = (df["high"].iloc[-2] + df["low"].iloc[-2] + df["close"].iloc[-2]) / 3.0
+    manual = pivot * 2 - df["high"].iloc[-2]
+    assert abs(values[-1] - manual) < 1e-6

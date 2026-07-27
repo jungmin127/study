@@ -28,3 +28,33 @@ def create_fib_618(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     hh = bt.indicators.Highest(data.high, period=period)
     ll = bt.indicators.Lowest(data.low, period=period)
     return hh - (hh - ll) * 0.618
+
+
+class PivotPoints(bt.Indicator):
+    """직전 1봉의 고가·저가·종가로 계산하는 표준 Pivot Point 기준선(P)/저항선(R1)/지지선(S1)."""
+
+    lines = ("p", "r1", "s1")
+
+    def __init__(self) -> None:
+        self.addminperiod(2)
+
+    def next(self) -> None:
+        prev_high = self.data.high[-1]
+        prev_low = self.data.low[-1]
+        prev_close = self.data.close[-1]
+        pivot = (prev_high + prev_low + prev_close) / 3.0
+        self.lines.p[0] = pivot
+        self.lines.r1[0] = pivot * 2 - prev_low
+        self.lines.s1[0] = pivot * 2 - prev_high
+
+
+def create_pivot_p(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    return PivotPoints(data).lines.p
+
+
+def create_pivot_r1(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    return PivotPoints(data).lines.r1
+
+
+def create_pivot_s1(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    return PivotPoints(data).lines.s1

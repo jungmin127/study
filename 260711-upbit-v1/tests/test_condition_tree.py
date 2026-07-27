@@ -3,6 +3,7 @@ from engine.condition_tree import (
     collect_blocks,
     eval_group,
     find_unknown_indicators,
+    get_indicator_value,
     is_empty,
     max_required_period,
     requires_market_data,
@@ -131,3 +132,18 @@ def test_requires_market_data_checks_nested_groups():
         ],
     }
     assert requires_market_data(tree) is True
+
+
+def test_get_indicator_value_dispatches_pivot_sublines():
+    import backtrader as bt
+
+    class _FakePivot:
+        def __init__(self):
+            self.p = [105.0]
+            self.r1 = [110.0]
+            self.s1 = [100.0]
+
+    obj = _FakePivot()
+    assert get_indicator_value("PIVOT_P", obj) == 105.0
+    assert get_indicator_value("PIVOT_R1", obj) == 110.0
+    assert get_indicator_value("PIVOT_S1", obj) == 100.0
