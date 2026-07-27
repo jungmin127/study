@@ -1,30 +1,13 @@
 'use client';
 
-import { Activity, BarChart3, DollarSign, Plus, TrendingUp, Users, X } from 'lucide-react';
+import { Plus, TrendingUp, X } from 'lucide-react';
 import type { ComparisonOperator, ConditionBlock, ConditionGroup } from '@/lib/types/strategy';
 import type { IndicatorCatalogItem } from '@/lib/types/eda';
 import { INPUT_CLASS, SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 import { OPERATOR_SYMBOLS, isConditionBlock, summarizeGroup } from '@/lib/condition-summary';
+import { CATEGORY_DOT_COLOR, CATEGORY_ICON, CATEGORY_ORDER } from '@/lib/indicator-categories';
 import InfoTooltip from '@/components/InfoTooltip';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
-
-const CATEGORY_ORDER = ['추세', '오실레이터', '거래량', '손익', '시장 심리'];
-
-const CATEGORY_DOT_COLOR: Record<string, string> = {
-  추세: 'bg-blue-500',
-  오실레이터: 'bg-violet-500',
-  거래량: 'bg-teal-500',
-  손익: 'bg-orange-500',
-  '시장 심리': 'bg-rose-500',
-};
-
-const CATEGORY_ICON: Record<string, typeof TrendingUp> = {
-  추세: TrendingUp,
-  오실레이터: Activity,
-  거래량: BarChart3,
-  손익: DollarSign,
-  '시장 심리': Users,
-};
 
 const OPERATORS: { value: ComparisonOperator; label: string }[] = [
   { value: '>', label: '초과 (>)' },
