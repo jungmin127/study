@@ -3,11 +3,12 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowDown, ArrowUp, ArrowUpDown, Copy, Eye, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Copy, Eye, RotateCcw, Trash2 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import BacktestCoinFilter from '@/components/BacktestCoinFilter';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,8 +26,35 @@ import { formatDateTime } from '@/lib/format';
 import { deleteBacktestRun } from '@/lib/api/eda';
 import type { BacktestRunSummary } from '@/lib/types/eda';
 
-type SortKey = 'return_rate' | 'created_at' | 'market' | 'timeframe';
+type SortKey = 'return_rate' | 'created_at' | 'market' | 'timeframe' | 'max_drawdown';
 type SortDir = 'asc' | 'desc';
+
+interface RunFilters {
+  coin: string | null;
+  profitOnly: boolean;
+  lossOnly: boolean;
+  closedOnly: boolean;
+  openOnly: boolean;
+}
+
+const EMPTY_FILTERS: RunFilters = {
+  coin: null,
+  profitOnly: false,
+  lossOnly: false,
+  closedOnly: false,
+  openOnly: false,
+};
+
+function filterRuns(runs: BacktestRunSummary[], filters: RunFilters): BacktestRunSummary[] {
+  return runs.filter((r) => {
+    if (filters.coin && r.market !== filters.coin) return false;
+    if (filters.profitOnly && !(r.return_rate !== null && r.return_rate > 0)) return false;
+    if (filters.lossOnly && !(r.return_rate !== null && r.return_rate < 0)) return false;
+    if (filters.closedOnly && r.last_trade_status !== 'closed') return false;
+    if (filters.openOnly && r.last_trade_status !== 'open') return false;
+    return true;
+  });
+}
 
 function sortRuns(runs: BacktestRunSummary[], key: SortKey | null, dir: SortDir): BacktestRunSummary[] {
   if (!key) return runs;
@@ -64,9 +92,10 @@ function buildCopyHref(run: BacktestRunSummary): string {
 
 interface BacktestRunsTableProps {
   runs: BacktestRunSummary[];
+  marketNames: Record<string, string>;
 }
 
-export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
+export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTableProps) {
   const router = useRouter();
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -74,9 +103,23 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<RunFilters>(EMPTY_FILTERS);
 
-  const sorted = useMemo(() => sortRuns(runs, sortKey, sortDir), [runs, sortKey, sortDir]);
+  const coinOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const r of runs) {
+      if (!seen.has(r.market)) seen.set(r.market, marketNames[r.market] ?? r.market);
+    }
+    return Array.from(seen, ([market, koreanName]) => ({ market, koreanName })).sort((a, b) =>
+      a.market.localeCompare(b.market)
+    );
+  }, [runs, marketNames]);
+
+  const filtered = useMemo(() => filterRuns(runs, filters), [runs, filters]);
+  const sorted = useMemo(() => sortRuns(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
   const allSelected = sorted.length > 0 && selected.size === sorted.length;
+  const hasActiveFilter =
+    filters.coin !== null || filters.profitOnly || filters.lossOnly || filters.closedOnly || filters.openOnly;
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -123,6 +166,63 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
 
   return (
     <div>
+      <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
+        <BacktestCoinFilter
+          options={coinOptions}
+          value={filters.coin}
+          onChange={(coin) => setFilters((f) => ({ ...f, coin }))}
+        />
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id="filter-profit"
+            checked={filters.profitOnly}
+            onCheckedChange={(c) => setFilters((f) => ({ ...f, profitOnly: c === true }))}
+          />
+          <label htmlFor="filter-profit" className="cursor-pointer text-sm select-none">
+            수익률 양수만
+          </label>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id="filter-loss"
+            checked={filters.lossOnly}
+            onCheckedChange={(c) => setFilters((f) => ({ ...f, lossOnly: c === true }))}
+          />
+          <label htmlFor="filter-loss" className="cursor-pointer text-sm select-none">
+            수익률 음수만
+          </label>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id="filter-closed"
+            checked={filters.closedOnly}
+            onCheckedChange={(c) => setFilters((f) => ({ ...f, closedOnly: c === true }))}
+          />
+          <label htmlFor="filter-closed" className="cursor-pointer text-sm select-none">
+            상태-청산
+          </label>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id="filter-open"
+            checked={filters.openOnly}
+            onCheckedChange={(c) => setFilters((f) => ({ ...f, openOnly: c === true }))}
+          />
+          <label htmlFor="filter-open" className="cursor-pointer text-sm select-none">
+            상태-보유중
+          </label>
+        </div>
+        {hasActiveFilter && (
+          <Button variant="ghost" size="sm" onClick={() => setFilters(EMPTY_FILTERS)}>
+            <RotateCcw className="size-3.5" />
+            전체 보기
+          </Button>
+        )}
+        <p className="ml-auto text-sm text-muted-foreground">
+          {filtered.length} / {runs.length}건
+        </p>
+      </div>
+
       <div className="mb-2 flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           {selected.size > 0 ? `${selected.size}개 선택됨` : ''}
@@ -186,7 +286,15 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
                 수익률(%) <SortIcon sortKeyOf="return_rate" />
               </button>
             </TableHead>
-            <TableHead className="text-right">MDD(%)</TableHead>
+            <TableHead className="text-right">
+              <button
+                type="button"
+                className="flex w-full items-center justify-end gap-1 hover:text-foreground"
+                onClick={() => toggleSort('max_drawdown')}
+              >
+                MDD(%) <SortIcon sortKeyOf="max_drawdown" />
+              </button>
+            </TableHead>
             <TableHead>상태</TableHead>
             <TableHead>
               <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('created_at')}>
@@ -198,6 +306,13 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
+          {sorted.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={13} className="text-center text-muted-foreground">
+                조건에 맞는 결과가 없습니다.
+              </TableCell>
+            </TableRow>
+          )}
           {sorted.map((run) => (
             <TableRow key={run.run_id}>
               <TableCell>
@@ -211,7 +326,12 @@ export default function BacktestRunsTable({ runs }: BacktestRunsTableProps) {
                 {run.title || <span className="text-muted-foreground">(제목 없음)</span>}
                 {run.description && <p className="text-xs text-muted-foreground">{run.description}</p>}
               </TableCell>
-              <TableCell>{run.market}</TableCell>
+              <TableCell>
+                {run.market}
+                {marketNames[run.market] && (
+                  <span className="block text-xs text-muted-foreground">{marketNames[run.market]}</span>
+                )}
+              </TableCell>
               <TableCell>{run.timeframe}</TableCell>
               <TableCell>
                 {run.start.slice(0, 10)} ~ {run.end.slice(0, 10)}
