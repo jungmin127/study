@@ -100,3 +100,28 @@ def test_run_backtest_with_extra_column_exposes_data_extra_line():
 
     assert captured[0] == 50000.0
     assert captured[-1] == 50000 + (len(df) - 1) * 10
+
+
+def test_run_backtest_with_trade_value_column_exposes_data_trade_value_line():
+    df = _make_synthetic_df()
+    df["trade_value"] = [v * 1000 for v in df["close"]]
+
+    captured: list[float] = []
+
+    class _CapturesTradeValueLine(bt.Strategy):
+        def next(self):
+            captured.append(float(self.data.trade_value[0]))
+
+    run_backtest(
+        df=df,
+        strategy_cls=_CapturesTradeValueLine,
+        risk_config={
+            "initial_capital": 10000,
+            "commission_rate": 0.001,
+            "position_sizing": "percent",
+            "position_size": 100,
+        },
+    )
+
+    assert captured[0] == df["trade_value"].iloc[0]
+    assert captured[-1] == df["trade_value"].iloc[-1]
