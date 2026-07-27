@@ -401,7 +401,7 @@ def list_distinct_combos() -> list[dict]:
     ]
 
 
-def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int = 100) -> list[dict]:
+def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int = 1000) -> list[dict]:
     """온디맨드 조건식 실행(홈 화면) 결과만 최신순으로 반환한다.
 
     strategy_name으로 필터링해 run_sweep()이 남기는 SignalStrategy 기반 행(히트맵/랭킹
