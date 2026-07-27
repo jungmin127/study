@@ -1,5 +1,6 @@
 import backtrader as bt
 
+from engine.condition_tree import get_indicator_value
 from engine.indicators import INDICATOR_FACTORY
 from tests.signal_fixtures import make_oscillating_df
 from engine.runner import PandasDataWithExtra, PandasDataWithTradeValue, run_backtest
@@ -14,7 +15,7 @@ class _ProbeStrategy(bt.Strategy):
         self.seen_values: list[float] = []
 
     def next(self):
-        self.seen_values.append(float(self.probe[0]))
+        self.seen_values.append(get_indicator_value(self.p.indicator, self.probe))
 
 
 def _run_probe(indicator: str, params: dict) -> list[float]:

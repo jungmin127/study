@@ -8,6 +8,8 @@ from engine.condition_tree import (
     max_required_period,
     requires_market_data,
 )
+from engine.indicators import INDICATOR_FACTORY
+from tests.signal_fixtures import make_oscillating_df
 
 
 def test_collect_blocks_flattens_nested_groups():
@@ -137,13 +139,54 @@ def test_requires_market_data_checks_nested_groups():
 def test_get_indicator_value_dispatches_pivot_sublines():
     import backtrader as bt
 
+    class _FakeLine:
+        def __init__(self, value):
+            self.value = value
+
+        def __getitem__(self, idx):
+            return self.value
+
     class _FakePivot:
         def __init__(self):
-            self.p = [105.0]
-            self.r1 = [110.0]
-            self.s1 = [100.0]
+            self.lines = type('obj', (object,), {
+                'p': _FakeLine(105.0),
+                'r1': _FakeLine(110.0),
+                's1': _FakeLine(100.0),
+            })()
 
     obj = _FakePivot()
     assert get_indicator_value("PIVOT_P", obj) == 105.0
     assert get_indicator_value("PIVOT_R1", obj) == 110.0
     assert get_indicator_value("PIVOT_S1", obj) == 100.0
+
+
+def test_pivot_factories_produce_dispatch_compatible_objects():
+    """Regression test: ensure factory functions return PivotPoints instances
+    that work with get_indicator_value() in the real integration path."""
+    import backtrader as bt
+
+    df = make_oscillating_df()
+    df_bt = df.set_index("candle_time")
+    df_bt.index = df_bt.index.tz_localize(None)
+
+    captured = {}
+
+    class _Probe(bt.Strategy):
+        def __init__(self):
+            self.p_obj = INDICATOR_FACTORY["PIVOT_P"](self.data)
+            self.r1_obj = INDICATOR_FACTORY["PIVOT_R1"](self.data)
+            self.s1_obj = INDICATOR_FACTORY["PIVOT_S1"](self.data)
+
+        def next(self):
+            captured["p"] = get_indicator_value("PIVOT_P", self.p_obj)
+            captured["r1"] = get_indicator_value("PIVOT_R1", self.r1_obj)
+            captured["s1"] = get_indicator_value("PIVOT_S1", self.s1_obj)
+
+    cerebro = bt.Cerebro()
+    cerebro.adddata(bt.feeds.PandasData(dataname=df_bt, openinterest=-1))
+    cerebro.addstrategy(_Probe)
+    cerebro.run()
+
+    assert isinstance(captured["p"], float)
+    assert isinstance(captured["r1"], float)
+    assert isinstance(captured["s1"], float)

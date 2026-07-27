@@ -57,11 +57,11 @@ def get_indicator_value(indicator_name: str, obj: bt.Indicator) -> float:
     elif indicator_name == "STOCH_D":
         return float(obj.percD[0])
     elif indicator_name == "PIVOT_P":
-        return float(obj.p[0])
+        return float(obj.lines.p[0])
     elif indicator_name == "PIVOT_R1":
-        return float(obj.r1[0])
+        return float(obj.lines.r1[0])
     elif indicator_name == "PIVOT_S1":
-        return float(obj.s1[0])
+        return float(obj.lines.s1[0])
     else:
         return float(obj[0])
 

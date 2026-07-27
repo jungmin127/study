@@ -49,12 +49,12 @@ class PivotPoints(bt.Indicator):
 
 
 def create_pivot_p(data: bt.feeds.PandasData, **params) -> bt.Indicator:
-    return PivotPoints(data).lines.p
+    return PivotPoints(data)
 
 
 def create_pivot_r1(data: bt.feeds.PandasData, **params) -> bt.Indicator:
-    return PivotPoints(data).lines.r1
+    return PivotPoints(data)
 
 
 def create_pivot_s1(data: bt.feeds.PandasData, **params) -> bt.Indicator:
-    return PivotPoints(data).lines.s1
+    return PivotPoints(data)
