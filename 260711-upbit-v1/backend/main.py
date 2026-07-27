@@ -199,6 +199,42 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=20이면 최근 20봉 거래대금의 평균. 현재 거래대금이 이 값의 2배를 넘으면 진짜 자금이 유입된 급증 구간으로 판단하는 식으로 활용합니다.",
     },
     {
+        "value": "FIB_382", "label": "피보나치 38.2%", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "최근 period봉의 스윙 고점과 저점 사이에서 38.2% 되돌림 지점을 계산합니다. 상승 추세 중 조정이 어디까지 진행될지 가늠하는 지지선으로 흔히 씁니다.",
+        "example": "period=20이면 최근 20봉의 최고가·최저가 구간에서, 고점 대비 38.2% 되돌아온 가격입니다.",
+    },
+    {
+        "value": "FIB_500", "label": "피보나치 50%", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "최근 period봉의 스윙 고점과 저점의 정중앙(50%) 되돌림 지점입니다. 엄밀히는 피보나치 비율이 아니지만 관례적으로 함께 봅니다.",
+        "example": "period=20이면 최근 20봉 구간의 정확히 중간 가격입니다.",
+    },
+    {
+        "value": "FIB_618", "label": "피보나치 61.8%", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "황금비율로 불리는 61.8% 되돌림 지점입니다. 조정이 깊게 들어와도 추세가 살아있는지 가늠하는 마지노선급 지지/저항으로 흔히 해석합니다.",
+        "example": "period=20이면 최근 20봉 구간에서 고점 대비 61.8% 되돌아온 가격입니다.",
+    },
+    {
+        "value": "PIVOT_P", "label": "Pivot 기준선", "category": "가격대",
+        "params": [],
+        "description": "직전 1봉의 고가·저가·종가 평균으로 계산하는 기준선입니다. 오늘 가격이 이 선 위/아래 어디서 노는지로 매수/매도 심리 우위를 가늠하는 전통적 지표입니다.",
+        "example": "직전 봉 고가 110, 저가 100, 종가 105면 Pivot = (110+100+105)/3 ≈ 105입니다.",
+    },
+    {
+        "value": "PIVOT_R1", "label": "Pivot 저항선(R1)", "category": "가격대",
+        "params": [],
+        "description": "Pivot 기준선을 기준으로 계산하는 1차 저항선입니다. 종가가 이 선을 넘으면 상승 모멘텀이 강하다고 흔히 해석합니다.",
+        "example": "Pivot이 105, 직전 봉 저가가 100이면 R1 = 105×2 − 100 = 110입니다.",
+    },
+    {
+        "value": "PIVOT_S1", "label": "Pivot 지지선(S1)", "category": "가격대",
+        "params": [],
+        "description": "Pivot 기준선을 기준으로 계산하는 1차 지지선입니다. 종가가 이 선 아래로 내려가면 하락 압력이 강하다고 흔히 해석합니다.",
+        "example": "Pivot이 105, 직전 봉 고가가 110이면 S1 = 105×2 − 110 = 100입니다.",
+    },
+    {
         "value": "STOP_LOSS_PCT", "label": "손절라인 (%)", "category": "손익",
         "params": [], "sellOnly": True, "fixedOperator": "<=",
         "description": "캔들 지표가 아니라 보유 포지션의 진입가 대비 현재 수익률(%)입니다. 이 값이 임계값 이하로 내려가면 매도합니다.",

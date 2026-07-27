@@ -190,7 +190,7 @@ def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp
     for item in body:
         assert item["description"], f"{item['value']}에 description이 없음"
         assert item["example"], f"{item['value']}에 example이 없음"
-        assert item["category"] in {"추세", "오실레이터", "거래량", "거래대금", "손익", "시장 심리"}
+        assert item["category"] in {"추세", "오실레이터", "거래량", "거래대금", "손익", "시장 심리", "가격대"}
 
 
 def test_stop_loss_and_take_profit_catalog_items_are_sell_only_with_fixed_operator(monkeypatch, tmp_path):
