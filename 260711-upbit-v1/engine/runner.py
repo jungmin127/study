@@ -21,6 +21,20 @@ class PandasDataWithExtra(bt.feeds.PandasData):
     params = (("extra", "extra"),)
 
 
+class PandasDataWithTradeValue(bt.feeds.PandasData):
+    """거래대금(trade_value) 컬럼을 포함하는 피드. 전략에서 self.data.trade_value[0]으로 접근."""
+
+    lines = ("trade_value",)
+    params = (("trade_value", "trade_value"),)
+
+
+class PandasDataWithExtraAndTradeValue(bt.feeds.PandasData):
+    """extra(외부 시세)와 trade_value(거래대금)를 동시에 포함하는 피드."""
+
+    lines = ("extra", "trade_value")
+    params = (("extra", "extra"), ("trade_value", "trade_value"))
+
+
 class FractionalPercentSizer(bt.Sizer):
     """소수점 수량을 지원하는 퍼센트 사이저 (암호화폐 소수점 거래용)."""
     params = (("percents", 100),)
@@ -162,11 +176,26 @@ def run_backtest(
     if df_bt.index.tz is not None:
         df_bt.index = df_bt.index.tz_localize(None)
 
-    if extra_column and extra_column in df_bt.columns:
+    has_trade_value = "trade_value" in df_bt.columns
+    has_extra = bool(extra_column and extra_column in df_bt.columns)
+
+    if has_extra:
         df_bt = df_bt.rename(columns={extra_column: "extra"})
+
+    if has_extra and has_trade_value:
+        data_feed = PandasDataWithExtraAndTradeValue(
+            dataname=df_bt, open="open", high="high", low="low", close="close",
+            volume="volume", openinterest=-1, extra="extra", trade_value="trade_value",
+        )
+    elif has_extra:
         data_feed = PandasDataWithExtra(
             dataname=df_bt, open="open", high="high", low="low", close="close",
             volume="volume", openinterest=-1, extra="extra",
+        )
+    elif has_trade_value:
+        data_feed = PandasDataWithTradeValue(
+            dataname=df_bt, open="open", high="high", low="low", close="close",
+            volume="volume", openinterest=-1, trade_value="trade_value",
         )
     else:
         data_feed = bt.feeds.PandasData(
@@ -232,4 +261,9 @@ def run_backtest(
     }
 
 
-__all__ = ["run_backtest"]
+__all__ = [
+    "run_backtest",
+    "PandasDataWithExtra",
+    "PandasDataWithTradeValue",
+    "PandasDataWithExtraAndTradeValue",
+]
