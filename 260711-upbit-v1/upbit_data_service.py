@@ -14,7 +14,7 @@ RETRY_BASE_DELAY_SECONDS = 1.0
 RATE_LIMIT_BACKOFF_SECONDS = 5.0
 REQUEST_DELAY_SECONDS = 0.15
 
-_CANDLE_COLUMNS = ["candle_time", "open", "high", "low", "close", "volume"]
+_CANDLE_COLUMNS = ["candle_time", "open", "high", "low", "close", "volume", "trade_value"]
 
 
 def _endpoint_for_timeframe(timeframe: str) -> str:
@@ -79,6 +79,7 @@ def _parse_candles(raw: list[dict]) -> pd.DataFrame:
             "low_price": "low",
             "trade_price": "close",
             "candle_acc_trade_volume": "volume",
+            "candle_acc_trade_price": "trade_value",
         }
     )
     df = df[_CANDLE_COLUMNS]
@@ -160,7 +161,12 @@ def _load_cache(market: str, timeframe: str) -> pd.DataFrame:
     path = _cache_path(market, timeframe)
     if not path.exists():
         return pd.DataFrame(columns=_CANDLE_COLUMNS)
-    return pd.read_parquet(path)
+    cached = pd.read_parquet(path)
+    if not set(_CANDLE_COLUMNS).issubset(cached.columns):
+        # trade_value 컬럼 추가 이전에 저장된 캐시 파일 — 스키마가 안 맞으므로
+        # 캐시가 없는 것처럼 취급해 해당 구간을 다시 받아온다(자연스러운 스키마 마이그레이션).
+        return pd.DataFrame(columns=_CANDLE_COLUMNS)
+    return cached
 
 
 def _save_cache(market: str, timeframe: str, df: pd.DataFrame) -> None:

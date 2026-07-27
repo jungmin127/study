@@ -32,21 +32,23 @@ def test_parse_candles_maps_fields():
             "low_price": 90.0,
             "trade_price": 105.0,
             "candle_acc_trade_volume": 12.5,
+            "candle_acc_trade_price": 1312.5,
         }
     ]
 
     df = _parse_candles(raw)
 
-    assert list(df.columns) == ["candle_time", "open", "high", "low", "close", "volume"]
+    assert list(df.columns) == ["candle_time", "open", "high", "low", "close", "volume", "trade_value"]
     assert df.iloc[0]["open"] == 100.0
     assert df.iloc[0]["close"] == 105.0
     assert df.iloc[0]["volume"] == 12.5
+    assert df.iloc[0]["trade_value"] == 1312.5
     assert df["candle_time"].dt.tz is not None
 
 
 def test_parse_candles_empty_input():
     df = _parse_candles([])
-    assert list(df.columns) == ["candle_time", "open", "high", "low", "close", "volume"]
+    assert list(df.columns) == ["candle_time", "open", "high", "low", "close", "volume", "trade_value"]
     assert len(df) == 0
 
 
@@ -105,6 +107,7 @@ def _candle(iso_time: str, price: float) -> dict:
         "low_price": price,
         "trade_price": price,
         "candle_acc_trade_volume": 1.0,
+        "candle_acc_trade_price": price * 1.0,
     }
 
 
@@ -230,6 +233,45 @@ def test_get_candles_fetches_full_range_when_no_cache(monkeypatch, tmp_path):
     assert (tmp_path / "KRW-BTC_days.parquet").exists()
 
 
+def test_get_candles_refetches_when_cache_predates_trade_value_column(monkeypatch, tmp_path):
+    """trade_value 컬럼 추가 이전에 저장된 캐시 파일(5개 컬럼만 있음)을 만나면 캐시가
+    없는 것처럼 취급해 다시 받아와야 한다 — 옛 캐시를 그대로 읽으면 trade_value가 없어
+    거래대금 조건 평가 시 KeyError가 난다."""
+    monkeypatch.setattr(uds, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(
+        uds, "datetime",
+        type("_FixedDatetime", (), {
+            "now": staticmethod(lambda tz=None: datetime(2026, 1, 20, tzinfo=timezone.utc))
+        }),
+    )
+
+    idx = pd.date_range("2026-01-01", "2026-01-10", freq="D", tz="UTC")
+    stale_cache = pd.DataFrame(
+        {"candle_time": idx, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+    )
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    stale_cache.to_parquet(tmp_path / "KRW-BTC_days.parquet", index=False)
+
+    calls: list[tuple] = []
+
+    def fake_fetch_range(market, timeframe, start, end, client=None):
+        calls.append((market, timeframe, start, end))
+        idx = pd.date_range(start, end, freq="D", tz="UTC")
+        return pd.DataFrame(
+            {"candle_time": idx, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "trade_value": 100}
+        )
+
+    monkeypatch.setattr(uds, "_fetch_range", fake_fetch_range)
+
+    start = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 9, tzinfo=timezone.utc)
+    df = get_candles("KRW-BTC", "days", start, end)
+
+    assert len(calls) == 1
+    assert "trade_value" in df.columns
+    assert (df["trade_value"] == 100).all()
+
+
 def test_get_candles_skips_fetch_when_fully_cached(monkeypatch, tmp_path):
     monkeypatch.setattr(uds, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(
@@ -241,7 +283,7 @@ def test_get_candles_skips_fetch_when_fully_cached(monkeypatch, tmp_path):
 
     idx = pd.date_range("2026-01-01", "2026-01-10", freq="D", tz="UTC")
     existing = pd.DataFrame(
-        {"candle_time": idx, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+        {"candle_time": idx, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "trade_value": 1}
     )
     tmp_path.mkdir(parents=True, exist_ok=True)
     existing.to_parquet(tmp_path / "KRW-BTC_days.parquet", index=False)
