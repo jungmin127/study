@@ -10,29 +10,23 @@ import backtrader as bt
 import pandas as pd
 
 
-class PandasDataWithExtra(bt.feeds.PandasData):
-    """dominance, kimchi_premium 등 외부 데이터 컬럼을 포함하는 커스텀 피드.
-
-    DataFrame에 'extra' 컬럼이 있어야 한다.
-    전략에서 self.data.extra[0] 으로 접근.
-    """
-
-    lines = ("extra",)
-    params = (("extra", "extra"),)
+AUX_MARKET_LINE_NAME: dict[str, str] = {"KRW-BTC": "btc_close", "KRW-USDT": "usdt_close"}
+_OPTIONAL_LINE_CANDIDATES: tuple[str, ...] = ("trade_value", *AUX_MARKET_LINE_NAME.values())
 
 
-class PandasDataWithTradeValue(bt.feeds.PandasData):
-    """거래대금(trade_value) 컬럼을 포함하는 피드. 전략에서 self.data.trade_value[0]으로 접근."""
+def build_data_feed_class(extra_lines: tuple[str, ...]) -> type[bt.feeds.PandasData]:
+    """주어진 이름들을 추가 라인으로 갖는 PandasData 서브클래스를 동적으로 만든다.
 
-    lines = ("trade_value",)
-    params = (("trade_value", "trade_value"),)
-
-
-class PandasDataWithExtraAndTradeValue(bt.feeds.PandasData):
-    """extra(외부 시세)와 trade_value(거래대금)를 동시에 포함하는 피드."""
-
-    lines = ("extra", "trade_value")
-    params = (("extra", "extra"), ("trade_value", "trade_value"))
+    보조 컬럼 조합(거래대금, BTC 종가, USDT 종가, ...)이 늘어나도 조합마다 클래스를 손으로
+    나열하지 않아도 되게 하기 위한 헬퍼 — 조합 수는 2^n으로 늘어나지만 이 함수는 필요한
+    조합만 그때그때 만든다."""
+    if not extra_lines:
+        return bt.feeds.PandasData
+    return type(
+        "DynamicPandasData",
+        (bt.feeds.PandasData,),
+        {"lines": extra_lines, "params": tuple((name, name) for name in extra_lines)},
+    )
 
 
 class FractionalPercentSizer(bt.Sizer):
@@ -151,7 +145,6 @@ def run_backtest(
     strategy_cls: type[bt.Strategy],
     risk_config: dict,
     strategy_params: dict | None = None,
-    extra_column: str | None = None,
 ) -> dict:
     """
     백테스트를 실행하고 결과를 반환.
@@ -162,7 +155,6 @@ def run_backtest(
         risk_config: {initial_capital, commission_rate, position_sizing,
                        position_size, stop_loss, take_profit, trailing_stop}
         strategy_params: 전략 파라미터 (addstrategy에 키워드 인수로 전달)
-        extra_column: df에 포함된 외부 데이터 컬럼명
 
     Returns:
         {equity_curve, trades, final_value, sharpe, max_drawdown}
@@ -176,32 +168,13 @@ def run_backtest(
     if df_bt.index.tz is not None:
         df_bt.index = df_bt.index.tz_localize(None)
 
-    has_trade_value = "trade_value" in df_bt.columns
-    has_extra = bool(extra_column and extra_column in df_bt.columns)
-
-    if has_extra:
-        df_bt = df_bt.rename(columns={extra_column: "extra"})
-
-    if has_extra and has_trade_value:
-        data_feed = PandasDataWithExtraAndTradeValue(
-            dataname=df_bt, open="open", high="high", low="low", close="close",
-            volume="volume", openinterest=-1, extra="extra", trade_value="trade_value",
-        )
-    elif has_extra:
-        data_feed = PandasDataWithExtra(
-            dataname=df_bt, open="open", high="high", low="low", close="close",
-            volume="volume", openinterest=-1, extra="extra",
-        )
-    elif has_trade_value:
-        data_feed = PandasDataWithTradeValue(
-            dataname=df_bt, open="open", high="high", low="low", close="close",
-            volume="volume", openinterest=-1, trade_value="trade_value",
-        )
-    else:
-        data_feed = bt.feeds.PandasData(
-            dataname=df_bt, open="open", high="high", low="low", close="close",
-            volume="volume", openinterest=-1,
-        )
+    extra_lines = tuple(name for name in _OPTIONAL_LINE_CANDIDATES if name in df_bt.columns)
+    feed_kwargs = {
+        "dataname": df_bt, "open": "open", "high": "high", "low": "low", "close": "close",
+        "volume": "volume", "openinterest": -1,
+    }
+    feed_kwargs.update({name: name for name in extra_lines})
+    data_feed = build_data_feed_class(extra_lines)(**feed_kwargs)
 
     cerebro = bt.Cerebro()
     cerebro.adddata(data_feed)
@@ -263,7 +236,6 @@ def run_backtest(
 
 __all__ = [
     "run_backtest",
-    "PandasDataWithExtra",
-    "PandasDataWithTradeValue",
-    "PandasDataWithExtraAndTradeValue",
+    "build_data_feed_class",
+    "AUX_MARKET_LINE_NAME",
 ]

@@ -1,9 +1,11 @@
+import statistics
+
 import backtrader as bt
 
 from engine.condition_tree import get_indicator_value
 from engine.indicators import INDICATOR_FACTORY
 from tests.signal_fixtures import make_oscillating_df
-from engine.runner import PandasDataWithExtra, PandasDataWithTradeValue, run_backtest
+from engine.runner import build_data_feed_class, run_backtest
 
 
 class _ProbeStrategy(bt.Strategy):
@@ -29,7 +31,7 @@ def _run_probe(indicator: str, params: dict) -> list[float]:
     return results[0].seen_values
 
 
-_NEEDS_EXTRA_LINE = {"MARKET_TREND"}  # extra 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_extra_line 참고
+_NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
 _NEEDS_TRADE_VALUE_LINE = {"TRADE_VALUE", "TRADE_VALUE_SMA"}  # trade_value 라인이 필요 — test_trade_value_* 참고
 
 
@@ -48,17 +50,16 @@ def test_sma_matches_manual_average():
     assert abs(values[-1] - manual) < 1e-6
 
 
-def _run_probe_with_extra(indicator: str, params: dict) -> list[float]:
+def _run_probe_with_aux(indicator: str, params: dict, aux_line: str, aux_series) -> list[float]:
     df = make_oscillating_df()
-    df["market_close"] = df["close"] * 2 + 1000  # 대상 마켓과 스케일이 다른 별도 시세임을 검증하기 위해 배율을 둠
+    df[aux_line] = aux_series
     df_bt = df.set_index("candle_time")
     df_bt.index = df_bt.index.tz_localize(None)
-    df_bt = df_bt.rename(columns={"market_close": "extra"})
     cerebro = bt.Cerebro()
     cerebro.adddata(
-        PandasDataWithExtra(
+        build_data_feed_class((aux_line,))(
             dataname=df_bt, open="open", high="high", low="low", close="close",
-            volume="volume", openinterest=-1, extra="extra",
+            volume="volume", openinterest=-1, **{aux_line: aux_line},
         )
     )
     cerebro.addstrategy(_ProbeStrategy, indicator=indicator, indicator_params=params)
@@ -66,11 +67,11 @@ def _run_probe_with_extra(indicator: str, params: dict) -> list[float]:
     return results[0].seen_values
 
 
-def test_market_trend_matches_manual_close_minus_sma_of_extra_line():
-    values = _run_probe_with_extra("MARKET_TREND", {"period": 5})
+def test_market_trend_matches_manual_close_minus_sma_of_btc_close_line():
     df = make_oscillating_df()
-    market_close = df["close"] * 2 + 1000
-    manual = (market_close - market_close.rolling(5).mean()).iloc[-1]
+    btc_close = df["close"] * 2 + 1000  # 대상 마켓과 스케일이 다른 별도 시세임을 검증하기 위해 배율을 둠
+    values = _run_probe_with_aux("MARKET_TREND", {"period": 5}, "btc_close", btc_close)
+    manual = (btc_close - btc_close.rolling(5).mean()).iloc[-1]
     assert abs(values[-1] - manual) < 1e-6
 
 
@@ -81,34 +82,17 @@ def test_momentum_pct_matches_manual_pct_change_over_period():
     assert abs(values[-1] - manual) < 1e-6
 
 
-def _run_probe_with_trade_value(indicator: str, params: dict) -> list[float]:
-    df = make_oscillating_df()
-    df["trade_value"] = df["close"] * df["volume"]
-    df_bt = df.set_index("candle_time")
-    df_bt.index = df_bt.index.tz_localize(None)
-    cerebro = bt.Cerebro()
-    cerebro.adddata(
-        PandasDataWithTradeValue(
-            dataname=df_bt, open="open", high="high", low="low", close="close",
-            volume="volume", openinterest=-1, trade_value="trade_value",
-        )
-    )
-    cerebro.addstrategy(_ProbeStrategy, indicator=indicator, indicator_params=params)
-    results = cerebro.run()
-    return results[0].seen_values
-
-
 def test_trade_value_matches_raw_trade_value_column():
-    values = _run_probe_with_trade_value("TRADE_VALUE", {})
     df = make_oscillating_df()
     trade_value = df["close"] * df["volume"]
+    values = _run_probe_with_aux("TRADE_VALUE", {}, "trade_value", trade_value)
     assert abs(values[-1] - trade_value.iloc[-1]) < 1e-6
 
 
 def test_trade_value_sma_matches_manual_average_of_trade_value():
-    values = _run_probe_with_trade_value("TRADE_VALUE_SMA", {"period": 5})
     df = make_oscillating_df()
     trade_value = df["close"] * df["volume"]
+    values = _run_probe_with_aux("TRADE_VALUE_SMA", {"period": 5}, "trade_value", trade_value)
     manual = trade_value.rolling(5).mean().iloc[-1]
     assert abs(values[-1] - manual) < 1e-6
 
@@ -151,4 +135,26 @@ def test_pivot_s1_matches_manual_formula():
     df = make_oscillating_df()
     pivot = (df["high"].iloc[-2] + df["low"].iloc[-2] + df["close"].iloc[-2]) / 3.0
     manual = pivot * 2 - df["high"].iloc[-2]
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_btc_correlation_matches_manual_pearson_of_pct_returns():
+    df = make_oscillating_df()
+    btc_df = make_oscillating_df(base=50000.0, amplitude=3000.0, period=45, ripple_period=9)
+    values = _run_probe_with_aux("BTC_CORRELATION", {"period": 10}, "btc_close", btc_df["close"])
+
+    coin_roc = df["close"].pct_change() * 100
+    btc_roc = btc_df["close"].pct_change() * 100
+    manual = statistics.correlation(coin_roc.iloc[-10:].tolist(), btc_roc.iloc[-10:].tolist())
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_usdt_correlation_matches_manual_pearson_of_pct_returns():
+    df = make_oscillating_df()
+    usdt_df = make_oscillating_df(base=1300.0, amplitude=40.0, period=30, ripple_period=4)
+    values = _run_probe_with_aux("USDT_CORRELATION", {"period": 10}, "usdt_close", usdt_df["close"])
+
+    coin_roc = df["close"].pct_change() * 100
+    usdt_roc = usdt_df["close"].pct_change() * 100
+    manual = statistics.correlation(coin_roc.iloc[-10:].tolist(), usdt_roc.iloc[-10:].tolist())
     assert abs(values[-1] - manual) < 1e-6
