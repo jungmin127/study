@@ -11,7 +11,7 @@ import pandas as pd
 
 
 AUX_MARKET_LINE_NAME: dict[str, str] = {"KRW-BTC": "btc_close", "KRW-USDT": "usdt_close"}
-_OPTIONAL_LINE_CANDIDATES: tuple[str, ...] = ("trade_value", *AUX_MARKET_LINE_NAME.values())
+_OPTIONAL_LINE_CANDIDATES: tuple[str, ...] = ("trade_value", "fear_greed_value", *AUX_MARKET_LINE_NAME.values())
 
 
 def build_data_feed_class(extra_lines: tuple[str, ...]) -> type[bt.feeds.PandasData]:

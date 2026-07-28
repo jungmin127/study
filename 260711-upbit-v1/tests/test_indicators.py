@@ -1,6 +1,7 @@
 import statistics
 
 import backtrader as bt
+import pandas as pd
 
 from engine.condition_tree import get_indicator_value
 from engine.indicators import INDICATOR_FACTORY
@@ -31,7 +32,7 @@ def _run_probe(indicator: str, params: dict) -> list[float]:
     return results[0].seen_values
 
 
-_NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
+_NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
 _NEEDS_TRADE_VALUE_LINE = {"TRADE_VALUE", "TRADE_VALUE_SMA"}  # trade_value 라인이 필요 — test_trade_value_* 참고
 
 
@@ -184,3 +185,10 @@ def test_obv_matches_manual_cumulative_volume_by_close_direction():
         else:
             manual.append(manual[-1])
     assert values[-1] == manual[-1]
+
+
+def test_fear_greed_cmc_matches_raw_fear_greed_value_column():
+    df = make_oscillating_df()
+    fear_greed = pd.Series([30.0 + (i % 50) for i in range(len(df))])
+    values = _run_probe_with_aux("FEAR_GREED_CMC", {}, "fear_greed_value", fear_greed)
+    assert abs(values[-1] - fear_greed.iloc[-1]) < 1e-6
