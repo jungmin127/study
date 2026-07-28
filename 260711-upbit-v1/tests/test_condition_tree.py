@@ -6,7 +6,7 @@ from engine.condition_tree import (
     get_indicator_value,
     is_empty,
     max_required_period,
-    requires_market_data,
+    required_aux_markets,
 )
 from engine.indicators import INDICATOR_FACTORY
 from tests.signal_fixtures import make_oscillating_df
@@ -107,20 +107,20 @@ def test_find_unknown_indicators_allows_holding_period_bars():
     assert find_unknown_indicators(tree) == []
 
 
-def test_requires_market_data_true_when_market_trend_present():
+def test_required_aux_markets_returns_btc_when_market_trend_present():
     tree = {
         "type": "AND",
         "conditions": [{"indicator": "MARKET_TREND", "params": {"period": 10}, "operator": "<", "threshold": 0}],
     }
-    assert requires_market_data(tree) is True
+    assert required_aux_markets(tree) == {"KRW-BTC"}
 
 
-def test_requires_market_data_false_when_market_trend_absent():
+def test_required_aux_markets_empty_when_absent():
     tree = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}]}
-    assert requires_market_data(tree) is False
+    assert required_aux_markets(tree) == set()
 
 
-def test_requires_market_data_checks_nested_groups():
+def test_required_aux_markets_checks_nested_groups():
     tree = {
         "type": "OR",
         "conditions": [
@@ -133,7 +133,29 @@ def test_requires_market_data_checks_nested_groups():
             },
         ],
     }
-    assert requires_market_data(tree) is True
+    assert required_aux_markets(tree) == {"KRW-BTC"}
+
+
+def test_required_aux_markets_returns_both_btc_and_usdt_when_both_correlations_present():
+    tree = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "BTC_CORRELATION", "params": {"period": 20}, "operator": ">", "threshold": 0.5},
+            {"indicator": "USDT_CORRELATION", "params": {"period": 20}, "operator": ">", "threshold": 0.5},
+        ],
+    }
+    assert required_aux_markets(tree) == {"KRW-BTC", "KRW-USDT"}
+
+
+def test_required_aux_markets_dedupes_when_market_trend_and_btc_correlation_both_need_btc():
+    tree = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "MARKET_TREND", "params": {"period": 10}, "operator": "<", "threshold": 0},
+            {"indicator": "BTC_CORRELATION", "params": {"period": 20}, "operator": ">", "threshold": 0.5},
+        ],
+    }
+    assert required_aux_markets(tree) == {"KRW-BTC"}
 
 
 def test_get_indicator_value_dispatches_pivot_sublines():

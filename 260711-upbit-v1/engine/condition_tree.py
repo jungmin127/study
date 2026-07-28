@@ -152,10 +152,23 @@ def max_required_period(group: dict) -> int:
     return max(periods)
 
 
-def requires_market_data(group: dict) -> bool:
-    """조건 트리가 MARKET_TREND처럼 대상 마켓이 아닌 외부 마켓(KRW-BTC) 데이터가 필요한
-    지표를 포함하는지 확인한다. backend가 이 값을 보고 KRW-BTC 캔들을 추가로 조회할지 정한다."""
-    return any(b["indicator"] == "MARKET_TREND" for b in collect_blocks(group))
+AUX_MARKET_INDICATORS: dict[str, str] = {
+    "MARKET_TREND": "KRW-BTC",
+    "BTC_CORRELATION": "KRW-BTC",
+    "USDT_CORRELATION": "KRW-USDT",
+}
+
+
+def required_aux_markets(group: dict) -> set[str]:
+    """조건 트리가 대상 마켓이 아닌 다른 마켓(KRW-BTC, KRW-USDT 등) 캔들이 필요한 지표를
+    포함하는지 확인해, 필요한 마켓 코드 집합을 반환한다. backend가 이 집합을 보고 각 마켓의
+    캔들을 추가로 조회해 병합할지 정한다. 여러 지표가 같은 마켓을 요구하면(예: MARKET_TREND와
+    BTC_CORRELATION이 둘 다 KRW-BTC) 한 번만 등장한다."""
+    return {
+        AUX_MARKET_INDICATORS[b["indicator"]]
+        for b in collect_blocks(group)
+        if b["indicator"] in AUX_MARKET_INDICATORS
+    }
 
 
 __all__ = [
@@ -168,5 +181,6 @@ __all__ = [
     "find_unknown_indicators",
     "is_empty",
     "max_required_period",
-    "requires_market_data",
+    "AUX_MARKET_INDICATORS",
+    "required_aux_markets",
 ]
