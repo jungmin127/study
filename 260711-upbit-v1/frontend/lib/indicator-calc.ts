@@ -208,6 +208,24 @@ export function marketTrend(btcCloses: number[], period: number): { sma: number[
   return { sma: smaLine, trend };
 }
 
+export function highest(values: number[], period: number): number[] {
+  return values.map((_, i) => {
+    if (i < period - 1) return NaN;
+    let max = -Infinity;
+    for (let j = i - period + 1; j <= i; j++) max = Math.max(max, values[j]);
+    return max;
+  });
+}
+
+export function lowest(values: number[], period: number): number[] {
+  return values.map((_, i) => {
+    if (i < period - 1) return NaN;
+    let min = Infinity;
+    for (let j = i - period + 1; j <= i; j++) min = Math.min(min, values[j]);
+    return min;
+  });
+}
+
 export function round(value: number, digits = 2): number {
   if (Number.isNaN(value)) return NaN;
   const factor = 10 ** digits;

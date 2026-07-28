@@ -224,6 +224,74 @@ export function buildGuideExample(value: string): GuideExample {
         chart: gauge.chart,
       };
     }
+    case 'FIB_382':
+    case 'FIB_500':
+    case 'FIB_618': {
+      const period = 20;
+      const ratio = value === 'FIB_382' ? 0.382 : value === 'FIB_500' ? 0.5 : 0.618;
+      const hh = calc.highest(highs, period);
+      const ll = calc.lowest(lows, period);
+      const fib = closes.map((_, i) => (Number.isNaN(hh[i]) ? NaN : hh[i] - (hh[i] - ll[i]) * ratio));
+      const start = firstValidIndex(fib);
+      const rows = windowFrom(start).map((bar, i) => ({
+        bar: bar.bar,
+        cells: { close: n(bar.close, 0), high: n(hh[start + i], 0), low: n(ll[start + i], 0), fib: n(fib[start + i]) },
+      }));
+      return {
+        columns: [
+          { key: 'close', label: '종가' },
+          { key: 'high', label: `${period}봉 최고가` },
+          { key: 'low', label: `${period}봉 최저가` },
+          { key: 'fib', label: '되돌림 가격' },
+        ],
+        rows,
+        chart: {
+          type: 'line',
+          data: SAMPLE_BARS.map((bar, i) => ({ bar: bar.bar, close: bar.close, fib: clean(fib[i]) })),
+          lines: [
+            { key: 'close', name: '종가', color: '#94a3b8' },
+            { key: 'fib', name: `${value}`, color: '#0891b2', dash: true },
+          ],
+        },
+      };
+    }
+    case 'PIVOT_P':
+    case 'PIVOT_R1':
+    case 'PIVOT_S1': {
+      const p = SAMPLE_BARS.map((_, i) => (i === 0 ? NaN : (SAMPLE_BARS[i - 1].high + SAMPLE_BARS[i - 1].low + SAMPLE_BARS[i - 1].close) / 3));
+      const r1 = SAMPLE_BARS.map((bar, i) => (i === 0 ? NaN : p[i] * 2 - SAMPLE_BARS[i - 1].low));
+      const s1 = SAMPLE_BARS.map((bar, i) => (i === 0 ? NaN : p[i] * 2 - SAMPLE_BARS[i - 1].high));
+      const line = value === 'PIVOT_P' ? p : value === 'PIVOT_R1' ? r1 : s1;
+      const rows = windowFrom(1, 6).map((bar, i) => {
+        const idx = i + 1;
+        return {
+          bar: bar.bar,
+          cells: {
+            prevHigh: n(SAMPLE_BARS[idx - 1].high, 0),
+            prevLow: n(SAMPLE_BARS[idx - 1].low, 0),
+            prevClose: n(SAMPLE_BARS[idx - 1].close, 0),
+            value: n(line[idx]),
+          },
+        };
+      });
+      return {
+        columns: [
+          { key: 'prevHigh', label: '직전 봉 고가' },
+          { key: 'prevLow', label: '직전 봉 저가' },
+          { key: 'prevClose', label: '직전 봉 종가' },
+          { key: 'value', label: value },
+        ],
+        rows,
+        chart: {
+          type: 'line',
+          data: SAMPLE_BARS.map((bar, i) => ({ bar: bar.bar, close: bar.close, value: clean(line[i]) })),
+          lines: [
+            { key: 'close', name: '종가', color: '#94a3b8' },
+            { key: 'value', name: value, color: '#0891b2', dash: true },
+          ],
+        },
+      };
+    }
     case 'CCI': {
       const period = 20;
       const line = calc.cci(highs, lows, closes, period);
