@@ -1,4 +1,4 @@
-import { SAMPLE_BARS, SAMPLE_BTC, type SampleBar } from '@/lib/guide-sample-data';
+import { SAMPLE_BARS, SAMPLE_BTC, SAMPLE_FEAR_GREED, type SampleBar } from '@/lib/guide-sample-data';
 import * as calc from '@/lib/indicator-calc';
 
 export interface TableColumn {
@@ -600,6 +600,28 @@ export function buildGuideExample(value: string): GuideExample {
           lines: [{ key: 'momentum', name: `모멘텀 %(period=${period})`, color: '#8b5cf6' }],
           refLines: [{ y: 0, label: '0선' }],
         },
+      };
+    }
+    case 'FEAR_GREED_CMC': {
+      const rows = windowFrom(0, 7).map((bar, i) => ({
+        bar: bar.bar,
+        cells: { fearGreed: n(SAMPLE_FEAR_GREED[i], 0) },
+      }));
+      const gauge = gaugeExample(
+        SAMPLE_FEAR_GREED,
+        0,
+        100,
+        [
+          { from: 0, to: 20, color: '#10b981', label: '공포(<20)' },
+          { from: 20, to: 80, color: '#94a3b8', label: '중립' },
+          { from: 80, to: 100, color: '#ef4444', label: '탐욕(>80)' },
+        ],
+        '공포탐욕지수'
+      );
+      return {
+        columns: [{ key: 'fearGreed', label: '공포탐욕지수' }],
+        rows,
+        chart: gauge.chart,
       };
     }
     case 'STOP_LOSS_PCT':
