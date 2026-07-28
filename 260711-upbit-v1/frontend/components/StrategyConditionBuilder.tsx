@@ -61,6 +61,9 @@ function recommendedThreshold(
   if (PRICE_SCALE_INDICATORS.has(indicator)) return currentPrice ?? 0;
   if (ZERO_CROSS_INDICATORS.has(indicator)) return 0;
   if (indicator === 'ATR') return currentPrice ? Math.round(currentPrice * 0.01) : 1;
+  if (indicator === 'BTC_CORRELATION' || indicator === 'USDT_CORRELATION') {
+    return operator === '<' || operator === '<=' ? -0.3 : 0.5;
+  }
 
   const bounds = OSCILLATOR_BOUNDS[indicator];
   if (bounds) {

@@ -273,4 +273,18 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
       '연산자 ">", threshold 3 → period봉 전보다 3% 이상 오른 상태(상승 모멘텀 진입)를 포착. 연산자 "<", threshold -5 → period봉 전보다 5% 이상 급락한 상태(눌림목/역추세 진입)를 포착.',
     usage: '단기 추세 추종(threshold 양수)이나 급락 후 반등 노림(threshold 음수) 두 가지 반대 방향 전략 모두에 씁니다.',
   },
+  BTC_CORRELATION: {
+    meaning: '대상 코인과 KRW-BTC의 봉 대비 등락률(%)을 최근 period봉 모아 계산한 Pearson 상관계수입니다. engine/indicators/market.py의 RollingCorrelation이 이 값을 계산합니다.',
+    params: [{ key: 'period', role: '상관계수를 계산할 롤링 윈도우 봉 개수.' }],
+    formula: '등락률_t = (종가_t − 종가_{t-1}) ÷ 종가_{t-1} × 100\n상관계수 = Pearson(대상코인 등락률_[t-period+1..t], KRW-BTC 등락률_[t-period+1..t])',
+    thresholdExample: '값은 -1~1 범위입니다. 1에 가까울수록 BTC와 같은 방향으로, -1에 가까울수록 반대 방향으로 움직입니다. 예: 임계값 0.3, 연산자 "<"면 BTC와의 동조화가 약해진(디커플링) 구간을 포착합니다.',
+    usage: '알트코인 매수 조건에 "BTC와 상관관계가 낮을 때만"이라는 필터를 추가해, 시장 전체 방향이 아니라 그 코인 고유의 움직임을 노리는 전략에 씁니다.',
+  },
+  USDT_CORRELATION: {
+    meaning: '대상 코인과 KRW-USDT(테더)의 봉 대비 등락률(%)을 최근 period봉 모아 계산한 Pearson 상관계수입니다.',
+    params: [{ key: 'period', role: '상관계수를 계산할 롤링 윈도우 봉 개수.' }],
+    formula: '등락률_t = (종가_t − 종가_{t-1}) ÷ 종가_{t-1} × 100\n상관계수 = Pearson(대상코인 등락률_[t-period+1..t], KRW-USDT 등락률_[t-period+1..t])',
+    thresholdExample: '값은 -1~1 범위입니다. 예: 임계값 0.5, 연산자 ">"면 원화 유동성(테더) 흐름과 강하게 같이 움직이는 구간만 남깁니다.',
+    usage: 'BTC 상관계수와 함께 걸어, "BTC와는 무관하지만 전체 원화 유동성 흐름과는 같이 가는" 것처럼 세밀한 시장 필터 조합을 만들 때 씁니다.',
+  },
 };

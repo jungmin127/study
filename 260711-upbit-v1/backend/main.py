@@ -260,6 +260,18 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=10이고 연산자 <, 임계값 0이면: KRW-BTC 종가가 자신의 10봉 이동평균보다 낮을 때(BTC가 하락 추세일 때) 조건이 참이 됩니다.",
     },
     {
+        "value": "BTC_CORRELATION", "label": "BTC 상관계수", "category": "시장 심리",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "대상 코인과 KRW-BTC의 봉 대비 등락률(%)을 최근 period봉 동안 비교한 Pearson 상관계수(-1~1)입니다. 1에 가까울수록 BTC와 같은 방향으로, -1에 가까울수록 반대 방향으로 움직입니다.",
+        "example": "period=20, 연산자 <, 임계값 0.3이면: 최근 20봉 동안 BTC와의 상관관계가 약해진(디커플링된) 상태를 포착합니다.",
+    },
+    {
+        "value": "USDT_CORRELATION", "label": "테더 상관계수", "category": "시장 심리",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "대상 코인과 KRW-USDT(테더)의 봉 대비 등락률(%)을 최근 period봉 동안 비교한 Pearson 상관계수(-1~1)입니다.",
+        "example": "period=20, 연산자 >, 임계값 0.5면: 최근 20봉 동안 원화 유동성(테더 시세)과 강하게 같이 움직이는 구간을 포착합니다.",
+    },
+    {
         "value": "MOMENTUM_PCT", "label": "모멘텀 (N봉 전 대비 등락률 %)", "category": "추세",
         "params": [{"key": "period", "label": "기간", "default": 5}],
         "description": "N봉 전 종가 대비 현재 종가의 등락률(%)입니다. 양수 임계값이면 최근 상승 흐름(모멘텀)을, 음수 임계값이면 최근 급락(눌림목)을 포착하는 조건으로 쓸 수 있습니다.",

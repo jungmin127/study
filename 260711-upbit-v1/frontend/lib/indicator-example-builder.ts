@@ -538,6 +538,44 @@ export function buildGuideExample(value: string): GuideExample {
         },
       };
     }
+    case 'BTC_CORRELATION':
+    case 'USDT_CORRELATION': {
+      const period = 10;
+      const coinRoc = closes.map((c, i) => (i === 0 ? NaN : ((c - closes[i - 1]) / closes[i - 1]) * 100));
+      const auxCloses = SAMPLE_BTC.map((b) => b.close);
+      const auxRoc = auxCloses.map((c, i) => (i === 0 ? NaN : ((c - auxCloses[i - 1]) / auxCloses[i - 1]) * 100));
+      const corr = closes.map((_, i) => {
+        if (i < period) return NaN;
+        const xs = coinRoc.slice(i - period + 1, i + 1);
+        const ys = auxRoc.slice(i - period + 1, i + 1);
+        const meanX = xs.reduce((a, b) => a + b, 0) / period;
+        const meanY = ys.reduce((a, b) => a + b, 0) / period;
+        const cov = xs.reduce((sum, x, j) => sum + (x - meanX) * (ys[j] - meanY), 0);
+        const stdX = Math.sqrt(xs.reduce((sum, x) => sum + (x - meanX) ** 2, 0));
+        const stdY = Math.sqrt(ys.reduce((sum, y) => sum + (y - meanY) ** 2, 0));
+        return stdX === 0 || stdY === 0 ? 0 : cov / (stdX * stdY);
+      });
+      const start = firstValidIndex(corr);
+      const rows = windowFrom(start).map((bar, i) => ({
+        bar: bar.bar,
+        cells: { close: n(bar.close, 0), aux: n(auxCloses[start + i], 0), corr: n(corr[start + i]) },
+      }));
+      const label = value === 'BTC_CORRELATION' ? 'KRW-BTC' : 'KRW-USDT';
+      return {
+        columns: [
+          { key: 'close', label: '종가' },
+          { key: 'aux', label: `${label} 종가` },
+          { key: 'corr', label: '상관계수' },
+        ],
+        rows,
+        chart: {
+          type: 'line',
+          data: SAMPLE_BARS.map((bar, i) => ({ bar: bar.bar, corr: clean(corr[i]) })),
+          lines: [{ key: 'corr', name: `${label} 상관계수 (period=${period})`, color: '#e11d48' }],
+          refLines: [{ y: 0, label: '0선' }],
+        },
+      };
+    }
     case 'MOMENTUM_PCT': {
       const period = 5;
       const line = calc.roc100(closes, period);
