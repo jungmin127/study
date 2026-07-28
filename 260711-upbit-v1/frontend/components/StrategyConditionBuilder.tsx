@@ -41,7 +41,10 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
 };
 
 const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT']);
-const PRICE_SCALE_INDICATORS = new Set(['SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower']);
+const PRICE_SCALE_INDICATORS = new Set([
+  'SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower',
+  'FIB_382', 'FIB_500', 'FIB_618', 'PIVOT_P', 'PIVOT_R1', 'PIVOT_S1',
+]);
 
 const POSITION_RELATIVE_DEFAULTS: Record<string, number> = {
   STOP_LOSS_PCT: -5,
