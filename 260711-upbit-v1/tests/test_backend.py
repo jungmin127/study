@@ -905,7 +905,7 @@ def test_run_backtest_returns_400_when_btc_candles_are_empty_for_range(monkeypat
 
 
 def test_run_backtest_returns_400_when_btc_candles_have_no_overlapping_candle_time(monkeypatch, tmp_path):
-    # btc_df에 행은 있지만 target과 candle_time이 전혀 겹치지 않는 경우 (merge 후 market_close 전체가 NaN)
+    # btc_df에 행은 있지만 target과 candle_time이 전혀 겹치지 않는 경우 (merge 후 btc_close 전체가 NaN)
     client = _client(monkeypatch, tmp_path)
 
     target_df = make_oscillating_df()

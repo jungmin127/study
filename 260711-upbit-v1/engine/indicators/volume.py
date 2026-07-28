@@ -31,8 +31,9 @@ def create_volume_sma(data: bt.feeds.PandasData, **params) -> bt.Indicator:
 
 
 def create_trade_value(data: bt.feeds.PandasData, **params):
-    """봉의 거래대금(KRW) — engine.runner의 PandasDataWithTradeValue가 채워주는
-    self.data.trade_value 라인(업비트 candle_acc_trade_price)을 그대로 반환한다.
+    """봉의 거래대금(KRW) — engine.runner의 build_data_feed_class가 동적으로 만들어주는
+    PandasData 서브클래스가 채워주는 self.data.trade_value 라인(업비트 candle_acc_trade_price)을
+    그대로 반환한다.
     거래량(수량)과 달리 가격이 반영된 값이라, 저가 잡코인의 거래량 착시 없이
     실제로 큰돈이 들어온 종목을 거를 때 쓴다."""
     return data.trade_value

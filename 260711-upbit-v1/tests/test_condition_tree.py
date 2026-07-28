@@ -1,4 +1,5 @@
 from engine.condition_tree import (
+    AUX_MARKET_INDICATORS,
     apply_operator,
     collect_blocks,
     eval_group,
@@ -9,6 +10,7 @@ from engine.condition_tree import (
     required_aux_markets,
 )
 from engine.indicators import INDICATOR_FACTORY
+from engine.runner import AUX_MARKET_LINE_NAME
 from tests.signal_fixtures import make_oscillating_df
 
 
@@ -156,6 +158,13 @@ def test_required_aux_markets_dedupes_when_market_trend_and_btc_correlation_both
         ],
     }
     assert required_aux_markets(tree) == {"KRW-BTC"}
+
+
+def test_all_aux_market_indicators_have_a_line_name_mapping():
+    """AUX_MARKET_INDICATORS에 새 마켓 코드가 추가되면 engine.runner.AUX_MARKET_LINE_NAME에도
+    같은 코드가 있어야 한다. 누락되면 backend/main.py의 AUX_MARKET_LINE_NAME[aux_market] 조회가
+    처리되지 않은 KeyError로 500 에러가 된다."""
+    assert set(AUX_MARKET_INDICATORS.values()) <= set(AUX_MARKET_LINE_NAME.keys())
 
 
 def test_get_indicator_value_dispatches_pivot_sublines():

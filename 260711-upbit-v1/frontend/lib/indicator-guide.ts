@@ -219,7 +219,8 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     meaning: '최근 period봉의 스윙 고점(최고가)과 저점(최저가) 사이에서, 고점 대비 38.2% 되돌아온 가격입니다.',
     params: [{ key: 'period', role: '스윙 고점/저점을 찾을 봉 개수.' }],
     formula: '최고가 = period봉 최고가, 최저가 = period봉 최저가\nFIB_382 = 최고가 − (최고가 − 최저가) × 0.382',
-    thresholdExample: `${'이 앱의 조건식은 "지표값과 숫자 threshold"만 비교합니다. 이 지표를 쓸 때 threshold는 보통 지금 가격대와 비슷한 값을 넣어 "가격이 이 지지/저항 레벨 근처에 있는지"를 거르는 용도로 씁니다.'}`,
+    thresholdExample:
+      '이 앱의 조건식은 "지표값과 숫자 threshold"만 비교합니다. 이 지표를 쓸 때 threshold는 보통 지금 가격대와 비슷한 값을 넣어 "가격이 이 지지/저항 레벨 근처에 있는지"를 거르는 용도로 씁니다.',
     usage: '상승 추세 중 조정이 38.2%선에서 멈추는지 확인해, 그 근처에서 반등을 노리는 눌림목 매수 조건으로 씁니다.',
   },
   FIB_500: {
@@ -259,7 +260,7 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
   },
   MARKET_TREND: {
     meaning:
-      '대상 코인이 아니라 KRW-BTC의 "종가 − 자기 자신의 이동평균" 값입니다. engine/indicators/market.py가 백엔드에서 병합해준 KRW-BTC 종가(self.data.extra)로 계산합니다. 알트코인이 BTC 흐름을 따라가는 경향을 이용한 시장 전체 필터입니다.',
+      '대상 코인이 아니라 KRW-BTC의 "종가 − 자기 자신의 이동평균" 값입니다. engine/indicators/market.py가 백엔드에서 병합해준 KRW-BTC 종가(self.data.btc_close)로 계산합니다. 알트코인이 BTC 흐름을 따라가는 경향을 이용한 시장 전체 필터입니다.',
     params: [{ key: 'period', role: 'KRW-BTC 종가의 이동평균을 계산할 봉 개수.' }],
     formula: '시장 추세 = KRW-BTC 종가 − KRW-BTC 종가의 period봉 이동평균',
     thresholdExample: '연산자 "<", threshold 0 → BTC 종가가 자기 이동평균보다 낮을 때(BTC 하락 추세일 때) 조건이 참. 반대로 ">" 0이면 BTC가 상승 추세일 때만 참이 됩니다.',
