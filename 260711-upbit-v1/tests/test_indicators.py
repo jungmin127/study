@@ -168,3 +168,19 @@ def test_usdt_correlation_returns_zero_when_aux_series_is_constant():
     usdt_df["close"] = 1300.0
     values = _run_probe_with_aux("USDT_CORRELATION", {"period": 10}, "usdt_close", usdt_df["close"])
     assert values[-1] == 0.0
+
+
+def test_obv_matches_manual_cumulative_volume_by_close_direction():
+    values = _run_probe("OBV", {})
+    df = make_oscillating_df()
+    closes = df["close"].tolist()
+    volumes = df["volume"].tolist()
+    manual = [0.0]
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i - 1]:
+            manual.append(manual[-1] + volumes[i])
+        elif closes[i] < closes[i - 1]:
+            manual.append(manual[-1] - volumes[i])
+        else:
+            manual.append(manual[-1])
+    assert values[-1] == manual[-1]

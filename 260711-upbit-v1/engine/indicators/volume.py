@@ -12,6 +12,16 @@ class OBV(bt.Indicator):
     def __init__(self) -> None:
         self.addminperiod(2)
 
+    def nextstart(self) -> None:
+        # 첫 next() 시점엔 obv[-1](이전 봉)이 한 번도 채워진 적 없어 NaN이므로,
+        # obv[-1]을 참조하지 않고 0을 기준선으로 삼아 첫 델타를 직접 계산한다.
+        if self.data.close[0] > self.data.close[-1]:
+            self.lines.obv[0] = self.data.volume[0]
+        elif self.data.close[0] < self.data.close[-1]:
+            self.lines.obv[0] = -self.data.volume[0]
+        else:
+            self.lines.obv[0] = 0.0
+
     def next(self) -> None:
         if self.data.close[0] > self.data.close[-1]:
             self.lines.obv[0] = self.lines.obv[-1] + self.data.volume[0]
