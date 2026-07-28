@@ -26,8 +26,15 @@ from engine.cache import (
     run_backtest_cached,
 )
 from engine.condition_strategy import ConditionTreeStrategy
-from engine.condition_tree import find_unknown_indicators, is_empty, max_required_period, required_aux_markets
+from engine.condition_tree import (
+    collect_blocks,
+    find_unknown_indicators,
+    is_empty,
+    max_required_period,
+    required_aux_markets,
+)
 from engine.runner import AUX_MARKET_LINE_NAME
+from external_data_service import get_fear_greed_cmc, merge_fear_greed
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import calculate_metrics
 from engine.segment_analysis import run_segment_batch
@@ -594,6 +601,21 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
                 detail=f"이 조건에 필요한 {aux_market} 캔들 데이터가 해당 기간에 없습니다",
             )
         df[line_name] = df[line_name].ffill().bfill()
+
+    fear_greed_indicators = {
+        b["indicator"] for b in collect_blocks(buy_dict) + collect_blocks(sell_dict)
+    }
+    if "FEAR_GREED_CMC" in fear_greed_indicators:
+        try:
+            fng_df = get_fear_greed_cmc(start_dt, end_dt)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        df = merge_fear_greed(df, fng_df)
+        if df["fear_greed_value"].isna().any():
+            raise HTTPException(
+                status_code=400,
+                detail="이 조건에 필요한 공포탐욕지수 데이터가 해당 기간에 없습니다 (2018-02-01 이전 구간은 지원하지 않습니다)",
+            )
 
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": req.initial_capital}
 

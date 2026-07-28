@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -924,3 +924,55 @@ def test_run_backtest_returns_400_when_btc_candles_have_no_overlapping_candle_ti
 
     assert resp.status_code == 400
     assert "이 조건에 필요한 KRW-BTC 캔들 데이터가 해당 기간에 없습니다" in resp.json()["detail"]
+
+
+def test_run_backtest_forward_fills_fear_greed_across_hourly_candles(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    hourly_df = make_oscillating_df()  # 300시간 = 2026-01-01 00:00 ~ 2026-01-13 11:00, UTC
+    _patch_get_candles(monkeypatch, hourly_df)
+
+    fng_df = pd.DataFrame(
+        {"date": pd.to_datetime(["2026-01-01", "2026-01-02"], utc=True), "fear_greed_value": [30.0, 70.0]}
+    )
+    monkeypatch.setattr(backend_module, "get_fear_greed_cmc", lambda start, end: fng_df)
+
+    captured = {}
+    real_run_backtest_cached = backend_module.run_backtest_cached
+
+    def _capture(**kwargs):
+        captured["df"] = kwargs["df"].copy()
+        return real_run_backtest_cached(**kwargs)
+
+    monkeypatch.setattr(backend_module, "run_backtest_cached", _capture)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "FEAR_GREED_CMC", "params": {}, "operator": ">", "threshold": 0}]}
+    resp = client.post(
+        "/api/v1/backtests/run", json=_run_request(buy_conditions=buy, timeframe="minutes60")
+    )
+
+    assert resp.status_code == 200
+    merged = captured["df"].reset_index(drop=True)
+    day1 = merged[merged["candle_time"] < pd.Timestamp("2026-01-02", tz="UTC")]
+    day2plus = merged[merged["candle_time"] >= pd.Timestamp("2026-01-02", tz="UTC")]
+    assert (day1["fear_greed_value"] == 30.0).all()
+    assert (day2plus["fear_greed_value"] == 70.0).all()
+
+
+def test_run_backtest_rejects_fear_greed_when_date_range_predates_history(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    old_df = make_oscillating_df()
+    old_df["candle_time"] = pd.date_range("2017-01-01", periods=len(old_df), freq="h", tz="UTC")
+    _patch_get_candles(monkeypatch, old_df)
+    monkeypatch.setattr(
+        backend_module, "get_fear_greed_cmc",
+        lambda start, end: pd.DataFrame(columns=["date", "fear_greed_value"]),
+    )
+
+    buy = {"type": "AND", "conditions": [{"indicator": "FEAR_GREED_CMC", "params": {}, "operator": ">", "threshold": 0}]}
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(buy_conditions=buy, timeframe="minutes60", start="2017-01-01", end="2017-01-05"),
+    )
+
+    assert resp.status_code == 400
+    assert "공포탐욕지수" in resp.json()["detail"]
