@@ -257,7 +257,6 @@ def run_backtest_cached(
     strategy_params: dict | None = None,
     title: str | None = None,
     description: str | None = None,
-    extra_column: str | None = None,
 ) -> dict:
     """
     캐시된 백테스트 결과를 반환하거나 새로 실행해 저장한다.
@@ -276,7 +275,7 @@ def run_backtest_cached(
         cached["run_id"] = run_id
         return cached
 
-    result = run_backtest(df, strategy_cls, risk_config, strategy_params, extra_column=extra_column)
+    result = run_backtest(df, strategy_cls, risk_config, strategy_params)
     save_result(
         run_id=run_id,
         strategy_name=strategy_cls.__name__,

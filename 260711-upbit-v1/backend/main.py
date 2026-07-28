@@ -26,7 +26,8 @@ from engine.cache import (
     run_backtest_cached,
 )
 from engine.condition_strategy import ConditionTreeStrategy
-from engine.condition_tree import find_unknown_indicators, is_empty, max_required_period, requires_market_data
+from engine.condition_tree import find_unknown_indicators, is_empty, max_required_period, required_aux_markets
+from engine.runner import AUX_MARKET_LINE_NAME
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import calculate_metrics
 from engine.segment_analysis import run_segment_batch
@@ -553,34 +554,34 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
             ),
         )
 
-    extra_column = None
-    if requires_market_data(buy_dict) or requires_market_data(sell_dict):
-        if req.market == "KRW-BTC":
-            df = df.assign(market_close=df["close"])
-        else:
-            try:
-                btc_df = get_candles("KRW-BTC", req.timeframe, start_dt, end_dt)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RuntimeError as exc:
-                raise HTTPException(status_code=500, detail=str(exc)) from exc
-            if btc_df.empty:
-                raise HTTPException(
-                    status_code=400,
-                    detail="MARKET_TREND 조건에 필요한 KRW-BTC 캔들 데이터가 해당 기간에 없습니다",
-                )
-            df = df.merge(
-                btc_df[["candle_time", "close"]].rename(columns={"close": "market_close"}),
-                on="candle_time",
-                how="left",
+    aux_markets = required_aux_markets(buy_dict) | required_aux_markets(sell_dict)
+    for aux_market in aux_markets:
+        line_name = AUX_MARKET_LINE_NAME[aux_market]
+        if req.market == aux_market:
+            df = df.assign(**{line_name: df["close"]})
+            continue
+        try:
+            aux_df = get_candles(aux_market, req.timeframe, start_dt, end_dt)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if aux_df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"이 조건에 필요한 {aux_market} 캔들 데이터가 해당 기간에 없습니다",
             )
-            if df["market_close"].isna().all():
-                raise HTTPException(
-                    status_code=400,
-                    detail="MARKET_TREND 조건에 필요한 KRW-BTC 캔들 데이터가 해당 기간에 없습니다",
-                )
-            df["market_close"] = df["market_close"].ffill().bfill()
-        extra_column = "market_close"
+        df = df.merge(
+            aux_df[["candle_time", "close"]].rename(columns={"close": line_name}),
+            on="candle_time",
+            how="left",
+        )
+        if df[line_name].isna().all():
+            raise HTTPException(
+                status_code=400,
+                detail=f"이 조건에 필요한 {aux_market} 캔들 데이터가 해당 기간에 없습니다",
+            )
+        df[line_name] = df[line_name].ffill().bfill()
 
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": req.initial_capital}
 
@@ -595,7 +596,6 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
         strategy_params={"buy_conditions": buy_dict, "sell_conditions": sell_dict},
         title=req.title,
         description=req.description,
-        extra_column=extra_column,
     )
     return {"run_id": result["run_id"]}
 

@@ -194,7 +194,7 @@ def test_run_backtest_cached_hits_cache_on_second_call(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     call_count = {"n": 0}
 
-    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params=None, extra_column=None):
+    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params=None):
         call_count["n"] += 1
         return {
             "equity_curve": [],
@@ -229,7 +229,7 @@ def test_run_backtest_cached_hits_cache_on_second_call(monkeypatch, tmp_path):
 def test_run_backtest_cached_does_not_cache_on_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
 
-    def failing_run_backtest(df, strategy_cls, risk_config, strategy_params=None, extra_column=None):
+    def failing_run_backtest(df, strategy_cls, risk_config, strategy_params=None):
         raise ValueError("전략 실행 실패")
 
     monkeypatch.setattr(cache_module, "run_backtest", failing_run_backtest)
@@ -256,7 +256,7 @@ def test_run_backtest_cached_does_not_cache_on_failure(monkeypatch, tmp_path):
 def test_run_backtest_cached_exposes_run_id(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
 
-    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params=None, extra_column=None):
+    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params=None):
         return {"equity_curve": [], "trades": [], "final_value": 10000.0, "sharpe": None, "max_drawdown": None}
 
     monkeypatch.setattr(cache_module, "run_backtest", fake_run_backtest)
@@ -523,27 +523,3 @@ def test_save_segment_classification_replaces_previous_batch(monkeypatch, tmp_pa
 
     rows = list_segment_classification()
     assert [r["market"] for r in rows] == ["KRW-NEW"]
-
-
-def test_run_backtest_cached_passes_extra_column_through(monkeypatch, tmp_path):
-    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
-    captured: dict = {}
-
-    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params=None, extra_column=None):
-        captured["extra_column"] = extra_column
-        return {"equity_curve": [], "trades": [], "final_value": 10000.0, "sharpe": None, "max_drawdown": None}
-
-    monkeypatch.setattr(cache_module, "run_backtest", fake_run_backtest)
-
-    run_backtest_cached(
-        df=_synthetic_df(),
-        strategy_cls=_StrategyA,
-        risk_config={"initial_capital": 10000},
-        market="KRW-BTC",
-        timeframe="days",
-        start=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        end=datetime(2026, 1, 10, tzinfo=timezone.utc),
-        extra_column="market_close",
-    )
-
-    assert captured["extra_column"] == "market_close"
