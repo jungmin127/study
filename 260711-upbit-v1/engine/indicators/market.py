@@ -36,7 +36,14 @@ class RollingCorrelation(bt.Indicator):
     def next(self) -> None:
         xs = [self.roc_a[-i] for i in range(self.p.period)]
         ys = [self.roc_b[-i] for i in range(self.p.period)]
-        self.lines.corr[0] = statistics.correlation(xs, ys)
+        try:
+            self.lines.corr[0] = statistics.correlation(xs, ys)
+        except statistics.StatisticsError:
+            # 두 윈도우 중 하나라도 분산이 0이면(예: 페그/스테이블코인 마켓이
+            # period+1봉 동안 완전히 flat) 상관계수가 수학적으로 정의되지 않는다.
+            # "상관 신호 없음"으로 간주해 0.0을 반환한다 — NaN은 이후 비교 조건을
+            # 모두 False로 만들고, 예외를 그대로 두면 백테스트 전체가 중단된다.
+            self.lines.corr[0] = 0.0
 
 
 def create_btc_correlation(data: bt.feeds.PandasData, **params) -> bt.Indicator:

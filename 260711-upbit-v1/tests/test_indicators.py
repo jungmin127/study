@@ -158,3 +158,13 @@ def test_usdt_correlation_matches_manual_pearson_of_pct_returns():
     usdt_roc = usdt_df["close"].pct_change() * 100
     manual = statistics.correlation(coin_roc.iloc[-10:].tolist(), usdt_roc.iloc[-10:].tolist())
     assert abs(values[-1] - manual) < 1e-6
+
+
+def test_usdt_correlation_returns_zero_when_aux_series_is_constant():
+    # KRW-USDT 등 페그/스테이블코인 마켓이 완전히 flat(무변동)한 구간에서는
+    # statistics.correlation()이 StatisticsError("at least one of the inputs
+    # is constant")를 던진다. 크래시 대신 "상관 신호 없음"으로 0.0을 반환해야 한다.
+    usdt_df = make_oscillating_df(base=1300.0, amplitude=40.0, period=30, ripple_period=4)
+    usdt_df["close"] = 1300.0
+    values = _run_probe_with_aux("USDT_CORRELATION", {"period": 10}, "usdt_close", usdt_df["close"])
+    assert values[-1] == 0.0
