@@ -124,8 +124,46 @@ def test_get_fear_greed_cmc_filters_to_requested_date_range(monkeypatch, tmp_pat
 
     result = get_fear_greed_cmc(today - timedelta(days=2), today - timedelta(days=2))
 
-    assert len(result) == 1
-    assert result.iloc[0]["fear_greed_value"] == 20.0
+    # 요청 종료일(today-2) 이후 값(today, 30.0)은 제외되지만, 시작일 이전 7일 lookback 마진
+    # 덕분에 today-3(10.0)은 포함된다 — merge_fear_greed의 merge_asof(direction="backward")가
+    # 요청 시작일 자체가 결측일이어도 fallback 값을 찾을 수 있어야 하기 때문.
+    assert result["fear_greed_value"].tolist() == [10.0, 20.0]
+    assert result["date"].max().date() == (today - timedelta(days=2)).date()
+
+
+def test_get_fear_greed_cmc_includes_lookback_margin_so_gap_day_requests_still_get_a_fallback_value(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(eds, "CACHE_DIR", tmp_path)
+    today = datetime.now(timezone.utc)
+    cached = pd.DataFrame(
+        {
+            # alternative.me 실제 히스토리에도 2024-10-26처럼 결측일이 존재한다 — 10-26 자체엔
+            # 값이 없다. 캐시가 stale하지 않도록(오늘 날짜 포함) 세 번째 행을 추가한다.
+            "date": pd.to_datetime(["2024-10-25", "2024-10-27", today.date()], utc=True),
+            "fear_greed_value": [40.0, 60.0, 50.0],
+        }
+    )
+    cached.to_parquet(tmp_path / "fear_greed_cmc.parquet", index=False)
+    monkeypatch.setattr(eds, "_fetch_fear_greed_all", _fail_fetch)
+
+    result = get_fear_greed_cmc(
+        datetime(2024, 10, 26, tzinfo=timezone.utc), datetime(2024, 10, 27, tzinfo=timezone.utc)
+    )
+
+    assert result.iloc[0]["fear_greed_value"] == 40.0
+    assert result.iloc[-1]["fear_greed_value"] == 60.0
+
+
+def test_fetch_fear_greed_all_raises_runtime_error_on_malformed_200_response(monkeypatch):
+    monkeypatch.setattr(eds, "RETRY_BASE_DELAY_SECONDS", 0.0)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"unexpected": "shape"})
+
+    with _mock_client(handler) as client:
+        with pytest.raises(RuntimeError):
+            _fetch_fear_greed_all(client)
 
 
 def test_merge_fear_greed_forward_fills_within_day():

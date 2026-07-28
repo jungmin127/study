@@ -7,7 +7,7 @@ external_data_service.py
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -23,6 +23,13 @@ CACHE_DIR = Path(__file__).parent / "data" / "cache" / "external"
 
 _FNG_COLUMNS = ["date", "fear_greed_value"]
 
+# alternative.me 히스토리엔 실제로 결측일이 간간이 있다(예: 2018-04-14~16, 2024-10-26). 요청
+# 시작일 자체가 결측일이면 merge_fear_greed()의 merge_asof(direction="backward")가 참조할
+# 이전 값이 없어 정상 구간인데도 400 에러가 나므로, 조회 시작일보다 이만큼 앞선 날짜부터
+# 여유 있게 포함해 반환한다(2018-02-01보다 이른 구간은 이 여분을 포함해도 여전히 데이터가
+# 없어 그대로 400으로 이어진다 — 진짜 범위 밖 요청까지 통과시키지는 않는다).
+_LOOKBACK_MARGIN_DAYS = 7
+
 
 def _fetch_fear_greed_all(client: httpx.Client) -> list[dict]:
     """alternative.me에서 전체 히스토리를 한 번에 받아온다(limit=0)."""
@@ -36,6 +43,11 @@ def _fetch_fear_greed_all(client: httpx.Client) -> list[dict]:
             resp.raise_for_status()
             return resp.json()["data"]
         except httpx.HTTPError as exc:
+            last_exc = exc
+            time.sleep(RETRY_BASE_DELAY_SECONDS * (2**attempt))
+        except (KeyError, ValueError) as exc:
+            # 200 OK인데 예상 스키마({"data": [...]}) 형태가 아닌 경우 — HTTPError로는
+            # 안 잡히므로 별도로 잡아 같은 재시도/에러 통일 경로를 태운다.
             last_exc = exc
             time.sleep(RETRY_BASE_DELAY_SECONDS * (2**attempt))
 
@@ -82,9 +94,9 @@ def get_fear_greed_cmc(start: datetime, end: datetime) -> pd.DataFrame:
         cached = _parse_fear_greed(raw)
         _save_cache(cached)
 
-    start_date = start.date()
+    lookback_start_date = start.date() - timedelta(days=_LOOKBACK_MARGIN_DAYS)
     end_date = end.date()
-    mask = (cached["date"].dt.date >= start_date) & (cached["date"].dt.date <= end_date)
+    mask = (cached["date"].dt.date >= lookback_start_date) & (cached["date"].dt.date <= end_date)
     return cached[mask].reset_index(drop=True)
 
 
