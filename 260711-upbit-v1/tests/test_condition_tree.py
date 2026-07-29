@@ -221,3 +221,11 @@ def test_pivot_factories_produce_dispatch_compatible_objects():
     assert isinstance(captured["p"], float)
     assert isinstance(captured["r1"], float)
     assert isinstance(captured["s1"], float)
+
+
+def test_required_aux_markets_returns_usdt_when_korea_premium_present():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "KOREA_PREMIUM", "params": {}, "operator": ">", "threshold": 0}],
+    }
+    assert required_aux_markets(tree) == {"KRW-USDT"}

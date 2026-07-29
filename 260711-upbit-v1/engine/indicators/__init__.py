@@ -19,7 +19,7 @@ from .price_levels import (
     create_pivot_r1,
     create_pivot_s1,
 )
-from .sentiment import create_fear_greed_cmc
+from .sentiment import create_fear_greed_cmc, create_korea_premium
 from .trend import create_ema, create_sma, create_wma
 from .volatility import create_atr, create_bb_lower, create_bb_middle, create_bb_upper
 from .volume import create_obv, create_trade_value, create_trade_value_sma, create_volume_sma
@@ -54,6 +54,7 @@ INDICATOR_FACTORY: dict[str, object] = {
     "PIVOT_R1": create_pivot_r1,
     "PIVOT_S1": create_pivot_s1,
     "FEAR_GREED_CMC": create_fear_greed_cmc,
+    "KOREA_PREMIUM": create_korea_premium,
 }
 
 __all__ = ["INDICATOR_FACTORY"]

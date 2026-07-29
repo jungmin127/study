@@ -32,7 +32,7 @@ def _run_probe(indicator: str, params: dict) -> list[float]:
     return results[0].seen_values
 
 
-_NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
+_NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC", "KOREA_PREMIUM"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
 _NEEDS_TRADE_VALUE_LINE = {"TRADE_VALUE", "TRADE_VALUE_SMA"}  # trade_value 라인이 필요 — test_trade_value_* 참고
 
 
@@ -192,3 +192,10 @@ def test_fear_greed_cmc_matches_raw_fear_greed_value_column():
     fear_greed = pd.Series([30.0 + (i % 50) for i in range(len(df))])
     values = _run_probe_with_aux("FEAR_GREED_CMC", {}, "fear_greed_value", fear_greed)
     assert abs(values[-1] - fear_greed.iloc[-1]) < 1e-6
+
+
+def test_korea_premium_matches_raw_korea_premium_value_column():
+    df = make_oscillating_df()
+    korea_premium = pd.Series([3.0 + (i % 5) * 0.1 for i in range(len(df))])
+    values = _run_probe_with_aux("KOREA_PREMIUM", {}, "korea_premium_value", korea_premium)
+    assert abs(values[-1] - korea_premium.iloc[-1]) < 1e-6
