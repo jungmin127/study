@@ -97,10 +97,12 @@ GET https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1d&limit=3
   → backend/main.py의 기존 aux_markets 루프가 자동으로 usdt_close를 df에 병합
 
 backend/main.py (신규 KOREA_PREMIUM 병합 분기, FEAR_GREED_CMC 분기 바로 다음)
-  → binance_df = get_binance_close(symbol, timeframe, start_dt, end_dt)
-  → binance_df 비어있으면 400 ("이 코인은 바이낸스에 상장되어 있지 않아...")
-  → candle_time 기준 left-join으로 binance_close 병합, ffill/bfill로 소규모 결측(거래소 다운타임 등) 보정
-  → 병합 후 전부 NaN이면 400 (기존 aux-market 패턴과 동일)
+  → get_binance_close(symbol, timeframe, start_dt, end_dt) 호출 — BinanceSymbolNotFoundError면 400
+    ("이 코인은 바이낸스에 상장되어 있지 않아...")
+  → candle_time 기준 left-join으로 binance_close 병합
+  → 병합 후 하나라도 NaN이면 400 ("해당 기간에 데이터가 없습니다" — 부분 구간만 겹쳐도 조용히
+    채워 넣지 않고 거부. 최종 리뷰에서 발견: ffill/bfill로 부분 결측을 채우면 프리미엄 값이
+    크게 왜곡될 수 있어 fear-greed의 엄격한 `isna().any()` 패턴으로 통일했다 — 아래 상세 설계 참고)
   → korea_premium_value = (df.close / (df.binance_close × df.usdt_close) - 1) × 100
 
   → build_data_feed_class(...)로 동적 PandasData 피드에 korea_premium_value 라인 추가
@@ -117,8 +119,9 @@ def get_binance_close(symbol: str, timeframe: str, start: datetime, end: datetim
     """바이낸스 klines API에서 종가를 조회한다. 컬럼: [candle_time, close].
     upbit_data_service.py의 get_candles와 동일한 구조(parquet 캐시 + gap 계산 + 미마감 캔들 제외)를
     복제하되, 캔들 전체(OHLCV)가 아니라 close 하나만 저장한다 — 한국프리미엄 계산에 다른 컬럼이
-    필요 없다. 심볼이 존재하지 않으면(바이낸스가 400 Invalid symbol을 반환하면) 재시도 없이 빈
-    DataFrame을 즉시 반환한다 — 재시도해도 결과가 달라지지 않는 에러이므로."""
+    필요 없다. 심볼이 존재하지 않으면(바이낸스가 400 Invalid symbol을 반환하면) BinanceSymbolNotFoundError를
+    재시도 없이 그대로 전파한다(호출부가 "미상장"과 "심볼은 있지만 이 구간에 데이터 없음"을 구분할 수
+    있도록 — 최종 리뷰 반영, 최초 구현은 이 두 경우를 모두 빈 DataFrame으로 뭉갰었다)."""
 ```
 
 - **심볼 변환**: `binance_symbol(market: str) -> str` — `market.removeprefix("KRW-") + "USDT"`.
@@ -151,35 +154,49 @@ AUX_MARKET_INDICATORS: dict[str, str] = {
 `FEAR_GREED_CMC` 분기 바로 다음에 `KOREA_PREMIUM` 전용 분기 추가:
 
 ```python
-korea_premium_indicators = {
+used_indicators = {
     b["indicator"] for b in collect_blocks(buy_dict) + collect_blocks(sell_dict)
 }
-if "KOREA_PREMIUM" in korea_premium_indicators:
+if "KOREA_PREMIUM" in used_indicators:
     symbol = binance_symbol(req.market)
     try:
         binance_df = get_binance_close(symbol, req.timeframe, start_dt, end_dt)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    if binance_df.empty:
+    except BinanceSymbolNotFoundError:
         raise HTTPException(
             status_code=400,
             detail=f"{req.market}에 대응하는 바이낸스 심볼({symbol})이 없어 한국프리미엄을 계산할 수 없습니다",
         )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    # usdt_close는 AUX_MARKET_INDICATORS["KOREA_PREMIUM"] = "KRW-USDT" 등록 덕분에
+    # 위 aux-market 루프가 이미 채워둔 값이다.
     df = df.merge(
         binance_df.rename(columns={"close": "binance_close"}), on="candle_time", how="left"
     )
-    if df["binance_close"].isna().all():
+    if df["binance_close"].isna().any():
         raise HTTPException(status_code=400, detail=f"해당 기간에 {symbol} 캔들 데이터가 없습니다")
-    df["binance_close"] = df["binance_close"].ffill().bfill()
     df["korea_premium_value"] = (df["close"] / (df["binance_close"] * df["usdt_close"]) - 1) * 100
 ```
 
-- **병합 방식**: `candle_time` 기준 exact left-join(공포탐욕지수의 날짜 단위 `merge_asof`와 다름 — 이
-  지표는 캔들 대 캔들 병합이라 기존 aux-market 루프와 같은 방식). 거래소별 캔들 마감 시각이 초 단위로
-  어긋날 가능성에 대비해 `ffill().bfill()`로 소규모 결측을 보정한다(기존 aux-market 패턴과 동일).
-- **날짜 구간 미보유 처리**: "특정 코인만 사용 불가"(바이낸스 미상장)와 "그 구간에 데이터 없음"(상장일
-  이전 구간 요청) 두 케이스 모두 400으로 명확히 처리하고, 부분 데이터로 조용히 진행하지 않는다 — 이
-  프로젝트의 기존 원칙(fear-greed 스펙의 "Global Constraints")을 그대로 따른다.
+**(수정 이력, 최종 리뷰 반영):** 이 절의 코드는 원래 `binance_df.empty`로 미상장 여부를 판정하고
+`isna().all()` + `ffill().bfill()`로 부분 결측을 조용히 채우는 형태였다(기존 aux-market 루프를
+그대로 흉내낸 것). 최종 전체 브랜치 리뷰에서 이게 실제 버그로 이어짐을 발견했다:
+- **부분 결측을 채우는 건 위험하다**: 바이낸스 상장일이 업비트보다 늦은 게 흔한 케이스인데,
+  `bfill()`이 상장 이전 구간을 "상장 후 첫 종가"로 고정값 채워 넣어, 그 구간의 `korea_premium_value`가
+  수백 % 단위로 틀어진 채 조용히 계산된다. Fear-greed 지표는 처음부터 `isna().any()`(하나라도 결측이면
+  거부)를 썼는데, aux-market 루프(KRW-BTC/KRW-USDT)는 히스토리가 항상 거의 완전해서 `.all()` +
+  fill이 위험하지 않았을 뿐이다 — 이 차이를 구분하지 못하고 aux-market 패턴을 그대로 가져온 게 원인.
+- **"미상장"과 "구간에 데이터 없음"이 같은 에러 메시지로 뭉개졌다**: `get_binance_close`가 "심볼 없음"과
+  "심볼은 있지만 이 구간엔 캔들이 없음"을 둘 다 빈 DataFrame으로 반환해 구분이 안 됐다. 수정: 이제
+  `get_binance_close`는 심볼이 없으면 `BinanceSymbolNotFoundError`를 그대로 전파한다(빈 DataFrame으로
+  삼키지 않음) — 위 코드처럼 백엔드가 이 예외를 잡아 "미상장" 메시지를, 병합 후 `isna().any()`가
+  "그 구간에 데이터 없음" 메시지를 각각 정확히 낸다.
+- **병합 방식**: `candle_time` 기준 exact left-join(공포탐욕지수의 날짜 단위 `merge_asof`와 다름). 하나라도
+  결측이면(부분 겹침 포함) 조용히 채우지 않고 즉시 400 — `ffill()`/`bfill()`은 쓰지 않는다.
+- **다음 C 레이어 지표(예: `FUNDING_RATE`) 설계 시 주의**: 이 절이 템플릿 역할을 하므로, 캔들 대 캔들
+  병합에 aux-market 루프의 `.all()` + fill 패턴을 그대로 베끼지 말고, 소스 히스토리가 대상 코인 캔들
+  구간 전체를 안정적으로 커버한다고 보장할 수 없다면 fear-greed/한국프리미엄처럼 `isna().any()` 엄격
+  거부를 기본으로 삼을 것.
 
 ### 3. 조건 빌더 / 카탈로그 / 가이드 탭 연동
 
