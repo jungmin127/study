@@ -42,7 +42,7 @@ alternative.me(CMC) 공포/탐욕 지수를 외부 API에서 가져와 캐싱하
   `date`는 UTC 00:00 정규화된 tz-aware `datetime64`). `merge_fear_greed(df: pd.DataFrame, fng_df: pd.DataFrame)
   -> pd.DataFrame`(Task 3에서 씀 — 이 Task에서 같이 구현).
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_external_data_service.py` (신규 파일):
 ```python
@@ -215,12 +215,12 @@ def test_merge_fear_greed_leaves_nan_before_earliest_available_date():
     assert merged["fear_greed_value"].iloc[1] == 50.0
 ```
 
-- [ ] **Step 2: 테스트가 실패하는지 확인**
+- [x] **Step 2: 테스트가 실패하는지 확인**
 
 Run: `pytest tests/test_external_data_service.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'external_data_service'`
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `external_data_service.py` (신규, 저장소 루트 — `upbit_data_service.py`와 같은 위치):
 ```python
@@ -336,12 +336,12 @@ def merge_fear_greed(df: pd.DataFrame, fng_df: pd.DataFrame) -> pd.DataFrame:
 __all__ = ["get_fear_greed_cmc", "merge_fear_greed"]
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_external_data_service.py -v`
 Expected: PASS (13개 테스트)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add external_data_service.py tests/test_external_data_service.py
@@ -364,7 +364,7 @@ git commit -m "feat: add CMC fear & greed index fetch/cache service"
 - Produces: `create_fear_greed_cmc(data, **params) -> bt.LineBuffer`(pass-through, `TRADE_VALUE`와 동일 패턴).
   `INDICATOR_FACTORY["FEAR_GREED_CMC"]`.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_indicators.py` 끝에 추가:
 ```python
@@ -384,12 +384,12 @@ def test_fear_greed_cmc_matches_raw_fear_greed_value_column():
 _NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC"}
 ```
 
-- [ ] **Step 2: 테스트가 실패하는지 확인**
+- [x] **Step 2: 테스트가 실패하는지 확인**
 
 Run: `pytest tests/test_indicators.py -k fear_greed -v`
 Expected: FAIL — `KeyError: 'FEAR_GREED_CMC'`(아직 `INDICATOR_FACTORY`에 없음)
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `engine/indicators/sentiment.py` (신규):
 ```python
@@ -424,12 +424,12 @@ _OPTIONAL_LINE_CANDIDATES: tuple[str, ...] = ("trade_value", "fear_greed_value",
 ```
 로 교체 — 이래야 `run_backtest()`가 df에 `fear_greed_value` 컬럼이 있을 때 자동으로 피드에 라인을 붙인다.
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_indicators.py -v`
 Expected: 기존 테스트 전부 PASS + `test_fear_greed_cmc_matches_raw_fear_greed_value_column` PASS
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add engine/indicators/sentiment.py engine/indicators/__init__.py engine/runner.py tests/test_indicators.py
@@ -448,7 +448,7 @@ git commit -m "feat: register FEAR_GREED_CMC indicator (pass-through of fear_gre
 - Consumes: Task 1의 `get_fear_greed_cmc`/`merge_fear_greed`, Task 2의 `INDICATOR_FACTORY["FEAR_GREED_CMC"]`.
 - Produces: `run_backtest_endpoint()`가 조건 트리에 `FEAR_GREED_CMC`가 있으면 자동으로 데이터를 병합.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_backend.py` 끝에 추가(파일 상단에 `from datetime import timedelta` 추가 필요 — 없으면 아래
 테스트에서 `NameError`):
@@ -505,14 +505,14 @@ def test_run_backtest_rejects_fear_greed_when_date_range_predates_history(monkey
     assert "공포탐욕지수" in resp.json()["detail"]
 ```
 
-- [ ] **Step 2: 테스트가 실패하는지 확인**
+- [x] **Step 2: 테스트가 실패하는지 확인**
 
 Run: `pytest tests/test_backend.py -k fear_greed -v`
 Expected: FAIL — 두 테스트 모두 200으로 응답(아직 `FEAR_GREED_CMC` 병합 로직이 없어 `merge_fear_greed`가
 호출되지 않고, `find_unknown_indicators`도 통과하므로 그냥 지표값 없이 진행되다가 다른 에러가 나거나
 `fear_greed_value` 컬럼 자체가 없어서 첫 번째 테스트는 `KeyError`로 실패).
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `backend/main.py`의 import 줄들을:
 ```python
@@ -551,7 +551,7 @@ from external_data_service import get_fear_greed_cmc, merge_fear_greed
             )
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_backend.py -v`
 Expected: 전부 PASS
@@ -559,7 +559,7 @@ Expected: 전부 PASS
 Run: `pytest tests/ -v`
 Expected: 전체 스위트 PASS
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
@@ -577,7 +577,7 @@ git commit -m "feat: merge FEAR_GREED_CMC data into backtest feed with day-bound
 - Consumes: Task 2의 `INDICATOR_FACTORY["FEAR_GREED_CMC"]`.
 - Produces: `GET /api/v1/indicators/catalog` 응답에 `FEAR_GREED_CMC` 항목 추가(카테고리 `"시장 심리"` 재사용).
 
-- [ ] **Step 1: 실패하는 테스트 확인**
+- [x] **Step 1: 실패하는 테스트 확인**
 
 기존 테스트 `test_get_indicator_catalog_covers_all_registered_indicators`(수정 없이 그대로 재사용)는
 `catalog_values == set(INDICATOR_FACTORY.keys()) | POSITION_RELATIVE_INDICATORS`를 검증하므로, Task 2에서
@@ -589,9 +589,9 @@ Expected: FAIL — `catalog_values`에 `FEAR_GREED_CMC`가 빠져 있어 set 비
 
 카테고리 화이트리스트(`assert item["category"] in {...}`)는 `"시장 심리"`가 이미 포함돼 있어 수정 불필요.
 
-- [ ] **Step 2: (Step 1에서 이미 실패 확인함 — 별도 실행 불필요)**
+- [x] **Step 2: (Step 1에서 이미 실패 확인함 — 별도 실행 불필요)**
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `backend/main.py`의 `INDICATOR_CATALOG` 리스트에서 `"USDT_CORRELATION"` 항목 바로 뒤에 추가:
 ```python
@@ -603,12 +603,12 @@ Expected: FAIL — `catalog_values`에 `FEAR_GREED_CMC`가 빠져 있어 set 비
     },
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/test_backend.py -v`
 Expected: 전부 PASS
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add backend/main.py
@@ -625,10 +625,10 @@ git commit -m "feat: register FEAR_GREED_CMC in the catalog under 시장 심리 
 **Interfaces:**
 - Consumes: 백엔드 카탈로그의 `category: "시장 심리"`, `value: "FEAR_GREED_CMC"`(Task 4).
 
-- [ ] **Step 1~2: (프론트 로직 테스트는 이 저장소에 별도 단위테스트 인프라가 없음 — 기존 컨벤션대로 Step 3
+- [x] **Step 1~2: (프론트 로직 테스트는 이 저장소에 별도 단위테스트 인프라가 없음 — 기존 컨벤션대로 Step 3
       구현 후 `tsc`+Playwright 수동 검증으로 대체한다.)**
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `frontend/components/StrategyConditionBuilder.tsx`의 `OSCILLATOR_BOUNDS`(현재 `RSI`/`STOCH_K`/`STOCH_D`/`CCI`/
 `WILLIAMS_R` 5개)에 추가:
@@ -646,7 +646,7 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
 추천하는 기존 로직을 그대로 타므로, 이 한 줄 추가만으로 `<`/`<=`면 20, `>`/`>=`면 80이 채워진다 — 별도
 분기 추가 불필요.)
 
-- [ ] **Step 4: 확인**
+- [x] **Step 4: 확인**
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: 에러 없음
@@ -654,7 +654,7 @@ Expected: 에러 없음
 브라우저(Playwright)에서 `/`(조건 빌더)의 "시장 심리" 카테고리에 "공포/탐욕 지수(CMC)"가 뜨는지, 선택 시
 연산자를 `<`로 두면 threshold가 20으로, `>`로 바꾸면 80으로 자동 채워지는지 확인.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add frontend/components/StrategyConditionBuilder.tsx
@@ -674,10 +674,10 @@ git commit -m "feat: add FEAR_GREED_CMC threshold recommendation to condition bu
 - Produces: `guide-sample-data.ts`에 `SAMPLE_FEAR_GREED: number[]`(길이 60, `SAMPLE_BARS`와 같은 `bar` 인덱스에
   대응하는 0~100 합성 시계열) 추가.
 
-- [ ] **Step 1~2: (지표 가이드 탭도 별도 단위테스트가 없는 순수 프레젠테이션 레이어 — 기존 컨벤션대로
+- [x] **Step 1~2: (지표 가이드 탭도 별도 단위테스트가 없는 순수 프레젠테이션 레이어 — 기존 컨벤션대로
       `tsc`+Playwright로 검증한다. Step 3 이후로 진행.)**
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `frontend/lib/guide-sample-data.ts`의 `buildBtcCloseSeries` 함수 뒤, `const closeSeries = buildCloseSeries();`
 줄 앞에 추가:
@@ -748,7 +748,7 @@ import { SAMPLE_BARS, SAMPLE_BTC, SAMPLE_FEAR_GREED, type SampleBar } from '@/li
     }
 ```
 
-- [ ] **Step 4: 확인**
+- [x] **Step 4: 확인**
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: 에러 없음
@@ -756,7 +756,7 @@ Expected: 에러 없음
 Playwright로 `/guide`를 열어 "시장 심리" 중분류에 "공포/탐욕 지수(CMC)"가 뜨는지, 클릭 시 표 + 게이지
 차트(0~100, 20/80 구간 색상 구분)가 정상 렌더되는지 확인.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add frontend/lib/guide-sample-data.ts frontend/lib/indicator-guide.ts frontend/lib/indicator-example-builder.ts
