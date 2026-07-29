@@ -625,9 +625,10 @@ export function buildGuideExample(value: string): GuideExample {
       };
     }
     case 'KOREA_PREMIUM': {
-      const rows = windowFrom(0, 7).map((bar, i) => ({
+      const start = 12;
+      const rows = windowFrom(start, 7).map((bar, i) => ({
         bar: bar.bar,
-        cells: { premium: n(SAMPLE_KOREA_PREMIUM[i]) },
+        cells: { premium: n(SAMPLE_KOREA_PREMIUM[start + i]) },
       }));
       const gauge = gaugeExample(
         SAMPLE_KOREA_PREMIUM,
