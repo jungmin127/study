@@ -159,7 +159,7 @@ def test_compute_gaps_no_cache_returns_full_range():
     assert gaps == [(start, end)]
 
 
-def test_get_binance_close_returns_empty_df_when_symbol_not_found_without_caching(monkeypatch, tmp_path):
+def test_get_binance_close_raises_when_symbol_not_found_without_caching(monkeypatch, tmp_path):
     monkeypatch.setattr(bds, "CACHE_DIR", tmp_path)
 
     def _raise_not_found(*args, **kwargs):
@@ -167,12 +167,12 @@ def test_get_binance_close_returns_empty_df_when_symbol_not_found_without_cachin
 
     monkeypatch.setattr(bds, "_fetch_range", _raise_not_found)
 
-    result = get_binance_close(
-        "NOTAREALCOINUSDT", "days",
-        datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 10, tzinfo=timezone.utc),
-    )
+    with pytest.raises(BinanceSymbolNotFoundError):
+        get_binance_close(
+            "NOTAREALCOINUSDT", "days",
+            datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 10, tzinfo=timezone.utc),
+        )
 
-    assert result.empty
     assert not (tmp_path / "NOTAREALCOINUSDT_days.parquet").exists()
 
 

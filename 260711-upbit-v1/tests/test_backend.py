@@ -186,6 +186,7 @@ def test_get_indicator_catalog_covers_all_registered_indicators(monkeypatch, tmp
 
     catalog_values = {item["value"] for item in body}
     assert catalog_values == set(INDICATOR_FACTORY.keys()) | POSITION_RELATIVE_INDICATORS
+    assert len(body) == len(catalog_values), "INDICATOR_CATALOG에 중복된 value가 있습니다"
 
     for item in body:
         assert item["description"], f"{item['value']}에 description이 없음"
@@ -1027,16 +1028,51 @@ def test_run_backtest_computes_korea_premium_value(monkeypatch, tmp_path):
 def test_run_backtest_rejects_korea_premium_when_binance_symbol_not_found(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _patch_get_candles(monkeypatch)
-    monkeypatch.setattr(
-        backend_module, "get_binance_close",
-        lambda symbol, timeframe, start, end: pd.DataFrame(columns=["candle_time", "close"]),
-    )
+
+    def _raise_not_found(symbol, timeframe, start, end):
+        raise backend_module.BinanceSymbolNotFoundError(symbol)
+
+    monkeypatch.setattr(backend_module, "get_binance_close", _raise_not_found)
 
     buy = {"type": "AND", "conditions": [{"indicator": "KOREA_PREMIUM", "params": {}, "operator": ">", "threshold": 0}]}
     resp = client.post("/api/v1/backtests/run", json=_run_request(buy_conditions=buy))
 
     assert resp.status_code == 400
     assert "바이낸스" in resp.json()["detail"]
+
+
+def test_run_backtest_rejects_korea_premium_when_binance_data_partially_missing(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    target_df = make_oscillating_df()
+    usdt_df = target_df.copy()
+    usdt_df["close"] = 1_000.0
+
+    def _fake_get_candles(market, timeframe, start, end):
+        if market == "KRW-USDT":
+            return usdt_df
+        return target_df
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    # binance_df only covers the first half of target_df's candle_times — partial coverage,
+    # a valid symbol with real data, just not for the whole requested range.
+    half = len(target_df) // 2
+    partial_binance_df = pd.DataFrame(
+        {"candle_time": target_df["candle_time"].iloc[:half], "close": 1_000.0}
+    )
+    monkeypatch.setattr(
+        backend_module, "get_binance_close",
+        lambda symbol, timeframe, start, end: partial_binance_df,
+    )
+
+    buy = {"type": "AND", "conditions": [{"indicator": "KOREA_PREMIUM", "params": {}, "operator": ">", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 400
+    # must be the "no data in range" message, NOT the "not listed" message —
+    # this is the whole point of the fix: the two causes must not collapse into one message.
+    assert "캔들 데이터가 없습니다" in resp.json()["detail"]
 
 
 def test_run_backtest_returns_400_when_binance_candles_have_no_overlapping_candle_time(monkeypatch, tmp_path):

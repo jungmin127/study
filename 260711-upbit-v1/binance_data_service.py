@@ -196,16 +196,14 @@ def _save_cache(symbol: str, timeframe: str, df: pd.DataFrame) -> None:
 
 def get_binance_close(symbol: str, timeframe: str, start: datetime, end: datetime) -> pd.DataFrame:
     """바이낸스 klines에서 종가만 조회한다. 컬럼: [candle_time, close]. 심볼이 존재하지
-    않으면(BinanceSymbolNotFoundError) 재시도 없이 빈 DataFrame을 즉시 반환하고, 이 경우
-    캐시에 아무것도 저장하지 않는다 — "없는 심볼"이라는 사실 자체는 캐싱할 대상이 아니다."""
+    않으면 BinanceSymbolNotFoundError를 재시도 없이 그대로 전파한다(호출부가 "미상장"과
+    "심볼은 있지만 이 구간에 데이터 없음"을 구분할 수 있도록) — 이 경우 캐시에 아무것도
+    저장하지 않는다."""
     cached = _load_cache(symbol, timeframe)
     gaps = _compute_gaps(cached, start, end)
 
     if gaps:
-        try:
-            fetched = [_fetch_range(symbol, timeframe, g_start, g_end) for g_start, g_end in gaps]
-        except BinanceSymbolNotFoundError:
-            return pd.DataFrame(columns=_CLOSE_COLUMNS)
+        fetched = [_fetch_range(symbol, timeframe, g_start, g_end) for g_start, g_end in gaps]
         to_concat = [df for df in [cached, *fetched] if not df.empty]
         if to_concat:
             cached = (
