@@ -71,11 +71,21 @@ function buildFearGreedSeries(): number[] {
   return values;
 }
 
+function buildKoreaPremiumSeries(): number[] {
+  const values: number[] = [];
+  for (let i = 0; i < TOTAL_BARS; i++) {
+    const wave = 3 * Math.sin((2 * Math.PI * i) / 18) + 2 * Math.sin((2 * Math.PI * i) / 6);
+    values.push(Math.round((2.5 + wave) * 100) / 100);
+  }
+  return values;
+}
+
 const closeSeries = buildCloseSeries();
 const volumeSeries = buildVolumeSeries();
 const tradeValueSeries = buildTradeValueSeries();
 const btcCloseSeries = buildBtcCloseSeries();
 const fearGreedSeries = buildFearGreedSeries();
+const koreaPremiumSeries = buildKoreaPremiumSeries();
 
 export const SAMPLE_BARS: SampleBar[] = closeSeries.map((close, i) => ({
   bar: i + 1,
@@ -93,6 +103,9 @@ export const SAMPLE_BTC: { bar: number; close: number }[] = btcCloseSeries.map((
 
 /** 공포탐욕지수는 코인 캔들과 무관한 고정 시계열이라 SAMPLE_BARS의 bar 인덱스에 맞춰 별도 배열로 둔다. */
 export const SAMPLE_FEAR_GREED: number[] = fearGreedSeries;
+
+/** 한국프리미엄은 코인 캔들과 무관한 고정 시계열이라 SAMPLE_BARS의 bar 인덱스에 맞춰 별도 배열로 둔다. */
+export const SAMPLE_KOREA_PREMIUM: number[] = koreaPremiumSeries;
 
 /** 가이드 문서 본문에서 "손으로 계산" 설명에 쓰는, 정확히 검산된 앞 7개 봉만 뽑은 뷰. */
 export const HAND_VERIFIED_BAR_COUNT = HAND_VERIFIED_CLOSE.length;

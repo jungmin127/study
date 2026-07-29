@@ -1,4 +1,4 @@
-import { SAMPLE_BARS, SAMPLE_BTC, SAMPLE_FEAR_GREED, type SampleBar } from '@/lib/guide-sample-data';
+import { SAMPLE_BARS, SAMPLE_BTC, SAMPLE_FEAR_GREED, SAMPLE_KOREA_PREMIUM, type SampleBar } from '@/lib/guide-sample-data';
 import * as calc from '@/lib/indicator-calc';
 
 export interface TableColumn {
@@ -620,6 +620,28 @@ export function buildGuideExample(value: string): GuideExample {
       );
       return {
         columns: [{ key: 'fearGreed', label: '공포탐욕지수' }],
+        rows,
+        chart: gauge.chart,
+      };
+    }
+    case 'KOREA_PREMIUM': {
+      const rows = windowFrom(0, 7).map((bar, i) => ({
+        bar: bar.bar,
+        cells: { premium: n(SAMPLE_KOREA_PREMIUM[i]) },
+      }));
+      const gauge = gaugeExample(
+        SAMPLE_KOREA_PREMIUM,
+        -10,
+        15,
+        [
+          { from: -10, to: 0, color: '#3b82f6', label: '역프리미엄(<0%)' },
+          { from: 0, to: 5, color: '#94a3b8', label: '중립' },
+          { from: 5, to: 15, color: '#ef4444', label: '과열(>5%)' },
+        ],
+        '한국프리미엄'
+      );
+      return {
+        columns: [{ key: 'premium', label: '한국프리미엄(%)' }],
         rows,
         chart: gauge.chart,
       };
