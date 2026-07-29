@@ -41,7 +41,7 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
   FEAR_GREED_CMC: { low: 20, high: 80 },
 };
 
-const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT']);
+const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT', 'KOREA_PREMIUM']);
 const PRICE_SCALE_INDICATORS = new Set([
   'SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower',
   'FIB_382', 'FIB_500', 'FIB_618', 'PIVOT_P', 'PIVOT_R1', 'PIVOT_S1',
