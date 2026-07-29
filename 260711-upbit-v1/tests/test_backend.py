@@ -976,3 +976,85 @@ def test_run_backtest_rejects_fear_greed_when_date_range_predates_history(monkey
 
     assert resp.status_code == 400
     assert "공포탐욕지수" in resp.json()["detail"]
+
+
+def test_run_backtest_computes_korea_premium_value(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    target_df = make_oscillating_df()
+    target_df["close"] = 1_050_000.0
+    usdt_df = target_df.copy()
+    usdt_df["close"] = 1_000.0
+
+    def _fake_get_candles(market, timeframe, start, end):
+        if market == "KRW-USDT":
+            return usdt_df
+        return target_df
+
+    monkeypatch.setattr(backend_module, "get_candles", _fake_get_candles)
+
+    binance_df = pd.DataFrame({"candle_time": target_df["candle_time"], "close": 1_000.0})
+    monkeypatch.setattr(
+        backend_module, "get_binance_close", lambda symbol, timeframe, start, end: binance_df
+    )
+
+    captured = {}
+    real_run_backtest_cached = backend_module.run_backtest_cached
+
+    def _capture(**kwargs):
+        captured["df"] = kwargs["df"].copy()
+        return real_run_backtest_cached(**kwargs)
+
+    monkeypatch.setattr(backend_module, "run_backtest_cached", _capture)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "KOREA_PREMIUM", "params": {}, "operator": ">", "threshold": 0}]}
+    # sell_conditions는 기본값(RSI(14))을 쓰지 않는다: 이 테스트는 korea_premium_value가 모든 행에서
+    # 정확히 5.0이 되도록 target_df["close"]를 상수로 고정하는데, 종가가 완전히 평평하면
+    # backtrader의 기본 RSI(safediv=False)가 maup=madown=0을 나누며 ZeroDivisionError를 던진다.
+    # 이는 KOREA_PREMIUM 병합 로직과 무관한 충돌이므로 sell 쪽도 KOREA_PREMIUM으로 바꿔 피한다.
+    sell = {"type": "AND", "conditions": [{"indicator": "KOREA_PREMIUM", "params": {}, "operator": "<", "threshold": -100}]}
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(market="KRW-ETH", buy_conditions=buy, sell_conditions=sell),
+    )
+
+    assert resp.status_code == 200
+    merged = captured["df"]
+    # close=1,050,000 / (binance_close=1,000 * usdt_close=1,000) - 1) * 100 = 5.0(%)
+    assert merged["korea_premium_value"].round(4).eq(5.0).all()
+
+
+def test_run_backtest_rejects_korea_premium_when_binance_symbol_not_found(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+    monkeypatch.setattr(
+        backend_module, "get_binance_close",
+        lambda symbol, timeframe, start, end: pd.DataFrame(columns=["candle_time", "close"]),
+    )
+
+    buy = {"type": "AND", "conditions": [{"indicator": "KOREA_PREMIUM", "params": {}, "operator": ">", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(buy_conditions=buy))
+
+    assert resp.status_code == 400
+    assert "바이낸스" in resp.json()["detail"]
+
+
+def test_run_backtest_returns_400_when_binance_candles_have_no_overlapping_candle_time(monkeypatch, tmp_path):
+    # 바이낸스 응답에 행은 있지만 target과 candle_time이 전혀 겹치지 않는 경우(merge 후 전부 NaN)
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    target_df = make_oscillating_df()
+    disjoint_binance_df = pd.DataFrame(
+        {"candle_time": target_df["candle_time"] + pd.Timedelta(days=10000), "close": 1000.0}
+    )
+    monkeypatch.setattr(
+        backend_module, "get_binance_close",
+        lambda symbol, timeframe, start, end: disjoint_binance_df,
+    )
+
+    buy = {"type": "AND", "conditions": [{"indicator": "KOREA_PREMIUM", "params": {}, "operator": ">", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 400
+    assert "캔들 데이터가 없습니다" in resp.json()["detail"]

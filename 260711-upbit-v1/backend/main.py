@@ -34,6 +34,7 @@ from engine.condition_tree import (
     required_aux_markets,
 )
 from engine.runner import AUX_MARKET_LINE_NAME
+from binance_data_service import binance_symbol, get_binance_close
 from external_data_service import get_fear_greed_cmc, merge_fear_greed
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import calculate_metrics
@@ -622,6 +623,33 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
                 status_code=400,
                 detail="이 조건에 필요한 공포탐욕지수 데이터가 해당 기간에 없습니다 (2018-02-01 이전 구간은 지원하지 않습니다)",
             )
+
+    korea_premium_indicators = {
+        b["indicator"] for b in collect_blocks(buy_dict) + collect_blocks(sell_dict)
+    }
+    if "KOREA_PREMIUM" in korea_premium_indicators:
+        symbol = binance_symbol(req.market)
+        try:
+            binance_df = get_binance_close(symbol, req.timeframe, start_dt, end_dt)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if binance_df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{req.market}에 대응하는 바이낸스 심볼({symbol})이 없어 "
+                    f"한국프리미엄을 계산할 수 없습니다"
+                ),
+            )
+        df = df.merge(
+            binance_df.rename(columns={"close": "binance_close"}), on="candle_time", how="left"
+        )
+        if df["binance_close"].isna().all():
+            raise HTTPException(
+                status_code=400, detail=f"해당 기간에 {symbol} 캔들 데이터가 없습니다"
+            )
+        df["binance_close"] = df["binance_close"].ffill().bfill()
+        df["korea_premium_value"] = (df["close"] / (df["binance_close"] * df["usdt_close"]) - 1) * 100
 
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": req.initial_capital}
 
