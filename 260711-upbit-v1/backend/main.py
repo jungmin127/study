@@ -577,19 +577,12 @@ def _validate_backtest_request(req: RunBacktestRequest) -> list[str]:
     return errors
 
 
-@app.post("/api/v1/backtests/run")
-def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
-    errors = _validate_backtest_request(req)
-    if errors:
-        raise HTTPException(status_code=400, detail=" / ".join(errors))
-
-    start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    end_dt = datetime.strptime(req.end, "%Y-%m-%d").replace(
-        hour=23, minute=59, second=59, tzinfo=timezone.utc
-    )
-
+def _fetch_backtest_dataframe(
+    market: str, timeframe: str, start_dt: datetime, end_dt: datetime,
+    buy_dict: dict, sell_dict: dict,
+):
     try:
-        df = get_candles(req.market, req.timeframe, start_dt, end_dt)
+        df = get_candles(market, timeframe, start_dt, end_dt)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -598,8 +591,6 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
     if df.empty:
         raise HTTPException(status_code=400, detail="해당 기간에 캔들 데이터가 없습니다")
 
-    buy_dict = req.buy_conditions.model_dump()
-    sell_dict = req.sell_conditions.model_dump()
     required_bars = max(max_required_period(buy_dict), max_required_period(sell_dict))
     if len(df) < required_bars:
         raise HTTPException(
@@ -613,11 +604,11 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
     aux_markets = required_aux_markets(buy_dict) | required_aux_markets(sell_dict)
     for aux_market in aux_markets:
         line_name = AUX_MARKET_LINE_NAME[aux_market]
-        if req.market == aux_market:
+        if market == aux_market:
             df = df.assign(**{line_name: df["close"]})
             continue
         try:
-            aux_df = get_candles(aux_market, req.timeframe, start_dt, end_dt)
+            aux_df = get_candles(aux_market, timeframe, start_dt, end_dt)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -655,14 +646,14 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
             )
 
     if "KOREA_PREMIUM" in used_indicators:
-        symbol = binance_symbol(req.market)
+        symbol = binance_symbol(market)
         try:
-            binance_df = get_binance_close(symbol, req.timeframe, start_dt, end_dt)
+            binance_df = get_binance_close(symbol, timeframe, start_dt, end_dt)
         except BinanceSymbolNotFoundError:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"{req.market}에 대응하는 바이낸스 심볼({symbol})이 없어 "
+                    f"{market}에 대응하는 바이낸스 심볼({symbol})이 없어 "
                     f"한국프리미엄을 계산할 수 없습니다"
                 ),
             )
@@ -678,6 +669,24 @@ def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
                 status_code=400, detail=f"해당 기간에 {symbol} 캔들 데이터가 없습니다"
             )
         df["korea_premium_value"] = (df["close"] / (df["binance_close"] * df["usdt_close"]) - 1) * 100
+
+    return df
+
+
+@app.post("/api/v1/backtests/run")
+def run_backtest_endpoint(req: RunBacktestRequest) -> dict:
+    errors = _validate_backtest_request(req)
+    if errors:
+        raise HTTPException(status_code=400, detail=" / ".join(errors))
+
+    start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt = datetime.strptime(req.end, "%Y-%m-%d").replace(
+        hour=23, minute=59, second=59, tzinfo=timezone.utc
+    )
+
+    buy_dict = req.buy_conditions.model_dump()
+    sell_dict = req.sell_conditions.model_dump()
+    df = _fetch_backtest_dataframe(req.market, req.timeframe, start_dt, end_dt, buy_dict, sell_dict)
 
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": req.initial_capital}
 
