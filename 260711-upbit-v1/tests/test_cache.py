@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 import engine.cache as cache_module
-from engine.cache import compute_cache_key, delete_backtest_run, load_result, save_result
+from engine.cache import compute_cache_key, delete_backtest_run, get_run_config, load_result, save_result
 from engine.cache import run_backtest_cached
 from engine.cache import (
     list_backtest_runs,
@@ -523,3 +523,37 @@ def test_save_segment_classification_replaces_previous_batch(monkeypatch, tmp_pa
 
     rows = list_segment_classification()
     assert [r["market"] for r in rows] == ["KRW-NEW"]
+
+
+def test_get_run_config_returns_stored_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy",
+        strategy_params={
+            "buy_conditions": {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]},
+            "sell_conditions": {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]},
+        },
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 1_000_000, "commission_rate": 0.0005},
+        result={"final_value": 1_100_000.0, "sharpe": 1.0, "max_drawdown": 5.0, "equity_curve": [], "trades": []},
+        title="추적용", description="설명",
+    )
+
+    config = get_run_config("r1")
+
+    assert config is not None
+    assert config["strategy_name"] == "ConditionTreeStrategy"
+    assert config["market"] == "KRW-BTC"
+    assert config["timeframe"] == "days"
+    assert config["start"].startswith("2026-01-01")
+    assert config["risk_config"] == {"initial_capital": 1_000_000, "commission_rate": 0.0005}
+    assert config["buy_conditions"]["conditions"][0]["indicator"] == "RSI"
+    assert config["sell_conditions"]["conditions"][0]["threshold"] == 70
+    assert config["title"] == "추적용"
+    assert config["description"] == "설명"
+
+
+def test_get_run_config_returns_none_for_missing_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    assert get_run_config("does-not-exist") is None

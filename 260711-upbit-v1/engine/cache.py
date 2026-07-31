@@ -184,6 +184,37 @@ def load_result(run_id: str) -> dict | None:
     }
 
 
+def get_run_config(run_id: str) -> dict | None:
+    """run_id로 저장된 실행 설정(시장/봉타입/시작일/조건식/리스크설정 등)을 반환한다.
+    "최신 데이터로 갱신" 기능처럼 같은 조건으로 end만 바꿔 재실행할 때 쓴다."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT strategy_name, market, timeframe, start, risk_config_json, params_json, title, description "
+            "FROM backtest_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+
+    strategy_name, market, timeframe, start, risk_config_json, params_json, title, description = row
+    params = json.loads(params_json)
+    return {
+        "strategy_name": strategy_name,
+        "market": market,
+        "timeframe": timeframe,
+        "start": start,
+        "risk_config": json.loads(risk_config_json),
+        "buy_conditions": params["buy_conditions"],
+        "sell_conditions": params["sell_conditions"],
+        "title": title,
+        "description": description,
+    }
+
+
 def delete_backtest_run(run_id: str) -> bool:
     """run_id에 해당하는 백테스트 결과를 삭제한다. 삭제된 행이 있었으면 True를 반환한다."""
     conn = _connect()
