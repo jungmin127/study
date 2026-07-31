@@ -80,12 +80,22 @@ function buildKoreaPremiumSeries(): number[] {
   return values;
 }
 
+function buildVpinSeries(): number[] {
+  const values: number[] = [];
+  for (let i = 0; i < TOTAL_BARS; i++) {
+    const wave = 0.2 * Math.sin((2 * Math.PI * i) / 15) + 0.1 * Math.sin((2 * Math.PI * i) / 5);
+    values.push(Math.max(0, Math.min(1, Math.round((0.25 + wave) * 100) / 100)));
+  }
+  return values;
+}
+
 const closeSeries = buildCloseSeries();
 const volumeSeries = buildVolumeSeries();
 const tradeValueSeries = buildTradeValueSeries();
 const btcCloseSeries = buildBtcCloseSeries();
 const fearGreedSeries = buildFearGreedSeries();
 const koreaPremiumSeries = buildKoreaPremiumSeries();
+const vpinSeries = buildVpinSeries();
 
 export const SAMPLE_BARS: SampleBar[] = closeSeries.map((close, i) => ({
   bar: i + 1,
@@ -109,3 +119,6 @@ export const SAMPLE_KOREA_PREMIUM: number[] = koreaPremiumSeries;
 
 /** 가이드 문서 본문에서 "손으로 계산" 설명에 쓰는, 정확히 검산된 앞 7개 봉만 뽑은 뷰. */
 export const HAND_VERIFIED_BAR_COUNT = HAND_VERIFIED_CLOSE.length;
+
+/** VPIN은 코인 캔들과 무관한 고정 시계열이라 SAMPLE_BARS의 bar 인덱스에 맞춰 별도 배열로 둔다. */
+export const SAMPLE_VPIN: number[] = vpinSeries;

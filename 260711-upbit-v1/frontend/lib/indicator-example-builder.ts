@@ -1,4 +1,4 @@
-import { SAMPLE_BARS, SAMPLE_BTC, SAMPLE_FEAR_GREED, SAMPLE_KOREA_PREMIUM, type SampleBar } from '@/lib/guide-sample-data';
+import { SAMPLE_BARS, SAMPLE_BTC, SAMPLE_FEAR_GREED, SAMPLE_KOREA_PREMIUM, SAMPLE_VPIN, type SampleBar } from '@/lib/guide-sample-data';
 import * as calc from '@/lib/indicator-calc';
 
 export interface TableColumn {
@@ -643,6 +643,28 @@ export function buildGuideExample(value: string): GuideExample {
       );
       return {
         columns: [{ key: 'premium', label: '한국프리미엄(%)' }],
+        rows,
+        chart: gauge.chart,
+      };
+    }
+    case 'VPIN': {
+      const rows = windowFrom(0, 7).map((bar, i) => ({
+        bar: bar.bar,
+        cells: { vpin: n(SAMPLE_VPIN[i]) },
+      }));
+      const gauge = gaugeExample(
+        SAMPLE_VPIN,
+        0,
+        1,
+        [
+          { from: 0, to: 0.2, color: '#94a3b8', label: '평온(<0.2)' },
+          { from: 0.2, to: 0.4, color: '#f59e0b', label: '주의' },
+          { from: 0.4, to: 1, color: '#ef4444', label: '독성 흐름(>0.4)' },
+        ],
+        'VPIN'
+      );
+      return {
+        columns: [{ key: 'vpin', label: 'VPIN' }],
         rows,
         chart: gauge.chart,
       };
