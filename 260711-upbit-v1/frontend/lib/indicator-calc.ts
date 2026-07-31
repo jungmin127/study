@@ -231,3 +231,81 @@ export function round(value: number, digits = 2): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
 }
+
+export function volumeProfile(
+  highs: number[],
+  lows: number[],
+  volumes: number[],
+  period: number,
+  numBins = 24,
+  valueAreaPct = 0.7
+): { poc: number[]; vah: number[]; val: number[] } {
+  const poc = new Array(highs.length).fill(NaN);
+  const vah = new Array(highs.length).fill(NaN);
+  const val = new Array(highs.length).fill(NaN);
+
+  for (let i = period - 1; i < highs.length; i++) {
+    const windowHighs = highs.slice(i - period + 1, i + 1);
+    const windowLows = lows.slice(i - period + 1, i + 1);
+    const windowVolumes = volumes.slice(i - period + 1, i + 1);
+    const windowHigh = Math.max(...windowHighs);
+    const windowLow = Math.min(...windowLows);
+
+    if (windowHigh === windowLow) {
+      poc[i] = windowHigh;
+      vah[i] = windowHigh;
+      val[i] = windowHigh;
+      continue;
+    }
+
+    const binWidth = (windowHigh - windowLow) / numBins;
+    const binVolumes = new Array(numBins).fill(0);
+
+    for (let b = 0; b < period; b++) {
+      const h = windowHighs[b];
+      const l = windowLows[b];
+      const v = windowVolumes[b];
+      if (h === l) {
+        const idx = Math.min(Math.floor((h - windowLow) / binWidth), numBins - 1);
+        binVolumes[idx] += v;
+        continue;
+      }
+      for (let bin = 0; bin < numBins; bin++) {
+        const binBottom = windowLow + bin * binWidth;
+        const binTop = binBottom + binWidth;
+        const overlap = Math.min(h, binTop) - Math.max(l, binBottom);
+        if (overlap > 0) {
+          binVolumes[bin] += v * (overlap / (h - l));
+        }
+      }
+    }
+
+    const totalVolume = binVolumes.reduce((sum, x) => sum + x, 0);
+    let pocIdx = 0;
+    for (let bin = 1; bin < numBins; bin++) {
+      if (binVolumes[bin] > binVolumes[pocIdx]) pocIdx = bin;
+    }
+    poc[i] = windowLow + (pocIdx + 0.5) * binWidth;
+
+    let lo = pocIdx;
+    let hi = pocIdx;
+    let accumulated = binVolumes[pocIdx];
+    const target = totalVolume * valueAreaPct;
+    while (accumulated < target && (lo > 0 || hi < numBins - 1)) {
+      const expandLo = lo > 0 ? binVolumes[lo - 1] : -1;
+      const expandHi = hi < numBins - 1 ? binVolumes[hi + 1] : -1;
+      if (expandHi >= expandLo) {
+        hi += 1;
+        accumulated += expandHi;
+      } else {
+        lo -= 1;
+        accumulated += expandLo;
+      }
+    }
+
+    vah[i] = windowLow + (hi + 1) * binWidth;
+    val[i] = windowLow + lo * binWidth;
+  }
+
+  return { poc, vah, val };
+}

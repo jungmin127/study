@@ -292,6 +292,33 @@ export function buildGuideExample(value: string): GuideExample {
         },
       };
     }
+    case 'VPVR_POC':
+    case 'VPVR_VAH':
+    case 'VPVR_VAL': {
+      const period = 50;
+      const { poc, vah, val } = calc.volumeProfile(highs, lows, volumes, period);
+      const line = value === 'VPVR_POC' ? poc : value === 'VPVR_VAH' ? vah : val;
+      const start = firstValidIndex(line);
+      const rows = windowFrom(start, 6).map((bar, i) => ({
+        bar: bar.bar,
+        cells: { close: n(bar.close, 0), value: n(line[start + i]) },
+      }));
+      return {
+        columns: [
+          { key: 'close', label: '종가' },
+          { key: 'value', label: value },
+        ],
+        rows,
+        chart: {
+          type: 'line',
+          data: SAMPLE_BARS.map((bar, i) => ({ bar: bar.bar, close: bar.close, value: clean(line[i]) })),
+          lines: [
+            { key: 'close', name: '종가', color: '#94a3b8' },
+            { key: 'value', name: `${value}`, color: '#0891b2', dash: true },
+          ],
+        },
+      };
+    }
     case 'CCI': {
       const period = 20;
       const line = calc.cci(highs, lows, closes, period);
