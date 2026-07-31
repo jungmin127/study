@@ -250,6 +250,24 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "Pivot이 105, 직전 봉 고가가 110이면 S1 = 105×2 − 110 = 100입니다.",
     },
     {
+        "value": "VPVR_POC", "label": "VPVR POC (거래량 최다 가격대)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 50}],
+        "description": "최근 period봉의 거래량을 가격대별로 나눠 쌓았을 때, 거래량이 가장 많이 몰린 가격대(Point of Control)입니다. 시장이 '공정하다'고 합의한 가격으로 해석되어 반등/저항이 자주 일어나는 자리로 흔히 씁니다.",
+        "example": "period=50이면 최근 50봉의 가격대별 거래량 분포에서 가장 거래가 많았던 가격대입니다.",
+    },
+    {
+        "value": "VPVR_VAH", "label": "VPVR Value Area 상단(VAH)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 50}],
+        "description": "최근 period봉 거래량의 70%가 몰려있는 구간(Value Area)의 상단 가격입니다. 이 위는 상대적으로 거래가 적었던 구간이라 가격이 빠르게 통과하는 경향이 있습니다.",
+        "example": "period=50, 연산자 >, threshold를 이 값으로 두면 가격이 Value Area 위로 벗어난 구간을 포착합니다.",
+    },
+    {
+        "value": "VPVR_VAL", "label": "VPVR Value Area 하단(VAL)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 50}],
+        "description": "최근 period봉 거래량의 70%가 몰려있는 구간(Value Area)의 하단 가격입니다. 이 아래는 상대적으로 거래가 적었던 구간이라 가격이 빠르게 통과하는 경향이 있습니다.",
+        "example": "period=50, 연산자 <, threshold를 이 값으로 두면 가격이 Value Area 아래로 벗어난 구간을 포착합니다.",
+    },
+    {
         "value": "STOP_LOSS_PCT", "label": "손절라인 (%)", "category": "손익",
         "params": [], "sellOnly": True, "fixedOperator": "<=",
         "description": "캔들 지표가 아니라 보유 포지션의 진입가 대비 현재 수익률(%)입니다. 이 값이 임계값 이하로 내려가면 매도합니다.",
