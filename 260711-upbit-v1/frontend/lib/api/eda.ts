@@ -70,6 +70,12 @@ export function deleteBacktestRun(runId: string): Promise<{ deleted: boolean }> 
   });
 }
 
+export function refreshBacktestRun(runId: string): Promise<{ run_id: string }> {
+  return apiFetch<{ run_id: string }>(`/api/v1/backtests/${runId}/refresh`, {
+    method: 'POST',
+  });
+}
+
 export function getSegmentSizeAnalysis(): Promise<SegmentSizeEntry[]> {
   return apiFetch<SegmentSizeEntry[]>('/api/v1/analysis/segments/size');
 }
