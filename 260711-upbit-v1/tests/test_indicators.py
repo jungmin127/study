@@ -6,6 +6,7 @@ import pytest
 
 from engine.condition_tree import get_indicator_value
 from engine.indicators import INDICATOR_FACTORY
+from engine.indicators import price_levels
 from tests.signal_fixtures import make_oscillating_df
 from engine.runner import build_data_feed_class, run_backtest
 
@@ -97,6 +98,128 @@ def test_trade_value_sma_matches_manual_average_of_trade_value():
     values = _run_probe_with_aux("TRADE_VALUE_SMA", {"period": 5}, "trade_value", trade_value)
     manual = trade_value.rolling(5).mean().iloc[-1]
     assert abs(values[-1] - manual) < 1e-6
+
+
+def _run_vpvr_probe(
+    highs: list[float], lows: list[float], volumes: list[float], period: int, num_bins: int
+) -> list[tuple[float, float, float]]:
+    """명시적 high/low/volume 시퀀스로 VPVR bin 분배를 손으로 검증할 수 있게 만드는 전용 하네스.
+    NUM_BINS을 테스트 전용 값으로 좁혀 손 계산이 가능하게 하고, 매 봉의 (poc, vah, val) 이력을
+    리스트로 반환한다."""
+    n = len(highs)
+    closes = [(h + l) / 2 for h, l in zip(highs, lows)]
+    idx = pd.date_range("2026-01-01", periods=n, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx,
+        "open": closes, "high": highs, "low": lows, "close": closes,
+        "volume": volumes,
+    })
+    df_bt = df.set_index("candle_time")
+    df_bt.index = df_bt.index.tz_localize(None)
+
+    class _VpvrProbeStrategy(bt.Strategy):
+        def __init__(self):
+            self.probe = price_levels.VolumeProfile(self.data, period=period)
+            self.seen_values: list[tuple[float, float, float]] = []
+
+        def next(self):
+            self.seen_values.append((
+                float(self.probe.lines.poc[0]),
+                float(self.probe.lines.vah[0]),
+                float(self.probe.lines.val[0]),
+            ))
+
+    original_num_bins = price_levels.NUM_BINS
+    price_levels.NUM_BINS = num_bins
+    try:
+        cerebro = bt.Cerebro()
+        cerebro.adddata(bt.feeds.PandasData(dataname=df_bt, openinterest=-1))
+        cerebro.addstrategy(_VpvrProbeStrategy)
+        results = cerebro.run()
+        return results[0].seen_values
+    finally:
+        price_levels.NUM_BINS = original_num_bins
+
+
+def test_vpvr_produces_nan_during_warmup_before_enough_bars():
+    # period=3인데 봉이 2개뿐이라 롤링 윈도우가 아직 안 찼음 — 세 라인 모두 NaN이어야 함.
+    highs = [10, 10]
+    lows = [0, 0]
+    volumes = [100, 100]
+    values = _run_vpvr_probe(highs, lows, volumes, period=3, num_bins=4)
+    assert all(v != v for poc, vah, val in values for v in (poc, vah, val)), (
+        "워밍업 중(봉이 period개 미만)엔 poc/vah/val 전부 NaN이어야 함(v != v는 NaN 체크)"
+    )
+
+
+def test_vpvr_matches_hand_traced_bin_distribution():
+    # period=3, num_bins=4로 손 계산 가능한 3봉 시퀀스.
+    # window_high=10.0(2번째 봉), window_low=0.0(1번째 봉) → bin_width=2.5.
+    # bin0=[0,2.5], bin1=[2.5,5.0], bin2=[5.0,7.5], bin3=[7.5,10.0].
+    # 1번째 봉(h=2.5,l=0,v=100)은 bin0에만 전량 겹침 → bin0 += 100.
+    # 2번째 봉(h=10,l=7.5,v=10)은 bin3에만 전량 겹침 → bin3 += 10.
+    # 3번째 봉(h=5,l=2.5,v=5)은 bin1에만 전량 겹침 → bin1 += 5.
+    # 최종 bin_volumes = [100, 5, 0, 10], 합계 115.
+    # POC = bin0(최댓값) 중간값 = 0 + 0.5*2.5 = 1.25.
+    # Value Area: bin0 하나만으로 100/115 ≈ 87% > 70% 목표 도달 → 확장 없음.
+    # VAH = bin0 윗값 = 2.5, VAL = bin0 아랫값 = 0.0.
+    highs = [2.5, 10.0, 5.0]
+    lows = [0.0, 7.5, 2.5]
+    volumes = [100, 10, 5]
+    values = _run_vpvr_probe(highs, lows, volumes, period=3, num_bins=4)
+    poc, vah, val = values[-1]
+    assert poc == pytest.approx(1.25)
+    assert vah == pytest.approx(2.5)
+    assert val == pytest.approx(0.0)
+
+
+def test_vpvr_handles_completely_flat_window_without_dividing_by_zero():
+    # 윈도우 안 모든 봉이 h==l==100(무변동) — window_high==window_low라 bin 분할이 무의미.
+    # ZeroDivisionError 없이 poc=vah=val=100.0으로 처리되어야 함.
+    highs = [100.0, 100.0, 100.0]
+    lows = [100.0, 100.0, 100.0]
+    volumes = [10, 10, 10]
+    values = _run_vpvr_probe(highs, lows, volumes, period=3, num_bins=4)
+    poc, vah, val = values[-1]
+    assert poc == pytest.approx(100.0)
+    assert vah == pytest.approx(100.0)
+    assert val == pytest.approx(100.0)
+
+
+def test_vpvr_handles_doji_bar_within_a_non_flat_window():
+    # 윈도우 전체는 평평하지 않지만(window_high=10 != window_low=0), 그 안의 한 봉(2번째)만
+    # h==l==5(도지)인 경우 — 그 봉 처리에서 크래시(ZeroDivisionError) 없이 값이 나와야 함.
+    # 정확한 값 대신 불변식(VAL <= POC <= VAH, 윈도우 범위 안)만 검증한다.
+    highs = [10, 5, 10]
+    lows = [0, 5, 0]
+    volumes = [50, 30, 50]
+    values = _run_vpvr_probe(highs, lows, volumes, period=3, num_bins=4)
+    poc, vah, val = values[-1]
+    assert 0.0 <= val <= poc <= vah <= 10.0
+
+
+def test_vpvr_default_settings_keep_value_area_ordering_and_stays_within_window_range():
+    # 기본 설정(NUM_BINS=24, period=50)의 실제 오실레이팅 데이터로, 워밍업 이후 모든 봉에서
+    # VAL <= POC <= VAH이고 셋 다 그 시점 롤링 윈도우([window_low, window_high]) 범위 안에
+    # 있는지 스모크 검증한다(정확한 값이 아니라 불변식 검증).
+    poc_values = _run_probe("VPVR_POC", {})
+    vah_values = _run_probe("VPVR_VAH", {})
+    val_values = _run_probe("VPVR_VAL", {})
+    df = make_oscillating_df()
+    period = 50
+    checked_any = False
+    for i in range(len(poc_values)):
+        poc, vah, val = poc_values[i], vah_values[i], val_values[i]
+        if poc != poc:  # 워밍업 구간(NaN)은 건너뜀
+            continue
+        checked_any = True
+        window_start = max(0, i - period + 1)
+        window_high = df["high"].iloc[window_start:i + 1].max()
+        window_low = df["low"].iloc[window_start:i + 1].min()
+        assert val <= poc <= vah, f"bar {i}: VAL<=POC<=VAH 불변식 깨짐 ({val}, {poc}, {vah})"
+        assert window_low - 1e-6 <= val, f"bar {i}: VAL이 윈도우 최저가보다 낮음"
+        assert vah <= window_high + 1e-6, f"bar {i}: VAH가 윈도우 최고가보다 높음"
+    assert checked_any, "워밍업 이후 값이 하나도 없음"
 
 
 def test_fib_382_matches_manual_swing_calculation():

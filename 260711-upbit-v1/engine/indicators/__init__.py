@@ -18,6 +18,9 @@ from .price_levels import (
     create_pivot_p,
     create_pivot_r1,
     create_pivot_s1,
+    create_vpvr_poc,
+    create_vpvr_vah,
+    create_vpvr_val,
 )
 from .sentiment import create_fear_greed_cmc, create_korea_premium
 from .trend import create_ema, create_sma, create_wma
@@ -54,6 +57,9 @@ INDICATOR_FACTORY: dict[str, object] = {
     "PIVOT_P": create_pivot_p,
     "PIVOT_R1": create_pivot_r1,
     "PIVOT_S1": create_pivot_s1,
+    "VPVR_POC": create_vpvr_poc,
+    "VPVR_VAH": create_vpvr_vah,
+    "VPVR_VAL": create_vpvr_val,
     "FEAR_GREED_CMC": create_fear_greed_cmc,
     "KOREA_PREMIUM": create_korea_premium,
 }
