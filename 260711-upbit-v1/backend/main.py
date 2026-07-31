@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from engine.cache import (
     delete_backtest_run,
+    get_run_config,
     list_backtest_runs,
     list_combined_ranking,
     list_distinct_combos,
@@ -24,6 +25,7 @@ from engine.cache import (
     list_sweep_history,
     load_result,
     run_backtest_cached,
+    save_result,
 )
 from engine.condition_strategy import ConditionTreeStrategy
 from engine.condition_tree import (
@@ -33,7 +35,7 @@ from engine.condition_tree import (
     max_required_period,
     required_aux_markets,
 )
-from engine.runner import AUX_MARKET_LINE_NAME
+from engine.runner import AUX_MARKET_LINE_NAME, run_backtest
 from binance_data_service import BinanceSymbolNotFoundError, binance_symbol, get_binance_close
 from external_data_service import get_fear_greed_cmc, merge_fear_greed
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
@@ -515,6 +517,41 @@ def delete_backtest(run_id: str) -> dict:
     if not deleted:
         raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 결과를 찾을 수 없습니다")
     return {"deleted": True}
+
+
+@app.post("/api/v1/backtests/{run_id}/refresh")
+def refresh_backtest_endpoint(run_id: str) -> dict:
+    config = get_run_config(run_id)
+    if config is None:
+        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 결과를 찾을 수 없습니다")
+
+    start_dt = datetime.fromisoformat(config["start"])
+    end_dt = datetime.now(timezone.utc)
+    if end_dt <= start_dt:
+        raise HTTPException(status_code=400, detail="시작일이 아직 지나지 않아 갱신할 수 없습니다")
+
+    buy_dict = config["buy_conditions"]
+    sell_dict = config["sell_conditions"]
+    df = _fetch_backtest_dataframe(config["market"], config["timeframe"], start_dt, end_dt, buy_dict, sell_dict)
+
+    result = run_backtest(
+        df, ConditionTreeStrategy, config["risk_config"],
+        {"buy_conditions": buy_dict, "sell_conditions": sell_dict},
+    )
+    save_result(
+        run_id=run_id,
+        strategy_name=config["strategy_name"],
+        strategy_params={"buy_conditions": buy_dict, "sell_conditions": sell_dict},
+        market=config["market"],
+        timeframe=config["timeframe"],
+        start=start_dt,
+        end=end_dt,
+        risk_config=config["risk_config"],
+        result=result,
+        title=config["title"],
+        description=config["description"],
+    )
+    return {"run_id": run_id}
 
 
 ComparisonOperator = Literal[">", "<", ">=", "<=", "=="]

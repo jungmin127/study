@@ -145,6 +145,53 @@ def test_delete_backtest_returns_404_for_missing_run(monkeypatch, tmp_path):
     assert resp.status_code == 404
 
 
+def test_refresh_backtest_returns_404_for_missing_run(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.post("/api/v1/backtests/does-not-exist/refresh")
+    assert resp.status_code == 404
+
+
+def test_refresh_backtest_keeps_same_run_id_and_updates_end(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+    _patch_get_current_prices(monkeypatch)
+
+    create_resp = client.post("/api/v1/backtests/run", json=_run_request())
+    run_id = create_resp.json()["run_id"]
+    original_end = client.get(f"/api/v1/backtests/{run_id}").json()["end"]
+
+    refresh_resp = client.post(f"/api/v1/backtests/{run_id}/refresh")
+
+    assert refresh_resp.status_code == 200
+    assert refresh_resp.json() == {"run_id": run_id}
+
+    detail_resp = client.get(f"/api/v1/backtests/{run_id}")
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["end"] != original_end
+
+    list_resp = client.get("/api/v1/backtests")
+    assert len(list_resp.json()) == 1, "덮어쓰기이므로 목록에 런이 늘어나면 안 됨"
+
+
+def test_refresh_backtest_preserves_title_and_description(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+    _patch_get_current_prices(monkeypatch)
+
+    create_resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(title="추적용", description="설명"),
+    )
+    run_id = create_resp.json()["run_id"]
+
+    client.post(f"/api/v1/backtests/{run_id}/refresh")
+
+    list_resp = client.get("/api/v1/backtests")
+    run = next(r for r in list_resp.json() if r["run_id"] == run_id)
+    assert run["title"] == "추적용"
+    assert run["description"] == "설명"
+
+
 def test_get_signals_returns_registered_signal_keys():
     from signals import SIGNAL_REGISTRY
 
