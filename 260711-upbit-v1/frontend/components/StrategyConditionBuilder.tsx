@@ -39,7 +39,7 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
   CCI: { low: -100, high: 100 },
   WILLIAMS_R: { low: -80, high: -20 },
   FEAR_GREED_CMC: { low: 20, high: 80 },
-  VPIN: { low: 0.2, high: 0.4 },
+  VPIN: { low: 0.35, high: 0.55 },
 };
 
 const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT', 'KOREA_PREMIUM']);

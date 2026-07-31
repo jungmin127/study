@@ -83,8 +83,8 @@ function buildKoreaPremiumSeries(): number[] {
 function buildVpinSeries(): number[] {
   const values: number[] = [];
   for (let i = 0; i < TOTAL_BARS; i++) {
-    const wave = 0.2 * Math.sin((2 * Math.PI * i) / 15) + 0.1 * Math.sin((2 * Math.PI * i) / 5);
-    values.push(Math.max(0, Math.min(1, Math.round((0.25 + wave) * 100) / 100)));
+    const wave = 0.1 * Math.sin((2 * Math.PI * i) / 15) + 0.05 * Math.sin((2 * Math.PI * i) / 5);
+    values.push(Math.max(0, Math.min(1, Math.round((0.46 + wave) * 100) / 100)));
   }
   return values;
 }

@@ -657,9 +657,9 @@ export function buildGuideExample(value: string): GuideExample {
         0,
         1,
         [
-          { from: 0, to: 0.2, color: '#94a3b8', label: '평온(<0.2)' },
-          { from: 0.2, to: 0.4, color: '#f59e0b', label: '주의' },
-          { from: 0.4, to: 1, color: '#ef4444', label: '독성 흐름(>0.4)' },
+          { from: 0, to: 0.35, color: '#94a3b8', label: '평온(<0.35)' },
+          { from: 0.35, to: 0.55, color: '#f59e0b', label: '주의' },
+          { from: 0.55, to: 1, color: '#ef4444', label: '독성 흐름(>0.55)' },
         ],
         'VPIN'
       );
