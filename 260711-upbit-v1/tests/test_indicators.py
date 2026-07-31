@@ -2,6 +2,7 @@ import statistics
 
 import backtrader as bt
 import pandas as pd
+import pytest
 
 from engine.condition_tree import get_indicator_value
 from engine.indicators import INDICATOR_FACTORY
@@ -199,3 +200,84 @@ def test_korea_premium_matches_raw_korea_premium_value_column():
     korea_premium = pd.Series([3.0 + (i % 5) * 0.1 for i in range(len(df))])
     values = _run_probe_with_aux("KOREA_PREMIUM", {}, "korea_premium_value", korea_premium)
     assert abs(values[-1] - korea_premium.iloc[-1]) < 1e-6
+
+
+def _run_vpin_probe(volumes: list[float], closes: list[float], period: int) -> list[float]:
+    """명시적인 volume/close 시퀀스로 VPIN 버킷 경계를 손으로 검증할 수 있게 만드는 전용 하네스.
+    make_oscillating_df 기반 _run_probe/_run_probe_with_aux와 달리, 매 봉의 vpin 값 전체 이력을
+    리스트로 반환한다(버킷이 몇 번째 봉에서 완성되는지까지 검증해야 하므로 마지막 값만으론 부족)."""
+    n = len(volumes)
+    idx = pd.date_range("2026-01-01", periods=n, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx,
+        "open": closes, "high": closes, "low": closes, "close": closes,
+        "volume": volumes,
+    })
+    df_bt = df.set_index("candle_time")
+    df_bt.index = df_bt.index.tz_localize(None)
+
+    class _VpinProbeStrategy(bt.Strategy):
+        def __init__(self):
+            self.probe = INDICATOR_FACTORY["VPIN"](self.data, period=period)
+            self.seen_values: list[float] = []
+
+        def next(self):
+            self.seen_values.append(float(self.probe[0]))
+
+    cerebro = bt.Cerebro()
+    cerebro.adddata(bt.feeds.PandasData(dataname=df_bt, openinterest=-1))
+    cerebro.addstrategy(_VpinProbeStrategy)
+    results = cerebro.run()
+    return results[0].seen_values
+
+
+def test_vpin_produces_nan_during_warmup_before_enough_buckets():
+    # period=2: 최근 2봉 평균 거래량이 버킷 목표치. 처음 두 완성 버킷(2번째·4번째 봉)까지는
+    # 불균형 비율이 1개(또는 0개)뿐이라 아직 평균 낼 period(2)개가 안 모여 NaN이어야 한다.
+    volumes = [10, 10, 2, 2]
+    closes = [100, 100, 100, 100]
+    values = _run_vpin_probe(volumes, closes, period=2)
+    assert all(v != v for v in values), "버킷이 period개 미만일 때는 전부 NaN이어야 함(v != v는 NaN 체크)"
+
+
+def test_vpin_matches_hand_traced_bucket_sequence():
+    # 손으로 추적 가능한 8봉 시퀀스(period=2). 실제 알고리즘을 파이썬으로 직접 재현해 검증한
+    # 기대값이며(스펙 문서의 알고리즘과 동일), 봉별 기대 결과:
+    #   1~4봉: NaN(워밍업, 완성 버킷이 아직 1개뿐이거나 없음)
+    #   5봉: 0.0 (두 번째 유효 불균형 비율까지 모여 평균 0.0)
+    #   6봉: 0.0 (거래량 1 < 목표 1.5라 버킷 미완성 → 5봉 값을 그대로 이어붙임, forward-fill)
+    #   7봉: 0.0 (버킷은 새로 완성되지만 가격 변화가 0이라 우연히 같은 값)
+    #   8봉: 아래에서 statistics로 직접 계산한 기대값(가격이 5 상승하는 버킷)
+    volumes = [10, 10, 2, 2, 2, 1, 1, 10]
+    closes = [100, 100, 100, 100, 100, 100, 100, 105]
+    values = _run_vpin_probe(volumes, closes, period=2)
+
+    assert all(v != v for v in values[:4])
+    assert values[4] == pytest.approx(0.0)
+    assert values[5] == values[4], "버킷 미완성 봉(6번째)은 직전 값을 그대로 이어붙여야 함(forward-fill)"
+    assert values[6] == pytest.approx(0.0)
+
+    sigma = statistics.stdev([0.0, 5.0])
+    z = 5.0 / sigma
+    buy_ratio = statistics.NormalDist().cdf(z)
+    imbalance_bucket_8 = abs(2 * buy_ratio - 1)
+    expected_bar8 = imbalance_bucket_8 / 2  # 직전 불균형(0.0)과 평균
+    assert values[7] == pytest.approx(expected_bar8)
+
+
+def test_vpin_handles_zero_price_variance_without_crashing():
+    # 가격이 한 번도 안 바뀌면 버킷 가격변화 표준편차가 0 — ZeroDivisionError 없이 z=0(매수/매도
+    # 50:50, 불균형 0)으로 처리되어야 한다.
+    volumes = [10] * 10
+    closes = [100.0] * 10
+    values = _run_vpin_probe(volumes, closes, period=2)
+    non_nan = [v for v in values if v == v]
+    assert non_nan, "버킷이 완성되는 구간이 있어야 함"
+    assert all(v == pytest.approx(0.0) for v in non_nan)
+
+
+def test_vpin_registered_in_factory_and_runs_on_default_oscillating_data():
+    # 다른 지표들과 동일한 스모크 테스트 경로(_run_probe, make_oscillating_df)로도 크래시 없이
+    # 값을 내야 한다 — VPIN은 aux 라인이 필요 없으므로 _NEEDS_EXTRA_LINE에 추가하지 않는다.
+    values = _run_probe("VPIN", {})
+    assert len(values) > 0

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import statistics
+from collections import deque
+
 import backtrader as bt
 
 
@@ -52,3 +55,74 @@ def create_trade_value(data: bt.feeds.PandasData, **params):
 def create_trade_value_sma(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     period = int(params.get("period", 20))
     return bt.indicators.SMA(data.trade_value, period=period)
+
+
+class VolumeBarVPIN(bt.Indicator):
+    """거래량 버킷(volume bar) 기반 VPIN. Easley/López de Prado/O'Hara의 Bulk Volume
+    Classification(BVC, 2012)을 따른다 — 틱 단위 매수/매도 라벨이 필요 없고, 캔들
+    종가·거래량만으로 버킷별 매수/매도 비율을 확률적으로 추정한다."""
+
+    lines = ("vpin",)
+    params = (("period", 20),)
+
+    def __init__(self) -> None:
+        period = self.p.period
+        self._recent_volumes: deque = deque(maxlen=period)
+        self._bucket_cum_volume = 0.0
+        self._last_bucket_close: float | None = None
+        self._bucket_deltas: deque = deque(maxlen=period)
+        self._bucket_imbalance_ratios: deque = deque(maxlen=period)
+
+    def _accumulate(self) -> None:
+        """이번 봉을 현재 버킷에 누적하고, 목표 거래량에 도달했으면 버킷을 완성해
+        BVC로 매수/매도 불균형 비율을 계산·기록한다. next()/nextstart() 공통 로직."""
+        period = self.p.period
+        self._recent_volumes.append(self.data.volume[0])
+        self._bucket_cum_volume += self.data.volume[0]
+
+        target = (
+            statistics.mean(self._recent_volumes)
+            if len(self._recent_volumes) == period
+            else None
+        )
+        if target is None or self._bucket_cum_volume < target:
+            return
+
+        bucket_close = self.data.close[0]
+        bucket_volume = self._bucket_cum_volume
+
+        if self._last_bucket_close is not None:
+            delta = bucket_close - self._last_bucket_close
+            self._bucket_deltas.append(delta)
+            sigma = statistics.stdev(self._bucket_deltas) if len(self._bucket_deltas) >= 2 else 0.0
+            z = delta / sigma if sigma > 0 else 0.0
+            buy_ratio = statistics.NormalDist().cdf(z)
+            buy_volume = bucket_volume * buy_ratio
+            sell_volume = bucket_volume - buy_volume
+            imbalance_ratio = abs(buy_volume - sell_volume) / bucket_volume if bucket_volume else 0.0
+            self._bucket_imbalance_ratios.append(imbalance_ratio)
+
+        self._last_bucket_close = bucket_close
+        self._bucket_cum_volume = 0.0
+
+    def nextstart(self) -> None:
+        # next()가 이 지표에 대해 처음 호출되는 시점에도 이 지표 자신의 vpin 라인은 아직
+        # 한 번도 기록된 적이 없어 vpin[-1]이 정의돼 있지 않다 — OBV의 nextstart()와 같은
+        # 이유로, 첫 호출만 [-1] 참조 없이 따로 처리한다.
+        self._accumulate()
+        if len(self._bucket_imbalance_ratios) == self.p.period:
+            self.lines.vpin[0] = statistics.mean(self._bucket_imbalance_ratios)
+        else:
+            self.lines.vpin[0] = float("nan")
+
+    def next(self) -> None:
+        self._accumulate()
+        if len(self._bucket_imbalance_ratios) == self.p.period:
+            self.lines.vpin[0] = statistics.mean(self._bucket_imbalance_ratios)
+        else:
+            self.lines.vpin[0] = self.lines.vpin[-1]
+
+
+def create_vpin(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 20))
+    return VolumeBarVPIN(data, period=period)
