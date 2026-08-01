@@ -22,7 +22,7 @@ export function summarizeGroup(group: ConditionGroup): string {
   if (group.conditions.length === 0) return '(조건 없음)';
   const parts = group.conditions.map((c) =>
     isConditionBlock(c)
-      ? `${c.indicator}${summarizeParams(c.params)}${OPERATOR_SYMBOLS[c.operator]}${c.threshold}`
+      ? `${c.indicator}${summarizeParams(c.params ?? {})}${OPERATOR_SYMBOLS[c.operator]}${c.threshold}`
       : `(${summarizeGroup(c)})`
   );
   return parts.join(group.type === 'AND' ? ' and ' : ' or ');

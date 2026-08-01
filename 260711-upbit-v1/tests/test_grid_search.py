@@ -144,3 +144,20 @@ def test_dedup_leaves_distinct_trade_sequences_untouched():
     deduped = dedup_top_results(results, top_n=20)
     assert len(deduped) == 2
     assert [r["return_pct"] for r in deduped] == [7.0, 3.0]
+
+
+def test_dedup_reports_dup_count_for_group_size():
+    results = [
+        _make_result(5.0, buy_k_period=20, sell_period=20, trades=_SAME_TRADES),
+        _make_result(5.0, buy_k_period=10, sell_period=14, trades=_SAME_TRADES),
+        _make_result(5.0, buy_k_period=14, sell_period=14, trades=_SAME_TRADES),
+        _make_result(9.0, buy_k_period=10, sell_period=10, trades=_OTHER_TRADES),
+    ]
+    deduped = dedup_top_results(results, top_n=20)
+    assert len(deduped) == 2
+    # 동일 거래 시퀀스를 만든 조합 3개 중 대표
+    same_group = next(r for r in deduped if r["return_pct"] == 5.0)
+    assert same_group["dup_count"] == 3
+    # 서로 다른 거래 시퀀스 1개짜리 그룹
+    other_group = next(r for r in deduped if r["return_pct"] == 9.0)
+    assert other_group["dup_count"] == 1

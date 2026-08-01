@@ -39,7 +39,8 @@ grid search [코인명],[운용자금],[봉데이터],[운용기간],[상위N개
    마켓코드/timeframe 코드/운용자금(원 단위 숫자)/시작일/종료일/상위N개가 포함되어야 한다.
    예상 소요 시간(약 9분, 2,565개 조합 기준)도 함께 안내한다.
 3. 사용자가 확인하면, 아래 형태로 `scripts/grid_search.py`를 저장소 루트에서 백그라운드로
-   실행한다:
+   실행한다. 이 명령은 Bash 툴로 실행해라(PowerShell 문법이 아니다 — `VAR=x cmd` 형태는
+   PowerShell에서 파싱 에러가 난다):
 
    ```bash
    PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \

@@ -113,7 +113,7 @@ def compute_grid_results(
             )
         if (i + 1) % 5 == 0 or (i + 1) == len(buy_conditions):
             done = (i + 1) * len(sell_conditions)
-            print(f"    매수조건 {i + 1}/{len(buy_conditions)} 완료 ({done}/{total}건)")
+            print(f"    매수조건 {i + 1}/{len(buy_conditions)} 완료 ({done}/{total}건)", flush=True)
 
     return results
 
@@ -129,19 +129,33 @@ def _trade_sequence_key(trades: list[dict]) -> tuple:
 def dedup_top_results(results: list[dict], top_n: int) -> list[dict]:
     """동일 거래 시퀀스를 만든 조합 중 매수+매도 period 합이 가장 작은 것만 남기고,
     수익률 내림차순 상위 top_n개를 반환한다. 거래가 0건인 조합은 제외한다.
+
+    각 그룹의 대표 결과에는 동일 거래 시퀀스를 만든 조합 개수를 "dup_count"로 포함한다.
     """
     groups: dict[tuple, dict] = {}
+    dup_counts: dict[tuple, int] = {}
     for r in results:
         if not r["trades"]:
             continue
         key = _trade_sequence_key(r["trades"])
+        dup_counts[key] = dup_counts.get(key, 0) + 1
         period_sum = _effective_period(r["buy_block"]["params"]) + _effective_period(r["sell_block"]["params"])
         existing = groups.get(key)
         if existing is None or period_sum < existing["_period_sum"]:
             groups[key] = {**r, "_period_sum": period_sum}
 
-    deduped = sorted(groups.values(), key=lambda r: r["return_pct"], reverse=True)
-    return [{k: v for k, v in r.items() if k != "_period_sum"} for r in deduped[:top_n]]
+    deduped = sorted(groups.items(), key=lambda kv: kv[1]["return_pct"], reverse=True)
+    return [
+        {**{k: v for k, v in r.items() if k != "_period_sum"}, "dup_count": dup_counts[key]}
+        for key, r in deduped[:top_n]
+    ]
+
+
+def _positive_int(value: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"--top-n must be >= 1 (got {n})")
+    return n
 
 
 def main() -> None:
@@ -151,7 +165,7 @@ def main() -> None:
     parser.add_argument("--capital", required=True, type=float, help="운용자금(원)")
     parser.add_argument("--start", required=True, help="시작일 YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="종료일 YYYY-MM-DD")
-    parser.add_argument("--top-n", type=int, default=20, help="저장할 상위 개수 (기본 20, 상한 50)")
+    parser.add_argument("--top-n", type=_positive_int, default=20, help="저장할 상위 개수 (기본 20, 상한 50)")
     args = parser.parse_args()
 
     top_n = min(args.top_n, 50)
@@ -161,23 +175,28 @@ def main() -> None:
         hour=23, minute=59, second=59, tzinfo=timezone.utc
     )
 
-    print(f"[1] 캔들 조회: {args.market} {args.timeframe} {args.start} ~ {args.end}")
+    print(f"[1] 캔들 조회: {args.market} {args.timeframe} {args.start} ~ {args.end}", flush=True)
     df = get_candles(args.market, args.timeframe, start_dt, end_dt)
-    print(f"    캔들 수: {len(df)}")
+    print(f"    캔들 수: {len(df)}", flush=True)
+    if len(df) == 0:
+        raise SystemExit(f"캔들 데이터가 없습니다: {args.market} {args.timeframe} {args.start}~{args.end}")
 
     buy_conditions, sell_conditions = build_condition_grid()
     total_combos = len(buy_conditions) * len(sell_conditions)
-    print(f"[2] 매수 조건 {len(buy_conditions)}개 x 매도 조건 {len(sell_conditions)}개 = 총 {total_combos:,}개 조합")
+    print(
+        f"[2] 매수 조건 {len(buy_conditions)}개 x 매도 조건 {len(sell_conditions)}개 = 총 {total_combos:,}개 조합",
+        flush=True,
+    )
 
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": args.capital}
 
     t0 = time.perf_counter()
     results = compute_grid_results(df, buy_conditions, sell_conditions, risk_config)
     elapsed = time.perf_counter() - t0
-    print(f"\n[3] 전체 계산 완료: {len(results)}건, {elapsed:.1f}초 ({elapsed / 60:.1f}분)")
+    print(f"\n[3] 전체 계산 완료: {len(results)}건, {elapsed:.1f}초 ({elapsed / 60:.1f}분)", flush=True)
 
     top_results = dedup_top_results(results, top_n)
-    print(f"\n[4] dedup 후 상위 {len(top_results)}개를 백테스트 결과에 저장 중...")
+    print(f"\n[4] dedup 후 상위 {len(top_results)}개를 백테스트 결과에 저장 중...", flush=True)
 
     saved_summaries = []
     for rank, r in enumerate(top_results, start=1):
@@ -191,6 +210,7 @@ def main() -> None:
         description = (
             f"grid search - {args.market}/{args.timeframe}/{args.start}~{args.end}, "
             f"수익률 {r['return_pct']:+.2f}% (상위 {rank}위)"
+            f", 동일 매매를 만든 조합 {r['dup_count']}개 중 대표"
         )
         saved = run_backtest_cached(
             df=df,
@@ -204,7 +224,7 @@ def main() -> None:
             title=title,
             description=description,
         )
-        print(f"  {rank:2d}. {r['return_pct']:+.2f}%  run_id={saved['run_id'][:12]}...")
+        print(f"  {rank:2d}. {r['return_pct']:+.2f}%  run_id={saved['run_id'][:12]}...", flush=True)
         saved_summaries.append(
             {"rank": rank, "run_id": saved["run_id"], "return_pct": round(r["return_pct"], 2), "title": title}
         )
