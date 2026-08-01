@@ -24,7 +24,7 @@ from .price_levels import (
 )
 from .sentiment import create_fear_greed_cmc, create_korea_premium
 from .trend import create_ema, create_sma, create_wma
-from .volatility import create_atr, create_bb_lower, create_bb_middle, create_bb_upper
+from .volatility import create_atr, create_atr_pct, create_bb_lower, create_bb_middle, create_bb_percent_b, create_bb_upper
 from .volume import create_obv, create_trade_value, create_trade_value_sma, create_volume_sma, create_vpin
 
 INDICATOR_FACTORY: dict[str, object] = {
@@ -42,6 +42,8 @@ INDICATOR_FACTORY: dict[str, object] = {
     "BB_lower": create_bb_lower,
     "BB_middle": create_bb_middle,
     "ATR": create_atr,
+    "BB_PERCENT_B": create_bb_percent_b,
+    "ATR_PCT": create_atr_pct,
     "OBV": create_obv,
     "VOLUME_SMA": create_volume_sma,
     "VPIN": create_vpin,

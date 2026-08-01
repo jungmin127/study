@@ -52,6 +52,9 @@ def get_indicator_value(indicator_name: str, obj: bt.Indicator) -> float:
         return float(obj.bot[0])
     elif indicator_name == "BB_middle":
         return float(obj.mid[0])
+    elif indicator_name == "BB_PERCENT_B":
+        top, bot = float(obj.top[0]), float(obj.bot[0])
+        return (float(obj.data.close[0]) - bot) / (top - bot) if top != bot else 0.5
     elif indicator_name == "STOCH_K":
         return float(obj.percK[0])
     elif indicator_name == "STOCH_D":
@@ -68,6 +71,9 @@ def get_indicator_value(indicator_name: str, obj: bt.Indicator) -> float:
         return float(obj.lines.vah[0])
     elif indicator_name == "VPVR_VAL":
         return float(obj.lines.val[0])
+    elif indicator_name == "ATR_PCT":
+        close = float(obj.data.close[0])
+        return float(obj.atr[0]) / close * 100 if close else 0.0
     else:
         return float(obj[0])
 

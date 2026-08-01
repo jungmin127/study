@@ -21,3 +21,13 @@ def create_bb_middle(data: bt.feeds.PandasData, **params) -> bt.Indicator:
 def create_atr(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     period = int(params.get("period", 14))
     return bt.indicators.ATR(data, period=period)
+
+
+def create_bb_percent_b(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 20))
+    return bt.indicators.BollingerBands(data, period=period, devfactor=2.0)
+
+
+def create_atr_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 14))
+    return bt.indicators.ATR(data, period=period)

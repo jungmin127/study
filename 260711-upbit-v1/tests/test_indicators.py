@@ -404,3 +404,22 @@ def test_vpin_registered_in_factory_and_runs_on_default_oscillating_data():
     # 값을 내야 한다 — VPIN은 aux 라인이 필요 없으므로 _NEEDS_EXTRA_LINE에 추가하지 않는다.
     values = _run_probe("VPIN", {})
     assert len(values) > 0
+
+
+def test_bb_percent_b_matches_position_within_bands():
+    top_values = _run_probe("BB_upper", {"period": 14})
+    bot_values = _run_probe("BB_lower", {"period": 14})
+    percent_b_values = _run_probe("BB_PERCENT_B", {"period": 14})
+    df = make_oscillating_df()
+    close = df["close"].iloc[-1]
+    manual = (close - bot_values[-1]) / (top_values[-1] - bot_values[-1])
+    assert abs(percent_b_values[-1] - manual) < 1e-6
+
+
+def test_atr_pct_matches_atr_over_close():
+    atr_values = _run_probe("ATR", {"period": 14})
+    atr_pct_values = _run_probe("ATR_PCT", {"period": 14})
+    df = make_oscillating_df()
+    close = df["close"].iloc[-1]
+    manual = atr_values[-1] / close * 100
+    assert abs(atr_pct_values[-1] - manual) < 1e-6
