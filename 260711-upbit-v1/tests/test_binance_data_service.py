@@ -276,6 +276,31 @@ def test_fetch_funding_page_returns_raw_events():
     assert raw == [_funding_event(1784073600000, 0.0001)]
 
 
+def test_fetch_funding_range_paginates_when_first_page_is_full(monkeypatch):
+    monkeypatch.setattr(bds, "REQUEST_DELAY_SECONDS", 0.0)
+    call_count = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["n"] += 1
+        start_time_ms = int(request.url.params["startTime"])
+        if call_count["n"] == 1:
+            events = [_funding_event(start_time_ms + i * 28_800_000, 0.0001) for i in range(1000)]
+            return httpx.Response(200, json=events)
+        events = [_funding_event(start_time_ms, 0.0002)]
+        return httpx.Response(200, json=events)
+
+    with _mock_client(handler) as client:
+        df = bds._fetch_funding_range(
+            "ETHUSDT",
+            datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2027, 1, 1, tzinfo=timezone.utc),
+            client=client,
+        )
+
+    assert call_count["n"] == 2
+    assert len(df) == 1001
+    assert df["funding_time"].is_monotonic_increasing
+
+
 def test_get_binance_funding_rate_returns_empty_for_unlisted_symbol(monkeypatch, tmp_path):
     monkeypatch.setattr(bds, "FUNDING_CACHE_DIR", tmp_path)
 
@@ -327,6 +352,18 @@ def test_merge_funding_rate_backward_fills_from_most_recent_event():
     assert merged.iloc[2]["funding_rate_value"] == pytest.approx(0.01)  # 02:00
     assert merged.iloc[3]["funding_rate_value"] == pytest.approx(0.02)  # 03:00
     assert merged.iloc[4]["funding_rate_value"] == pytest.approx(0.02)  # 04:00
+
+
+def test_merge_funding_rate_treats_stale_event_beyond_tolerance_as_nan():
+    df = pd.DataFrame({"candle_time": [pd.Timestamp("2026-01-05 00:00", tz="UTC")]})
+    funding_df = pd.DataFrame({
+        "funding_time": [pd.Timestamp("2026-01-01 00:00", tz="UTC")],  # 4일 전 — tolerance(16시간) 초과
+        "funding_rate": [0.01],
+    })
+
+    merged = bds.merge_funding_rate(df, funding_df)
+
+    assert pd.isna(merged.iloc[0]["funding_rate_value"])
 
 
 def test_merge_funding_rate_all_nan_when_funding_df_empty():

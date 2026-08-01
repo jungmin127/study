@@ -89,6 +89,15 @@ function buildVpinSeries(): number[] {
   return values;
 }
 
+function buildFundingRateSeries(): number[] {
+  const values: number[] = [];
+  for (let i = 0; i < TOTAL_BARS; i++) {
+    const wave = 0.03 * Math.sin((2 * Math.PI * i) / 20) + 0.015 * Math.sin((2 * Math.PI * i) / 7);
+    values.push(Math.round((0.01 + wave) * 10000) / 10000);
+  }
+  return values;
+}
+
 const closeSeries = buildCloseSeries();
 const volumeSeries = buildVolumeSeries();
 const tradeValueSeries = buildTradeValueSeries();
@@ -96,6 +105,7 @@ const btcCloseSeries = buildBtcCloseSeries();
 const fearGreedSeries = buildFearGreedSeries();
 const koreaPremiumSeries = buildKoreaPremiumSeries();
 const vpinSeries = buildVpinSeries();
+const fundingRateSeries = buildFundingRateSeries();
 
 export const SAMPLE_BARS: SampleBar[] = closeSeries.map((close, i) => ({
   bar: i + 1,
@@ -122,3 +132,6 @@ export const HAND_VERIFIED_BAR_COUNT = HAND_VERIFIED_CLOSE.length;
 
 /** VPIN은 코인 캔들과 무관한 고정 시계열이라 SAMPLE_BARS의 bar 인덱스에 맞춰 별도 배열로 둔다. */
 export const SAMPLE_VPIN: number[] = vpinSeries;
+
+/** 펀딩비는 코인 캔들과 무관한 고정 시계열이라 SAMPLE_BARS의 bar 인덱스에 맞춰 별도 배열로 둔다. */
+export const SAMPLE_FUNDING_RATE: number[] = fundingRateSeries;

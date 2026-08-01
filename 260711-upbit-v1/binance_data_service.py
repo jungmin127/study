@@ -372,6 +372,7 @@ def merge_funding_rate(df: pd.DataFrame, funding_df: pd.DataFrame) -> pd.DataFra
         left_on="candle_time",
         right_on="funding_time",
         direction="backward",
+        tolerance=pd.Timedelta(hours=16),
     )
     return merged.drop(columns="funding_time")
 

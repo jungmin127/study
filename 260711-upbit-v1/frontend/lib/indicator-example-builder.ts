@@ -1,4 +1,4 @@
-import { SAMPLE_BARS, SAMPLE_BTC, SAMPLE_FEAR_GREED, SAMPLE_KOREA_PREMIUM, SAMPLE_VPIN, type SampleBar } from '@/lib/guide-sample-data';
+import { SAMPLE_BARS, SAMPLE_BTC, SAMPLE_FEAR_GREED, SAMPLE_FUNDING_RATE, SAMPLE_KOREA_PREMIUM, SAMPLE_VPIN, type SampleBar } from '@/lib/guide-sample-data';
 import * as calc from '@/lib/indicator-calc';
 
 export interface TableColumn {
@@ -692,6 +692,28 @@ export function buildGuideExample(value: string): GuideExample {
       );
       return {
         columns: [{ key: 'vpin', label: 'VPIN' }],
+        rows,
+        chart: gauge.chart,
+      };
+    }
+    case 'FUNDING_RATE': {
+      const rows = windowFrom(0, 7).map((bar, i) => ({
+        bar: bar.bar,
+        cells: { fundingRate: n(SAMPLE_FUNDING_RATE[i]) },
+      }));
+      const gauge = gaugeExample(
+        SAMPLE_FUNDING_RATE,
+        -0.05,
+        0.08,
+        [
+          { from: -0.05, to: -0.03, color: '#3b82f6', label: '숏 과열(<-0.03%)' },
+          { from: -0.03, to: 0.05, color: '#94a3b8', label: '중립' },
+          { from: 0.05, to: 0.08, color: '#ef4444', label: '롱 과열(>0.05%)' },
+        ],
+        '펀딩비'
+      );
+      return {
+        columns: [{ key: 'fundingRate', label: '펀딩비(%)' }],
         rows,
         chart: gauge.chart,
       };
