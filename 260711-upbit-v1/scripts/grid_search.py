@@ -9,8 +9,16 @@ Run: python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
 """
 from __future__ import annotations
 
+import argparse
+import json
+import time
+from datetime import datetime, timezone
+
+from engine.cache import run_backtest_cached
 from engine.condition_strategy import ConditionTreeStrategy
 from engine.runner import run_backtest
+from engine.sweep import DEFAULT_RISK_CONFIG
+from upbit_data_service import get_candles
 
 PERIOD_GRID = [10, 14, 20]
 
@@ -134,3 +142,77 @@ def dedup_top_results(results: list[dict], top_n: int) -> list[dict]:
 
     deduped = sorted(groups.values(), key=lambda r: r["return_pct"], reverse=True)
     return [{k: v for k, v in r.items() if k != "_period_sum"} for r in deduped[:top_n]]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="오실레이터 그리드서치 백테스트")
+    parser.add_argument("--market", required=True, help="마켓코드 (예: KRW-ETH)")
+    parser.add_argument("--timeframe", required=True, help="timeframe 코드 (예: minutes60)")
+    parser.add_argument("--capital", required=True, type=float, help="운용자금(원)")
+    parser.add_argument("--start", required=True, help="시작일 YYYY-MM-DD")
+    parser.add_argument("--end", required=True, help="종료일 YYYY-MM-DD")
+    parser.add_argument("--top-n", type=int, default=20, help="저장할 상위 개수 (기본 20, 상한 50)")
+    args = parser.parse_args()
+
+    top_n = min(args.top_n, 50)
+
+    start_dt = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt = datetime.strptime(args.end, "%Y-%m-%d").replace(
+        hour=23, minute=59, second=59, tzinfo=timezone.utc
+    )
+
+    print(f"[1] 캔들 조회: {args.market} {args.timeframe} {args.start} ~ {args.end}")
+    df = get_candles(args.market, args.timeframe, start_dt, end_dt)
+    print(f"    캔들 수: {len(df)}")
+
+    buy_conditions, sell_conditions = build_condition_grid()
+    total_combos = len(buy_conditions) * len(sell_conditions)
+    print(f"[2] 매수 조건 {len(buy_conditions)}개 x 매도 조건 {len(sell_conditions)}개 = 총 {total_combos:,}개 조합")
+
+    risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": args.capital}
+
+    t0 = time.perf_counter()
+    results = compute_grid_results(df, buy_conditions, sell_conditions, risk_config)
+    elapsed = time.perf_counter() - t0
+    print(f"\n[3] 전체 계산 완료: {len(results)}건, {elapsed:.1f}초 ({elapsed / 60:.1f}분)")
+
+    top_results = dedup_top_results(results, top_n)
+    print(f"\n[4] dedup 후 상위 {len(top_results)}개를 백테스트 결과에 저장 중...")
+
+    saved_summaries = []
+    for rank, r in enumerate(top_results, start=1):
+        buy_block, sell_block = r["buy_block"], r["sell_block"]
+        buy_group = {"type": "AND", "conditions": [buy_block]}
+        sell_group = {"type": "AND", "conditions": [sell_block]}
+        title = (
+            f"[Grid] 매수 {buy_block['indicator']}{buy_block['params']}{buy_block['operator']}{buy_block['threshold']} "
+            f"/ 매도 {sell_block['indicator']}{sell_block['params']}{sell_block['operator']}{sell_block['threshold']}"
+        )
+        description = (
+            f"grid search - {args.market}/{args.timeframe}/{args.start}~{args.end}, "
+            f"수익률 {r['return_pct']:+.2f}% (상위 {rank}위)"
+        )
+        saved = run_backtest_cached(
+            df=df,
+            strategy_cls=ConditionTreeStrategy,
+            risk_config=risk_config,
+            market=args.market,
+            timeframe=args.timeframe,
+            start=start_dt,
+            end=end_dt,
+            strategy_params={"buy_conditions": buy_group, "sell_conditions": sell_group},
+            title=title,
+            description=description,
+        )
+        print(f"  {rank:2d}. {r['return_pct']:+.2f}%  run_id={saved['run_id'][:12]}...")
+        saved_summaries.append(
+            {"rank": rank, "run_id": saved["run_id"], "return_pct": round(r["return_pct"], 2), "title": title}
+        )
+
+    result_json = {"total_combos": total_combos, "elapsed_sec": round(elapsed, 1), "saved": saved_summaries}
+    print("\n완료.")
+    print(f"RESULT_JSON: {json.dumps(result_json, ensure_ascii=False)}")
+
+
+if __name__ == "__main__":
+    main()
