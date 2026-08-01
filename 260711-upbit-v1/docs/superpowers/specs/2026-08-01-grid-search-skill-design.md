@@ -37,6 +37,8 @@ period 그리드는 5개 오실레이터 공통 `[10, 14, 20]`. threshold는 지
 
 매수 조건 45개(5지표×3period×3threshold) × 매도 조건 57개(오실레이터 45 + 매도전용 12) = **2,565개 조합**. 2026-08-01 세션에서 ETH/1시간봉/2026-06-01~현재로 이 그리드 전체를 실제로 돌려 8.9분에 완료, 상위 20개를 `run_backtest_cached()`로 저장까지 검증함(1위: 매수 STOCH_D(p10~20)<10 / 매도 RSI(p14)>80, +15.46%). 이 20개는 제목에 `[Grid]` 접두사가 붙어 지금도 "백테스트 결과"에 남아있고, 이번 구현 완료본과 비교용으로 그대로 둔다.
 
+**정정 (2026-08-01, 플랜 작성 중 발견)**: `engine/indicators/momentum.py`의 `create_stoch_k`/`create_stoch_d`는 `period`가 아니라 `k_period`(및 `d_period`, 기본 3 고정)를 파라미터로 받는다. 위 프로토타입 실행은 5개 지표 전부에 `{"period": p}`를 넘겼기 때문에 STOCH_K/STOCH_D는 실제로는 `period` 값이 무시되고 항상 `k_period=14`로 계산됐다 — period 10/14/20이 이 두 지표에서는 아무 차이도 만들지 않았다(이 세션에서 관찰된 "STOCH_D period 10/14/20이 전부 동일 트레이드" dedup 사례의 실제 원인으로 추정됨). 이번 구현에서는 `scripts/grid_search.py`가 STOCH_K/STOCH_D에 한해 `{"k_period": p}`로 넘기도록 고쳐 period 그리드가 실제로 작동하게 한다. 그리드 표의 나머지 내용(period 값 `[10,14,20]`, threshold 값)은 변경 없음 — 파라미터 키만 지표별로 올바르게 매핑한다.
+
 ### 매수/매도 짝짓기
 
 서로 다른 지표 전 교차(full cross product) — 같은 지표를 양쪽에 쓰는 조합도 포함해 모든 (매수지표, 매도지표) 쌍을 시도한다.
@@ -78,7 +80,7 @@ period 그리드는 5개 오실레이터 공통 `[10, 14, 20]`. threshold는 지
 
 내부 흐름:
 1. `upbit_data_service.get_candles(market, timeframe, start, end)`로 캔들 1회 조회.
-2. 위 "그리드 정의"대로 매수/매도 조건 리스트 생성, 전 교차.
+2. 위 "그리드 정의"대로 매수/매도 조건 리스트 생성, 전 교차. `params` 딕셔너리의 period 키는 지표별로 `create_fn`이 실제로 읽는 이름을 써야 한다 — STOCH_K/STOCH_D는 `{"k_period": p}`, 나머지(RSI/CCI/WILLIAMS_R)는 `{"period": p}` (`engine/indicators/momentum.py` 참고).
 3. 각 조합을 `engine.runner.run_backtest(df, ConditionTreeStrategy, risk_config, {...})`로 계산 — `risk_config`는 `engine.sweep.DEFAULT_RISK_CONFIG`에 `initial_capital`만 덮어씀.
 4. dedup(위 로직) → 수익률 내림차순 정렬 → 상위 N개.
 5. 상위 N개만 `engine.cache.run_backtest_cached()`로 저장, 제목에 `[Grid]` 접두사.
