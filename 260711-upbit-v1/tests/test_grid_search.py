@@ -5,8 +5,8 @@ from tests.signal_fixtures import make_oscillating_df
 
 def test_build_condition_grid_combo_counts():
     buy_conditions, sell_conditions = build_condition_grid()
-    assert len(buy_conditions) == 45
-    assert len(sell_conditions) == 57
+    assert len(buy_conditions) == 138
+    assert len(sell_conditions) == 150
 
 
 def test_build_condition_grid_uses_k_period_for_stochastics():
@@ -22,9 +22,8 @@ def test_build_condition_grid_uses_k_period_for_stochastics():
 
 def test_build_condition_grid_uses_period_for_non_stochastic_oscillators():
     buy_conditions, _ = build_condition_grid()
-    for indicator in ("RSI", "CCI", "WILLIAMS_R"):
+    for indicator in ("RSI", "CCI", "WILLIAMS_R", "BB_PERCENT_B", "ATR_PCT"):
         blocks = [b for b in buy_conditions if b["indicator"] == indicator]
-        assert len(blocks) == 9
         assert {b["params"]["period"] for b in blocks} == {10, 14, 20}
 
 
@@ -161,3 +160,68 @@ def test_dedup_reports_dup_count_for_group_size():
     # 서로 다른 거래 시퀀스 1개짜리 그룹
     other_group = next(r for r in deduped if r["return_pct"] == 9.0)
     assert other_group["dup_count"] == 1
+
+
+def test_build_condition_grid_bb_percent_b_thresholds():
+    buy_conditions, sell_conditions = build_condition_grid()
+    bb_buy = [b for b in buy_conditions if b["indicator"] == "BB_PERCENT_B"]
+    bb_sell = [b for b in sell_conditions if b["indicator"] == "BB_PERCENT_B"]
+    assert len(bb_buy) == 9
+    assert {b["threshold"] for b in bb_buy} == {0.0, 0.1, 0.2}
+    assert all(b["operator"] == "<" for b in bb_buy)
+    assert len(bb_sell) == 9
+    assert {b["threshold"] for b in bb_sell} == {0.8, 0.9, 1.0}
+    assert all(b["operator"] == ">" for b in bb_sell)
+
+
+def test_build_condition_grid_macd_ppo_param_grid_and_thresholds():
+    buy_conditions, sell_conditions = build_condition_grid()
+    for indicator in ("MACD_PPO", "MACD_PPO_signal"):
+        buy_blocks = [b for b in buy_conditions if b["indicator"] == indicator]
+        sell_blocks = [b for b in sell_conditions if b["indicator"] == indicator]
+        assert len(buy_blocks) == 24
+        assert len(sell_blocks) == 24
+        param_combos = {tuple(sorted(b["params"].items())) for b in buy_blocks}
+        assert len(param_combos) == 8
+        assert {b["threshold"] for b in buy_blocks} == {-3, -2, -1}
+        assert all(b["operator"] == "<" for b in buy_blocks)
+        assert {b["threshold"] for b in sell_blocks} == {1, 2, 3}
+        assert all(b["operator"] == ">" for b in sell_blocks)
+
+
+def test_build_condition_grid_atr_pct_is_bidirectional():
+    buy_conditions, sell_conditions = build_condition_grid()
+    for conditions in (buy_conditions, sell_conditions):
+        atr_blocks = [b for b in conditions if b["indicator"] == "ATR_PCT"]
+        assert len(atr_blocks) == 36
+        assert {b["operator"] for b in atr_blocks} == {"<", ">"}
+        assert {b["threshold"] for b in atr_blocks} == {0.5, 1, 2, 3, 5, 8}
+        assert {b["params"]["period"] for b in atr_blocks} == {10, 14, 20}
+
+
+_MACD_SAME_TRADES = [{"entryTime": "2026-06-01T00:00:00", "exitTime": "2026-06-02T00:00:00"}]
+
+
+def _make_macd_result(return_pct, fast, slow, signal, trades):
+    return {
+        "return_pct": return_pct,
+        "buy_block": {
+            "indicator": "MACD_PPO",
+            "params": {"fast": fast, "slow": slow, "signal": signal},
+            "operator": "<",
+            "threshold": -2,
+        },
+        "sell_block": {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70},
+        "trades": trades,
+        "final_value": 1_000_000 * (1 + return_pct / 100),
+    }
+
+
+def test_dedup_keeps_smallest_fast_slow_signal_sum_for_macd_style_params():
+    results = [
+        _make_macd_result(5.0, fast=16, slow=32, signal=12, trades=_MACD_SAME_TRADES),
+        _make_macd_result(5.0, fast=12, slow=26, signal=9, trades=_MACD_SAME_TRADES),
+    ]
+    deduped = dedup_top_results(results, top_n=20)
+    assert len(deduped) == 1
+    assert deduped[0]["buy_block"]["params"] == {"fast": 12, "slow": 26, "signal": 9}

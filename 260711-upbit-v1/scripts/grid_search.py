@@ -1,8 +1,9 @@
 """
 scripts/grid_search.py
 
-'grid search' 스킬의 연산 엔진. 오실레이터 5종(RSI/STOCH_K/STOCH_D/CCI/WILLIAMS_R) +
-매도전용 3종(STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS)의 전 교차 그리드를
+'grid search' 스킬의 연산 엔진. 오실레이터 9종(RSI/STOCH_K/STOCH_D/CCI/WILLIAMS_R/
+BB_PERCENT_B/MACD_PPO/MACD_PPO_signal/ATR_PCT — ATR_PCT만 양방향) + 매도전용 3종
+(STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS)의 전 교차 그리드(20,700개 조합)를
 계산하고, 거래 시퀀스가 동일한 조합은 dedup한 뒤 상위 N개만 백테스트 결과에 저장한다.
 Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
      --capital 10000000 --start 2026-06-01 --end 2026-07-31 --top-n 20
@@ -22,20 +23,35 @@ from upbit_data_service import get_candles
 
 PERIOD_GRID = [10, 14, 20]
 
-OSCILLATORS: dict[str, dict[str, list[int]]] = {
-    "RSI": {"low": [20, 30, 40], "high": [60, 70, 80]},
-    "STOCH_K": {"low": [10, 20, 30], "high": [70, 80, 90]},
-    "STOCH_D": {"low": [10, 20, 30], "high": [70, 80, 90]},
-    "CCI": {"low": [-140, -100, -60], "high": [60, 100, 140]},
-    "WILLIAMS_R": {"low": [-90, -80, -70], "high": [-30, -20, -10]},
-}
 
-# STOCH_K/STOCH_D는 create_stoch_k/create_stoch_d(engine/indicators/momentum.py)가
-# "period"가 아니라 "k_period"를 읽는다. period 그리드가 실제로 반영되도록
-# 지표별로 올바른 파라미터 키를 매핑한다.
-PERIOD_PARAM_KEY: dict[str, str] = {
-    "STOCH_K": "k_period",
-    "STOCH_D": "k_period",
+def _period_grid(key: str = "period") -> list[dict]:
+    return [{key: p} for p in PERIOD_GRID]
+
+
+OSCILLATOR_SPECS: dict[str, dict] = {
+    "RSI": {"param_grid": _period_grid(), "low": [20, 30, 40], "high": [60, 70, 80], "bidirectional": False},
+    "STOCH_K": {"param_grid": _period_grid("k_period"), "low": [10, 20, 30], "high": [70, 80, 90], "bidirectional": False},
+    "STOCH_D": {"param_grid": _period_grid("k_period"), "low": [10, 20, 30], "high": [70, 80, 90], "bidirectional": False},
+    "CCI": {"param_grid": _period_grid(), "low": [-140, -100, -60], "high": [60, 100, 140], "bidirectional": False},
+    "WILLIAMS_R": {"param_grid": _period_grid(), "low": [-90, -80, -70], "high": [-30, -20, -10], "bidirectional": False},
+    "BB_PERCENT_B": {"param_grid": _period_grid(), "low": [0.0, 0.1, 0.2], "high": [0.8, 0.9, 1.0], "bidirectional": False},
+    "MACD_PPO": {
+        "param_grid": [
+            {"fast": f, "slow": s, "signal": sig} for f in [12, 16] for s in [26, 32] for sig in [9, 12]
+        ],
+        "low": [-3, -2, -1],
+        "high": [1, 2, 3],
+        "bidirectional": False,
+    },
+    "MACD_PPO_signal": {
+        "param_grid": [
+            {"fast": f, "slow": s, "signal": sig} for f in [12, 16] for s in [26, 32] for sig in [9, 12]
+        ],
+        "low": [-3, -2, -1],
+        "high": [1, 2, 3],
+        "bidirectional": False,
+    },
+    "ATR_PCT": {"param_grid": _period_grid(), "low": [0.5, 1, 2, 3, 5, 8], "high": [], "bidirectional": True},
 }
 
 SELL_ONLY: dict[str, tuple[str, list[int]]] = {
@@ -46,7 +62,7 @@ SELL_ONLY: dict[str, tuple[str, list[int]]] = {
 
 
 def build_condition_grid() -> tuple[list[dict], list[dict]]:
-    """오실레이터 5종 + 매도전용 3종의 매수/매도 ConditionBlock 그리드를 생성한다.
+    """오실레이터 9종 + 매도전용 3종의 매수/매도 ConditionBlock 그리드를 생성한다.
 
     Returns:
         (buy_conditions, sell_conditions) — 각각 ConditionBlock 딕셔너리 리스트
@@ -55,17 +71,19 @@ def build_condition_grid() -> tuple[list[dict], list[dict]]:
     buy_conditions: list[dict] = []
     sell_conditions: list[dict] = []
 
-    for indicator, bounds in OSCILLATORS.items():
-        param_key = PERIOD_PARAM_KEY.get(indicator, "period")
-        for period in PERIOD_GRID:
-            for t in bounds["low"]:
-                buy_conditions.append(
-                    {"indicator": indicator, "params": {param_key: period}, "operator": "<", "threshold": t}
-                )
-            for t in bounds["high"]:
-                sell_conditions.append(
-                    {"indicator": indicator, "params": {param_key: period}, "operator": ">", "threshold": t}
-                )
+    for indicator, spec in OSCILLATOR_SPECS.items():
+        for params in spec["param_grid"]:
+            if spec["bidirectional"]:
+                for t in spec["low"]:
+                    buy_conditions.append({"indicator": indicator, "params": params, "operator": "<", "threshold": t})
+                    buy_conditions.append({"indicator": indicator, "params": params, "operator": ">", "threshold": t})
+                    sell_conditions.append({"indicator": indicator, "params": params, "operator": "<", "threshold": t})
+                    sell_conditions.append({"indicator": indicator, "params": params, "operator": ">", "threshold": t})
+            else:
+                for t in spec["low"]:
+                    buy_conditions.append({"indicator": indicator, "params": params, "operator": "<", "threshold": t})
+                for t in spec["high"]:
+                    sell_conditions.append({"indicator": indicator, "params": params, "operator": ">", "threshold": t})
 
     for indicator, (operator, thresholds) in SELL_ONLY.items():
         for t in thresholds:
@@ -119,7 +137,11 @@ def compute_grid_results(
 
 
 def _effective_period(params: dict) -> int:
-    return params.get("period", params.get("k_period", 0))
+    if "period" in params:
+        return params["period"]
+    if "k_period" in params:
+        return params["k_period"]
+    return params.get("fast", 0) + params.get("slow", 0) + params.get("signal", 0)
 
 
 def _trade_sequence_key(trades: list[dict]) -> tuple:
