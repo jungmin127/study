@@ -42,7 +42,7 @@ grid search [코인명],[운용자금],[봉데이터],[운용기간],[상위N개
    실행한다:
 
    ```bash
-   python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
+   PYTHONPATH=. python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
      --capital 10000000 --start 2026-06-01 --end 2026-07-31 --top-n 20
    ```
 
@@ -57,4 +57,4 @@ grid search [코인명],[운용자금],[봉데이터],[운용기간],[상위N개
 
 - `--capital`은 원 단위 정수로 넘긴다(예: 1000만원 → `10000000`).
 - `--start`/`--end`는 `YYYY-MM-DD` 형식이어야 한다.
-- 스크립트는 저장소 루트(`260711-upbit-v1/`)에서 실행해야 한다(`from engine...`, `from upbit_data_service...` 절대 임포트를 쓰기 때문).
+- 스크립트는 저장소 루트(`260711-upbit-v1/`)에서 `PYTHONPATH=.`를 붙여 실행해야 한다(`from engine...`, `from upbit_data_service...` 절대 임포트를 쓰는데, `python scripts/grid_search.py`로 직접 실행하면 스크립트 소속 디렉터리만 `sys.path`에 잡혀 `ModuleNotFoundError: No module named 'engine'`가 난다 — `run_eda_sweep.py`도 동일).

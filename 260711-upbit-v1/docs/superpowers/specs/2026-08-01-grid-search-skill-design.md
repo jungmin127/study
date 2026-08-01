@@ -126,7 +126,7 @@ const paramStr = Object.entries(c.params).length
 
 ## 검증 절차 (구현 완료 후)
 
-1. `python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 --capital 10000000 --start 2026-06-01 --end 2026-07-31 --top-n 20` 직접 실행. **주의**: STOCH_K/STOCH_D 파라미터 키 수정(위 "정정" 참고) 때문에 2026-08-01 세션 프로토타입의 정확한 수치(1위 STOCH_D<10/RSI>80, +15.46%)와 동일할 필요는 없다 — STOCH_D의 period 그리드가 이번엔 실제로 작동하므로 결과가 달라질 수 있다. 확인할 것은 (a) 총 조합 수 2,565개가 전부 계산되는지, (b) RESULT_JSON 라인이 정상 출력되는지, (c) 저장된 20건이 "백테스트 결과"에 `[Grid]` 접두사로 나타나는지, (d) 저장된 항목 중 동일 거래 시퀀스 중복이 없는지(dedup 정상 동작).
+1. `PYTHONPATH=. python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 --capital 10000000 --start 2026-06-01 --end 2026-07-31 --top-n 20` 직접 실행. **주의**: STOCH_K/STOCH_D 파라미터 키 수정(위 "정정" 참고) 때문에 2026-08-01 세션 프로토타입의 정확한 수치(1위 STOCH_D<10/RSI>80, +15.46%)와 동일할 필요는 없다 — STOCH_D의 period 그리드가 이번엔 실제로 작동하므로 결과가 달라질 수 있다. 확인할 것은 (a) 총 조합 수 2,565개가 전부 계산되는지, (b) RESULT_JSON 라인이 정상 출력되는지, (c) 저장된 20건이 "백테스트 결과"에 `[Grid]` 접두사로 나타나는지, (d) 저장된 항목 중 동일 거래 시퀀스 중복이 없는지(dedup 정상 동작).
 2. SKILL.md를 통해 자연어 명령(`grid search 이더리움,1000만원,1시간,2026-06-01~2026-07-31,20`)으로 1번과 동일한 스크립트 호출·결과가 재현되는지 확인.
 3. 프론트 "백테스트 결과"에서 params 표기(`RSI(period=10)<20` 형태) 확인.
 

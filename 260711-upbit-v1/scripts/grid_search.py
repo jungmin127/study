@@ -4,7 +4,7 @@ scripts/grid_search.py
 'grid search' 스킬의 연산 엔진. 오실레이터 5종(RSI/STOCH_K/STOCH_D/CCI/WILLIAMS_R) +
 매도전용 3종(STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS)의 전 교차 그리드를
 계산하고, 거래 시퀀스가 동일한 조합은 dedup한 뒤 상위 N개만 백테스트 결과에 저장한다.
-Run: python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
+Run: PYTHONPATH=. python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
      --capital 10000000 --start 2026-06-01 --end 2026-07-31 --top-n 20
 """
 from __future__ import annotations
