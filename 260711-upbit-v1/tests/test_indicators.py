@@ -34,7 +34,7 @@ def _run_probe(indicator: str, params: dict) -> list[float]:
     return results[0].seen_values
 
 
-_NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC", "KOREA_PREMIUM"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
+_NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC", "KOREA_PREMIUM", "FUNDING_RATE"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
 _NEEDS_TRADE_VALUE_LINE = {"TRADE_VALUE", "TRADE_VALUE_SMA"}  # trade_value 라인이 필요 — test_trade_value_* 참고
 
 
@@ -435,3 +435,10 @@ def test_macd_ppo_signal_param_mapping_actually_changes_output():
     values_default = _run_probe("MACD_PPO_signal", {"fast": 12, "slow": 26, "signal": 9})
     values_different = _run_probe("MACD_PPO_signal", {"fast": 12, "slow": 26, "signal": 3})
     assert values_default[-1] != values_different[-1]
+
+
+def test_funding_rate_returns_merged_line_value():
+    df = make_oscillating_df()
+    funding_series = pd.Series([0.03] * len(df))
+    values = _run_probe_with_aux("FUNDING_RATE", {}, "funding_rate_value", funding_series)
+    assert values[-1] == pytest.approx(0.03)

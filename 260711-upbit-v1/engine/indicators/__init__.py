@@ -24,7 +24,7 @@ from .price_levels import (
     create_vpvr_vah,
     create_vpvr_val,
 )
-from .sentiment import create_fear_greed_cmc, create_korea_premium
+from .sentiment import create_fear_greed_cmc, create_funding_rate, create_korea_premium
 from .trend import create_ema, create_sma, create_wma
 from .volatility import create_atr, create_atr_pct, create_bb_lower, create_bb_middle, create_bb_percent_b, create_bb_upper
 from .volume import create_obv, create_trade_value, create_trade_value_sma, create_volume_sma, create_vpin
@@ -68,6 +68,7 @@ INDICATOR_FACTORY: dict[str, object] = {
     "VPVR_VAL": create_vpvr_val,
     "FEAR_GREED_CMC": create_fear_greed_cmc,
     "KOREA_PREMIUM": create_korea_premium,
+    "FUNDING_RATE": create_funding_rate,
 }
 
 __all__ = ["INDICATOR_FACTORY"]

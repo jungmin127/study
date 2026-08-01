@@ -18,3 +18,7 @@ def create_fear_greed_cmc(data: bt.feeds.PandasData, **params) -> bt.LineBuffer:
 
 def create_korea_premium(data: bt.feeds.PandasData, **params) -> bt.LineBuffer:
     return data.korea_premium_value
+
+
+def create_funding_rate(data: bt.feeds.PandasData, **params) -> bt.LineBuffer:
+    return data.funding_rate_value

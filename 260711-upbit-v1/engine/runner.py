@@ -12,7 +12,7 @@ import pandas as pd
 
 AUX_MARKET_LINE_NAME: dict[str, str] = {"KRW-BTC": "btc_close", "KRW-USDT": "usdt_close"}
 _OPTIONAL_LINE_CANDIDATES: tuple[str, ...] = (
-    "trade_value", "fear_greed_value", "korea_premium_value", *AUX_MARKET_LINE_NAME.values()
+    "trade_value", "fear_greed_value", "korea_premium_value", "funding_rate_value", *AUX_MARKET_LINE_NAME.values()
 )
 
 
