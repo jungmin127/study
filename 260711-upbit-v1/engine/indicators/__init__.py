@@ -4,6 +4,8 @@ from .market import create_btc_correlation, create_market_trend, create_usdt_cor
 from .momentum import (
     create_cci,
     create_macd_line,
+    create_macd_ppo,
+    create_macd_ppo_signal,
     create_macd_signal,
     create_momentum_pct,
     create_rsi,
@@ -34,6 +36,8 @@ INDICATOR_FACTORY: dict[str, object] = {
     "RSI": create_rsi,
     "MACD_line": create_macd_line,
     "MACD_signal": create_macd_signal,
+    "MACD_PPO": create_macd_ppo,
+    "MACD_PPO_signal": create_macd_ppo_signal,
     "STOCH_K": create_stoch_k,
     "STOCH_D": create_stoch_d,
     "CCI": create_cci,

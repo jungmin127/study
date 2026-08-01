@@ -46,6 +46,10 @@ def get_indicator_value(indicator_name: str, obj: bt.Indicator) -> float:
         return float(obj.macd[0])
     elif indicator_name == "MACD_signal":
         return float(obj.signal[0])
+    elif indicator_name == "MACD_PPO":
+        return float(obj.ppo[0])
+    elif indicator_name == "MACD_PPO_signal":
+        return float(obj.signal[0])
     elif indicator_name == "BB_upper":
         return float(obj.top[0])
     elif indicator_name == "BB_lower":

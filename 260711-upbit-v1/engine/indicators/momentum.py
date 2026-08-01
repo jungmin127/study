@@ -47,3 +47,17 @@ def create_williams_r(data: bt.feeds.PandasData, **params) -> bt.Indicator:
 def create_momentum_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     period = int(params.get("period", 5))
     return bt.indicators.ROC100(data, period=period)
+
+
+def create_macd_ppo(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    fast = int(params.get("fast", 12))
+    slow = int(params.get("slow", 26))
+    signal = int(params.get("signal", 9))
+    return bt.indicators.PPO(data, period1=fast, period2=slow, period_signal=signal)
+
+
+def create_macd_ppo_signal(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    fast = int(params.get("fast", 12))
+    slow = int(params.get("slow", 26))
+    signal = int(params.get("signal", 9))
+    return bt.indicators.PPO(data, period1=fast, period2=slow, period_signal=signal)

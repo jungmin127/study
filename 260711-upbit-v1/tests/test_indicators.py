@@ -423,3 +423,9 @@ def test_atr_pct_matches_atr_over_close():
     close = df["close"].iloc[-1]
     manual = atr_values[-1] / close * 100
     assert abs(atr_pct_values[-1] - manual) < 1e-6
+
+
+def test_macd_ppo_param_mapping_actually_changes_output():
+    values_default = _run_probe("MACD_PPO", {"fast": 12, "slow": 26, "signal": 9})
+    values_different = _run_probe("MACD_PPO", {"fast": 5, "slow": 10, "signal": 3})
+    assert values_default[-1] != values_different[-1]
