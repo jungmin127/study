@@ -40,6 +40,7 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
   WILLIAMS_R: { low: -80, high: -20 },
   FEAR_GREED_CMC: { low: 20, high: 80 },
   VPIN: { low: 0.35, high: 0.55 },
+  FUNDING_RATE: { low: -0.03, high: 0.05 },
   BB_PERCENT_B: { low: 0.2, high: 0.8 },
 };
 
