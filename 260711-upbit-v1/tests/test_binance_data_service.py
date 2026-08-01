@@ -222,3 +222,23 @@ def test_get_binance_close_excludes_unclosed_candle(monkeypatch, tmp_path):
 
     # 1/5 일봉은 00:00에 열려 1/6 00:00에 마감되는데, now=1/5 12:00이므로 아직 마감 전 → 제외돼야 함
     assert df["candle_time"].max() < datetime(2026, 1, 5, tzinfo=timezone.utc)
+
+
+def test_compute_gaps_uses_custom_time_column():
+    start = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    cached = pd.DataFrame({
+        "funding_time": pd.date_range("2026-01-01", "2026-01-10", freq="D", tz="UTC"),
+        "funding_rate": 0.01,
+    })
+    gaps = _compute_gaps(cached, start, end, time_col="funding_time")
+    # cache covers 1/1~1/10, requested 1/5~1/15 -> gap after cache end only
+    assert gaps == [(datetime(2026, 1, 10, 0, 0, 1, tzinfo=timezone.utc), end)]
+
+
+def test_compute_gaps_default_time_col_still_candle_time():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    cached = pd.DataFrame({"candle_time": pd.date_range("2026-01-01", "2026-01-10", freq="D", tz="UTC"), "close": 1.0})
+    gaps = _compute_gaps(cached, start, end)
+    assert gaps == []

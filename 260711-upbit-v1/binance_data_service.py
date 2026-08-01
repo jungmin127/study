@@ -159,13 +159,13 @@ def _fetch_range(
 
 
 def _compute_gaps(
-    cached: pd.DataFrame, start: datetime, end: datetime
+    cached: pd.DataFrame, start: datetime, end: datetime, time_col: str = "candle_time"
 ) -> list[tuple[datetime, datetime]]:
     if cached.empty:
         return [(start, end)]
 
-    cache_start = cached["candle_time"].min()
-    cache_end = cached["candle_time"].max()
+    cache_start = cached[time_col].min()
+    cache_end = cached[time_col].max()
 
     gaps: list[tuple[datetime, datetime]] = []
     if start < cache_start:
