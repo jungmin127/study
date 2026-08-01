@@ -9,6 +9,9 @@ Run: python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
 """
 from __future__ import annotations
 
+from engine.condition_strategy import ConditionTreeStrategy
+from engine.runner import run_backtest
+
 PERIOD_GRID = [10, 14, 20]
 
 OSCILLATORS: dict[str, dict[str, list[int]]] = {
@@ -61,3 +64,47 @@ def build_condition_grid() -> tuple[list[dict], list[dict]]:
             sell_conditions.append({"indicator": indicator, "params": {}, "operator": operator, "threshold": t})
 
     return buy_conditions, sell_conditions
+
+
+def compute_grid_results(
+    df,
+    buy_conditions: list[dict],
+    sell_conditions: list[dict],
+    risk_config: dict,
+) -> list[dict]:
+    """buy_conditions x sell_conditions 전 조합을 run_backtest로 계산한다.
+
+    Returns:
+        각 조합의 결과 딕셔너리 리스트:
+        {"return_pct": float, "buy_block": dict, "sell_block": dict,
+         "trades": list[dict], "final_value": float}
+    """
+    results: list[dict] = []
+    initial_capital = float(risk_config.get("initial_capital", 10000))
+    total = len(buy_conditions) * len(sell_conditions)
+
+    for i, buy_block in enumerate(buy_conditions):
+        buy_group = {"type": "AND", "conditions": [buy_block]}
+        for sell_block in sell_conditions:
+            sell_group = {"type": "AND", "conditions": [sell_block]}
+            result = run_backtest(
+                df,
+                ConditionTreeStrategy,
+                risk_config,
+                {"buy_conditions": buy_group, "sell_conditions": sell_group},
+            )
+            return_pct = (result["final_value"] - initial_capital) / initial_capital * 100
+            results.append(
+                {
+                    "return_pct": return_pct,
+                    "buy_block": buy_block,
+                    "sell_block": sell_block,
+                    "trades": result["trades"],
+                    "final_value": result["final_value"],
+                }
+            )
+        if (i + 1) % 5 == 0 or (i + 1) == len(buy_conditions):
+            done = (i + 1) * len(sell_conditions)
+            print(f"    매수조건 {i + 1}/{len(buy_conditions)} 완료 ({done}/{total}건)")
+
+    return results
