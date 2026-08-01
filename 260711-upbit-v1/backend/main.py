@@ -36,7 +36,13 @@ from engine.condition_tree import (
     required_aux_markets,
 )
 from engine.runner import AUX_MARKET_LINE_NAME, run_backtest
-from binance_data_service import BinanceSymbolNotFoundError, binance_symbol, get_binance_close
+from binance_data_service import (
+    BinanceSymbolNotFoundError,
+    binance_symbol,
+    get_binance_close,
+    get_binance_funding_rate,
+    merge_funding_rate,
+)
 from external_data_service import get_fear_greed_cmc, merge_fear_greed
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import calculate_metrics
@@ -348,6 +354,12 @@ INDICATOR_CATALOG: list[dict] = [
         "params": [],
         "description": "대상 코인의 업비트(KRW) 시세가 바이낸스(USDT, 업비트 KRW-USDT 환율로 환산) 시세보다 몇 % 비싼지를 나타냅니다. 코인별로 계산되며, 해당 코인이 바이낸스에 상장돼 있지 않으면 이 지표를 쓸 수 없습니다.",
         "example": "연산자 <, 임계값 0이면: 역프리미엄(국내가가 더 싼) 구간을 포착합니다. 연산자 >, 임계값 5면: 프리미엄이 +5%를 넘는 과열 구간을 매도 필터로 씁니다.",
+    },
+    {
+        "value": "FUNDING_RATE", "label": "펀딩비(바이낸스 선물)", "category": "시장 심리",
+        "params": [],
+        "description": "대상 코인의 바이낸스 무기한 선물 펀딩비를 퍼센트로 나타냅니다. 양수면 롱이 숏에게 수수료를 지불(롱 우세/과열), 음수면 그 반대(숏 우세)입니다.",
+        "example": "펀딩비 > 0.05%면 롱 포지션이 과열된 구간으로, < -0.03%면 숏 포지션이 과열된 구간으로 흔히 해석합니다.",
     },
     {
         "value": "MOMENTUM_PCT", "label": "모멘텀 (N봉 전 대비 등락률 %)", "category": "추세",
@@ -738,6 +750,22 @@ def _fetch_backtest_dataframe(
                 status_code=400, detail=f"해당 기간에 {symbol} 캔들 데이터가 없습니다"
             )
         df["korea_premium_value"] = (df["close"] / (df["binance_close"] * df["usdt_close"]) - 1) * 100
+
+    if "FUNDING_RATE" in used_indicators:
+        symbol = binance_symbol(market)
+        try:
+            funding_df = get_binance_funding_rate(symbol, start_dt, end_dt)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        df = merge_funding_rate(df, funding_df)
+        if df["funding_rate_value"].isna().all():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{symbol}의 바이낸스 선물 펀딩비 데이터가 해당 기간에 없습니다"
+                    "(선물 미상장 또는 기간 밖일 수 있습니다)"
+                ),
+            )
 
     return df
 

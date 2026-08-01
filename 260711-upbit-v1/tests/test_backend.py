@@ -1141,3 +1141,74 @@ def test_run_backtest_returns_400_when_binance_candles_have_no_overlapping_candl
 
     assert resp.status_code == 400
     assert "캔들 데이터가 없습니다" in resp.json()["detail"]
+
+
+def test_run_backtest_computes_funding_rate_value(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    target_df = make_oscillating_df()
+    funding_df = pd.DataFrame({
+        "funding_time": target_df["candle_time"] - pd.Timedelta(minutes=1),
+        "funding_rate": 0.03,
+    })
+    monkeypatch.setattr(
+        backend_module, "get_binance_funding_rate",
+        lambda symbol, start, end: funding_df,
+    )
+
+    captured = {}
+    real_run_backtest_cached = backend_module.run_backtest_cached
+
+    def _capture(**kwargs):
+        captured["df"] = kwargs["df"].copy()
+        return real_run_backtest_cached(**kwargs)
+
+    monkeypatch.setattr(backend_module, "run_backtest_cached", _capture)
+
+    buy = {"type": "AND", "conditions": [{"indicator": "FUNDING_RATE", "params": {}, "operator": ">", "threshold": -100}]}
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(market="KRW-ETH", buy_conditions=buy),
+    )
+
+    assert resp.status_code == 200
+    merged = captured["df"]
+    assert merged["funding_rate_value"].round(4).eq(0.03).all()
+
+
+def test_run_backtest_rejects_funding_rate_when_no_data_in_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+    monkeypatch.setattr(
+        backend_module, "get_binance_funding_rate",
+        lambda symbol, start, end: pd.DataFrame(columns=["funding_time", "funding_rate"]),
+    )
+
+    buy = {"type": "AND", "conditions": [{"indicator": "FUNDING_RATE", "params": {}, "operator": ">", "threshold": 0}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 400
+    assert "펀딩비" in resp.json()["detail"]
+
+
+def test_run_backtest_allows_funding_rate_with_partial_leading_nan(monkeypatch, tmp_path):
+    # 구간 앞부분(첫 펀딩비 이벤트 이전)에 NaN이 남는 건 정상 — 400 에러가 나면 안 된다.
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    target_df = make_oscillating_df()
+    half = len(target_df) // 2
+    funding_df = pd.DataFrame({
+        "funding_time": target_df["candle_time"].iloc[half:] - pd.Timedelta(minutes=1),
+        "funding_rate": 0.02,
+    })
+    monkeypatch.setattr(
+        backend_module, "get_binance_funding_rate",
+        lambda symbol, start, end: funding_df,
+    )
+
+    buy = {"type": "AND", "conditions": [{"indicator": "FUNDING_RATE", "params": {}, "operator": ">", "threshold": -100}]}
+    resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
+
+    assert resp.status_code == 200
