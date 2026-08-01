@@ -186,6 +186,38 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=14면 최근 14봉의 True Range 평균. 예: 전일 종가 + ATR×2 를 오늘 고가가 넘으면 변동성 돌파로 봅니다.",
     },
     {
+        "value": "BB_PERCENT_B", "label": "%B (볼린저밴드 정규화)", "category": "오실레이터",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "종가가 볼린저밴드 내에서 어느 위치에 있는지를 0~1 사이 값으로 정규화합니다(하단=0, 상단=1). 코인 시세와 무관하게 항상 같은 범위입니다.",
+        "example": "%B < 0.2면 하단 근접(과매도), %B > 0.8이면 상단 근접(과매수)으로 흔히 해석합니다.",
+    },
+    {
+        "value": "MACD_PPO", "label": "PPO (MACD 정규화)", "category": "오실레이터",
+        "params": [
+            {"key": "fast", "label": "단기", "default": 12},
+            {"key": "slow", "label": "장기", "default": 26},
+            {"key": "signal", "label": "시그널", "default": 9},
+        ],
+        "description": "MACD Line을 장기 EMA 대비 비율(%)로 표현해 코인 가격과 무관하게 만든 지표입니다.",
+        "example": "PPO = (EMA(12) − EMA(26)) / EMA(26) × 100. 0보다 크면 상승 모멘텀.",
+    },
+    {
+        "value": "MACD_PPO_signal", "label": "PPO Signal", "category": "오실레이터",
+        "params": [
+            {"key": "fast", "label": "단기", "default": 12},
+            {"key": "slow", "label": "장기", "default": 26},
+            {"key": "signal", "label": "시그널", "default": 9},
+        ],
+        "description": "PPO를 다시 지수이동평균한 시그널 라인입니다.",
+        "example": "PPO가 Signal을 상향 돌파하면 흔히 매수 신호로 봅니다.",
+    },
+    {
+        "value": "ATR_PCT", "label": "ATR% (변동성 정규화)", "category": "오실레이터",
+        "params": [{"key": "period", "label": "기간", "default": 14}],
+        "description": "ATR을 현재가 대비 비율(%)로 표현해 코인마다 다른 가격 스케일을 제거한 지표입니다.",
+        "example": "ATR% = ATR / 종가 × 100. 예: ATR%=2면 최근 변동폭이 종가의 2% 수준.",
+    },
+    {
         "value": "OBV", "label": "OBV (누적 거래량)", "category": "거래량",
         "params": [],
         "description": "종가가 오른 날은 거래량을 더하고 내린 날은 뺀 누적값으로, 가격과 거래량의 방향이 일치하는지 봅니다.",
