@@ -429,3 +429,9 @@ def test_macd_ppo_param_mapping_actually_changes_output():
     values_default = _run_probe("MACD_PPO", {"fast": 12, "slow": 26, "signal": 9})
     values_different = _run_probe("MACD_PPO", {"fast": 5, "slow": 10, "signal": 3})
     assert values_default[-1] != values_different[-1]
+
+
+def test_macd_ppo_signal_param_mapping_actually_changes_output():
+    values_default = _run_probe("MACD_PPO_signal", {"fast": 12, "slow": 26, "signal": 9})
+    values_different = _run_probe("MACD_PPO_signal", {"fast": 12, "slow": 26, "signal": 3})
+    assert values_default[-1] != values_different[-1]
