@@ -226,4 +226,154 @@ def get_binance_close(symbol: str, timeframe: str, start: datetime, end: datetim
     return result.reset_index(drop=True)
 
 
-__all__ = ["get_binance_close", "binance_symbol", "BinanceSymbolNotFoundError"]
+FUNDING_BASE_URL = "https://fapi.binance.com/fapi/v1"
+
+_FUNDING_COLUMNS = ["funding_time", "funding_rate"]
+
+FUNDING_CACHE_DIR = Path(__file__).parent / "data" / "cache" / "binance_funding"
+
+
+def _fetch_funding_page(
+    client: httpx.Client,
+    symbol: str,
+    start_time: datetime,
+    end_time: datetime,
+    limit: int = 1000,
+) -> list[dict]:
+    params = {
+        "symbol": symbol,
+        "startTime": int(start_time.timestamp() * 1000),
+        "endTime": int(end_time.timestamp() * 1000),
+        "limit": limit,
+    }
+    last_exc: Exception | None = None
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            resp = client.get(f"{FUNDING_BASE_URL}/fundingRate", params=params)
+            if resp.status_code == 429:
+                time.sleep(RATE_LIMIT_BACKOFF_SECONDS * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            time.sleep(RETRY_BASE_DELAY_SECONDS * (2**attempt))
+
+    raise RuntimeError(f"바이낸스 펀딩비 API 호출 실패 (symbol={symbol}): {last_exc}")
+
+
+def _parse_funding(raw: list[dict]) -> pd.DataFrame:
+    if not raw:
+        return pd.DataFrame(columns=_FUNDING_COLUMNS)
+    df = pd.DataFrame(raw)
+    df["funding_time"] = pd.to_datetime(df["fundingTime"].astype("int64"), unit="ms", utc=True)
+    df["funding_rate"] = df["fundingRate"].astype(float) * 100
+    return (
+        df[_FUNDING_COLUMNS]
+        .drop_duplicates(subset="funding_time")
+        .sort_values("funding_time")
+        .reset_index(drop=True)
+    )
+
+
+def _fetch_funding_range(
+    symbol: str, start: datetime, end: datetime, client: httpx.Client | None = None
+) -> pd.DataFrame:
+    close_client = client is None
+    client = client or httpx.Client(timeout=10)
+    try:
+        frames: list[pd.DataFrame] = []
+        cursor = start
+
+        while cursor <= end:
+            raw = _fetch_funding_page(client, symbol, cursor, end)
+            if not raw:
+                break
+            page_df = _parse_funding(raw)
+            frames.append(page_df)
+
+            newest = page_df["funding_time"].max()
+            if len(raw) < 1000 or newest >= end:
+                break
+            cursor = newest + timedelta(milliseconds=1)
+            time.sleep(REQUEST_DELAY_SECONDS)
+
+        if not frames:
+            return pd.DataFrame(columns=_FUNDING_COLUMNS)
+
+        merged = (
+            pd.concat(frames)
+            .drop_duplicates(subset="funding_time")
+            .sort_values("funding_time")
+            .reset_index(drop=True)
+        )
+        return merged[
+            (merged["funding_time"] >= start) & (merged["funding_time"] <= end)
+        ].reset_index(drop=True)
+    finally:
+        if close_client:
+            client.close()
+
+
+def _funding_cache_path(symbol: str) -> Path:
+    return FUNDING_CACHE_DIR / f"{symbol}.parquet"
+
+
+def _load_funding_cache(symbol: str) -> pd.DataFrame:
+    path = _funding_cache_path(symbol)
+    if not path.exists():
+        return pd.DataFrame(columns=_FUNDING_COLUMNS)
+    return pd.read_parquet(path)
+
+
+def _save_funding_cache(symbol: str, df: pd.DataFrame) -> None:
+    FUNDING_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(_funding_cache_path(symbol), index=False)
+
+
+def get_binance_funding_rate(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+    """바이낸스 무기한 선물 펀딩비 히스토리를 조회한다(퍼센트 단위, 원시값×100). 심볼이
+    선물에 없거나 이 구간에 데이터가 없으면 빈 DataFrame을 반환한다 — futures fundingRate
+    엔드포인트는 spot klines와 달리 잘못된 심볼도 200+빈 배열을 반환하므로(실측 확인),
+    "심볼 없음"과 "데이터 없음"을 구분하지 않는다."""
+    cached = _load_funding_cache(symbol)
+    gaps = _compute_gaps(cached, start, end, time_col="funding_time")
+
+    if gaps:
+        fetched = [_fetch_funding_range(symbol, g_start, g_end) for g_start, g_end in gaps]
+        to_concat = [df for df in [cached, *fetched] if not df.empty]
+        cached = (
+            pd.concat(to_concat)
+            .drop_duplicates(subset="funding_time")
+            .sort_values("funding_time")
+            .reset_index(drop=True)
+            if to_concat
+            else pd.DataFrame(columns=_FUNDING_COLUMNS)
+        )
+        _save_funding_cache(symbol, cached)
+
+    result = cached[(cached["funding_time"] >= start) & (cached["funding_time"] <= end)]
+    return result.reset_index(drop=True)
+
+
+def merge_funding_rate(df: pd.DataFrame, funding_df: pd.DataFrame) -> pd.DataFrame:
+    """대상 코인 캔들(df, candle_time 컬럼)에 펀딩비(funding_df, funding_time 컬럼)를
+    merge_asof(direction="backward")로 병합한다 — 각 캔들 시각 기준 그 시각 이전(또는 동시)
+    가장 최근 펀딩비를 채운다(look-ahead bias 방지). funding_df가 비어있으면 전체 NaN —
+    호출부(backend/main.py)가 이 NaN을 보고 400 에러를 낸다."""
+    if funding_df.empty:
+        return df.assign(funding_rate_value=float("nan"))
+
+    merged = pd.merge_asof(
+        df.sort_values("candle_time").reset_index(drop=True),
+        funding_df.sort_values("funding_time").reset_index(drop=True).rename(
+            columns={"funding_rate": "funding_rate_value"}
+        ),
+        left_on="candle_time",
+        right_on="funding_time",
+        direction="backward",
+    )
+    return merged.drop(columns="funding_time")
+
+
+__all__ = ["get_binance_close", "binance_symbol", "BinanceSymbolNotFoundError", "get_binance_funding_rate", "merge_funding_rate"]

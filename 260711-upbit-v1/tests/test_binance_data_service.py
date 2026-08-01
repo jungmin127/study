@@ -242,3 +242,94 @@ def test_compute_gaps_default_time_col_still_candle_time():
     cached = pd.DataFrame({"candle_time": pd.date_range("2026-01-01", "2026-01-10", freq="D", tz="UTC"), "close": 1.0})
     gaps = _compute_gaps(cached, start, end)
     assert gaps == []
+
+
+def _funding_event(funding_time_ms: int, rate: float) -> dict:
+    return {
+        "symbol": "ETHUSDT", "fundingTime": funding_time_ms, "fundingRate": str(rate),
+        "markPrice": "0", "rateType": "Regular",
+    }
+
+
+def test_parse_funding_converts_to_percentage():
+    df = bds._parse_funding([_funding_event(1784073600000, 0.0005)])
+    assert df.iloc[0]["funding_rate"] == pytest.approx(0.05)
+
+
+def test_parse_funding_empty_input():
+    df = bds._parse_funding([])
+    assert list(df.columns) == ["funding_time", "funding_rate"]
+    assert df.empty
+
+
+def test_fetch_funding_page_returns_raw_events():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["symbol"] == "ETHUSDT"
+        return httpx.Response(200, json=[_funding_event(1784073600000, 0.0001)])
+
+    with _mock_client(handler) as client:
+        raw = bds._fetch_funding_page(
+            client, "ETHUSDT",
+            datetime(2026, 7, 15, tzinfo=timezone.utc), datetime(2026, 7, 16, tzinfo=timezone.utc),
+        )
+
+    assert raw == [_funding_event(1784073600000, 0.0001)]
+
+
+def test_get_binance_funding_rate_returns_empty_for_unlisted_symbol(monkeypatch, tmp_path):
+    monkeypatch.setattr(bds, "FUNDING_CACHE_DIR", tmp_path)
+
+    def fake_fetch_funding_range(symbol, start, end, client=None):
+        return pd.DataFrame(columns=bds._FUNDING_COLUMNS)
+
+    monkeypatch.setattr(bds, "_fetch_funding_range", fake_fetch_funding_range)
+
+    df = bds.get_binance_funding_rate(
+        "NOTREALUSDT",
+        datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 10, tzinfo=timezone.utc),
+    )
+    assert df.empty
+
+
+def test_get_binance_funding_rate_skips_fetch_when_fully_cached(monkeypatch, tmp_path):
+    monkeypatch.setattr(bds, "FUNDING_CACHE_DIR", tmp_path)
+
+    idx = pd.date_range("2026-01-01", "2026-01-10", freq="8h", tz="UTC")
+    existing = pd.DataFrame({"funding_time": idx, "funding_rate": 0.01})
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    existing.to_parquet(tmp_path / "ETHUSDT.parquet", index=False)
+
+    def _fail_fetch(*args, **kwargs):
+        raise AssertionError("캐시가 이미 구간을 커버하므로 호출되면 안 됨")
+
+    monkeypatch.setattr(bds, "_fetch_funding_range", _fail_fetch)
+
+    start = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 9, tzinfo=timezone.utc)
+    df = bds.get_binance_funding_rate("ETHUSDT", start, end)
+
+    assert len(df) > 0
+    assert df["funding_time"].min() >= start
+    assert df["funding_time"].max() <= end
+
+
+def test_merge_funding_rate_backward_fills_from_most_recent_event():
+    df = pd.DataFrame({"candle_time": pd.date_range("2026-01-01", periods=5, freq="h", tz="UTC")})
+    funding_df = pd.DataFrame({
+        "funding_time": [pd.Timestamp("2026-01-01 00:30", tz="UTC"), pd.Timestamp("2026-01-01 02:30", tz="UTC")],
+        "funding_rate": [0.01, 0.02],
+    })
+
+    merged = bds.merge_funding_rate(df, funding_df)
+
+    assert pd.isna(merged.iloc[0]["funding_rate_value"])  # 00:00, 첫 이벤트(00:30) 이전
+    assert merged.iloc[1]["funding_rate_value"] == pytest.approx(0.01)  # 01:00
+    assert merged.iloc[2]["funding_rate_value"] == pytest.approx(0.01)  # 02:00
+    assert merged.iloc[3]["funding_rate_value"] == pytest.approx(0.02)  # 03:00
+    assert merged.iloc[4]["funding_rate_value"] == pytest.approx(0.02)  # 04:00
+
+
+def test_merge_funding_rate_all_nan_when_funding_df_empty():
+    df = pd.DataFrame({"candle_time": pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC")})
+    merged = bds.merge_funding_rate(df, pd.DataFrame(columns=bds._FUNDING_COLUMNS))
+    assert merged["funding_rate_value"].isna().all()
