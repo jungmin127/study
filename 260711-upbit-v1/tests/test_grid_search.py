@@ -1,5 +1,5 @@
 from engine.sweep import DEFAULT_RISK_CONFIG
-from scripts.grid_search import build_condition_grid, compute_grid_results
+from scripts.grid_search import build_condition_grid, compute_grid_results, dedup_top_results
 from tests.signal_fixtures import make_oscillating_df
 
 
@@ -88,3 +88,59 @@ def test_compute_grid_results_pairs_every_buy_with_every_sell():
     assert len(results) == 2
     assert results[0]["buy_block"] == buy_conditions[0]
     assert {r["sell_block"]["threshold"] for r in results} == {70, 80}
+
+
+_SAME_TRADES = [{"entryTime": "2026-06-01T00:00:00", "exitTime": "2026-06-02T00:00:00"}]
+_OTHER_TRADES = [{"entryTime": "2026-06-05T00:00:00", "exitTime": "2026-06-06T00:00:00"}]
+
+
+def _make_result(return_pct, buy_k_period, sell_period, trades):
+    return {
+        "return_pct": return_pct,
+        "buy_block": {
+            "indicator": "STOCH_D",
+            "params": {"k_period": buy_k_period},
+            "operator": "<",
+            "threshold": 20,
+        },
+        "sell_block": {"indicator": "RSI", "params": {"period": sell_period}, "operator": ">", "threshold": 70},
+        "trades": trades,
+        "final_value": 1_000_000 * (1 + return_pct / 100),
+    }
+
+
+def test_dedup_keeps_shortest_period_among_identical_trade_sequences():
+    results = [
+        _make_result(5.0, buy_k_period=20, sell_period=20, trades=_SAME_TRADES),
+        _make_result(5.0, buy_k_period=10, sell_period=14, trades=_SAME_TRADES),
+        _make_result(5.0, buy_k_period=14, sell_period=14, trades=_SAME_TRADES),
+    ]
+    deduped = dedup_top_results(results, top_n=20)
+    assert len(deduped) == 1
+    assert deduped[0]["buy_block"]["params"]["k_period"] == 10
+    assert deduped[0]["sell_block"]["params"]["period"] == 14
+
+
+def test_dedup_excludes_zero_trade_results():
+    results = [_make_result(0.0, 10, 10, trades=[])]
+    assert dedup_top_results(results, top_n=20) == []
+
+
+def test_dedup_sorts_desc_and_caps_top_n():
+    results = [
+        _make_result(1.0, 10, 10, trades=_SAME_TRADES),
+        _make_result(9.0, 10, 10, trades=_OTHER_TRADES),
+    ]
+    deduped = dedup_top_results(results, top_n=1)
+    assert len(deduped) == 1
+    assert deduped[0]["return_pct"] == 9.0
+
+
+def test_dedup_leaves_distinct_trade_sequences_untouched():
+    results = [
+        _make_result(3.0, 10, 10, trades=_SAME_TRADES),
+        _make_result(7.0, 10, 10, trades=_OTHER_TRADES),
+    ]
+    deduped = dedup_top_results(results, top_n=20)
+    assert len(deduped) == 2
+    assert [r["return_pct"] for r in deduped] == [7.0, 3.0]

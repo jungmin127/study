@@ -108,3 +108,29 @@ def compute_grid_results(
             print(f"    매수조건 {i + 1}/{len(buy_conditions)} 완료 ({done}/{total}건)")
 
     return results
+
+
+def _effective_period(params: dict) -> int:
+    return params.get("period", params.get("k_period", 0))
+
+
+def _trade_sequence_key(trades: list[dict]) -> tuple:
+    return tuple((t["entryTime"], t["exitTime"]) for t in trades)
+
+
+def dedup_top_results(results: list[dict], top_n: int) -> list[dict]:
+    """동일 거래 시퀀스를 만든 조합 중 매수+매도 period 합이 가장 작은 것만 남기고,
+    수익률 내림차순 상위 top_n개를 반환한다. 거래가 0건인 조합은 제외한다.
+    """
+    groups: dict[tuple, dict] = {}
+    for r in results:
+        if not r["trades"]:
+            continue
+        key = _trade_sequence_key(r["trades"])
+        period_sum = _effective_period(r["buy_block"]["params"]) + _effective_period(r["sell_block"]["params"])
+        existing = groups.get(key)
+        if existing is None or period_sum < existing["_period_sum"]:
+            groups[key] = {**r, "_period_sum": period_sum}
+
+    deduped = sorted(groups.values(), key=lambda r: r["return_pct"], reverse=True)
+    return [{k: v for k, v in r.items() if k != "_period_sum"} for r in deduped[:top_n]]
