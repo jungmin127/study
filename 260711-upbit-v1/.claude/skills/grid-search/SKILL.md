@@ -5,8 +5,9 @@ description: Sweep oscillator buy/sell threshold and period grids for an Upbit b
 
 # Grid Search
 
-`grid search` 명령을 받으면 오실레이터 5종(RSI/STOCH_K/STOCH_D/CCI/WILLIAMS_R) + 매도전용
-3종(STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS)의 전 교차 그리드(2,565개 조합)를
+`grid search` 명령을 받으면 오실레이터 9종(RSI/STOCH_K/STOCH_D/CCI/WILLIAMS_R/BB_PERCENT_B/
+MACD_PPO/MACD_PPO_signal/ATR_PCT — ATR_PCT만 매수·매도 양방향) + 매도전용 3종
+(STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS)의 전 교차 그리드(20,700개 조합)를
 `scripts/grid_search.py`로 계산하고, 중복 거래를 제거한 상위 N개를 "백테스트 결과"에 저장한다.
 
 ## 명령 형식
@@ -37,7 +38,8 @@ grid search [코인명],[운용자금],[봉데이터],[운용기간],[상위N개
 1. 위 규칙대로 명령을 파싱한다.
 2. 파싱 결과를 표로 정리해 사용자에게 보여주고 확인을 받는다. 이 표에는 반드시
    마켓코드/timeframe 코드/운용자금(원 단위 숫자)/시작일/종료일/상위N개가 포함되어야 한다.
-   예상 소요 시간(약 9분, 2,565개 조합 기준)도 함께 안내한다.
+   예상 소요 시간(1시간봉 기준 약 1.2시간, 20,700개 조합. 일봉처럼 캔들 수가 적은
+   timeframe은 훨씬 빠름)도 함께 안내한다.
 3. 사용자가 확인하면, 아래 형태로 `scripts/grid_search.py`를 저장소 루트에서 백그라운드로
    실행한다. 이 명령은 Bash 툴로 실행해라(PowerShell 문법이 아니다 — `VAR=x cmd` 형태는
    PowerShell에서 파싱 에러가 난다):
