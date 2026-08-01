@@ -40,9 +40,10 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
   WILLIAMS_R: { low: -80, high: -20 },
   FEAR_GREED_CMC: { low: 20, high: 80 },
   VPIN: { low: 0.35, high: 0.55 },
+  BB_PERCENT_B: { low: 0.2, high: 0.8 },
 };
 
-const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT', 'KOREA_PREMIUM']);
+const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT', 'KOREA_PREMIUM', 'MACD_PPO', 'MACD_PPO_signal']);
 const PRICE_SCALE_INDICATORS = new Set([
   'SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower',
   'FIB_382', 'FIB_500', 'FIB_618', 'PIVOT_P', 'PIVOT_R1', 'PIVOT_S1',
@@ -64,6 +65,7 @@ function recommendedThreshold(
   if (PRICE_SCALE_INDICATORS.has(indicator)) return currentPrice ?? 0;
   if (ZERO_CROSS_INDICATORS.has(indicator)) return 0;
   if (indicator === 'ATR') return currentPrice ? Math.round(currentPrice * 0.01) : 1;
+  if (indicator === 'ATR_PCT') return 2;
   if (indicator === 'BTC_CORRELATION' || indicator === 'USDT_CORRELATION') {
     return operator === '<' || operator === '<=' ? -0.3 : 0.5;
   }
