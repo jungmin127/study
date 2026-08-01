@@ -607,7 +607,7 @@ grid search [코인명],[운용자금],[봉데이터],[운용기간],[상위N개
    실행한다:
 
    ```bash
-   PYTHONPATH=. python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
+   PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
      --capital 10000000 --start 2026-06-01 --end 2026-07-31 --top-n 20
    ```
 
@@ -706,7 +706,7 @@ git commit -m "fix: render indicator params in summarizeGroup"
 저장소 루트에서:
 
 ```bash
-PYTHONPATH=. python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
+PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/grid_search.py --market KRW-ETH --timeframe minutes60 \
   --capital 10000000 --start 2026-06-01 --end 2026-07-31 --top-n 20
 ```
 
