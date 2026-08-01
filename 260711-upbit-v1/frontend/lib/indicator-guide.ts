@@ -71,7 +71,7 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     formula: 'MACD Line = EMA(fast) − EMA(slow)',
     thresholdExample:
       'MACD Line > 0 → 단기 EMA가 장기 EMA보다 위, 즉 상승 모멘텀이 우세하다는 뜻. threshold 0을 기준으로 부호가 바뀌는 지점을 "모멘텀 전환"으로 봅니다.',
-    usage: 'MACD_line과 MACD_signal을 매수/매도 조건에 각각 넣어, "Line이 Signal보다 크면 매수 유지, 작아지면 매도"처럼 두 지표를 짝지어 씁니다.',
+    usage: 'MACD_line과 MACD_signal을 매수/매도 조건에 각각 넣어, "Line이 Signal보다 크면 매수 유지, 작아지면 매도"처럼 두 지표를 짝지어 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 MACD_PPO를 대신 쓰세요.',
   },
   MACD_signal: {
     meaning:
@@ -84,7 +84,7 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     formula: 'MACD Signal = MACD Line의 signal기간 EMA',
     thresholdExample:
       'MACD Line이 Signal을 상향 돌파(Line > Signal)하는 시점을 흔히 매수 신호로, 하향 돌파를 매도 신호로 봅니다. threshold는 보통 0 근처(zero-cross)를 씁니다.',
-    usage: 'MACD_line ">" 조건과 MACD_signal 값을 서로 다른 블록에 넣기보다, 보통 "MACD_line > 0"과 "MACD_signal > 0"을 함께 걸어 상승 모멘텀 구간만 남기는 식으로 씁니다.',
+    usage: 'MACD_line ">" 조건과 MACD_signal 값을 서로 다른 블록에 넣기보다, 보통 "MACD_line > 0"과 "MACD_signal > 0"을 함께 걸어 상승 모멘텀 구간만 남기는 식으로 씁니다. 정규화 버전은 MACD_PPO_signal입니다.',
   },
   STOCH_K: {
     meaning:
@@ -132,7 +132,7 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     params: [{ key: 'period', role: '중간선(이동평균)과 표준편차를 계산할 봉 개수.' }],
     formula: '상단 = SMA(period) + 2 × 표준편차(period)',
     thresholdExample: `${PRICE_SCALE_CAVEAT}`,
-    usage: '종가가 상단을 넘나드는지 자체보다는, "지금 가격이 상단 밴드 값보다 높은 절대 레벨"인지 필터로 쓰거나 ATR과 함께 변동성 국면을 가늠하는 보조 지표로 씁니다.',
+    usage: '종가가 상단을 넘나드는지 자체보다는, "지금 가격이 상단 밴드 값보다 높은 절대 레벨"인지 필터로 쓰거나 ATR과 함께 변동성 국면을 가늠하는 보조 지표로 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 BB_PERCENT_B를 대신 쓰세요.',
   },
   BB_lower: {
     meaning:
@@ -156,7 +156,50 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     formula: 'True Range = max(고가−저가, |고가−전봉종가|, |저가−전봉종가|)\nATR = True Range의 period봉 Wilder 평활 평균',
     thresholdExample:
       '값 자체보다 "종가 + ATR×배수"를 다른 조건의 threshold로 활용하는 경우가 많습니다. 예: 전봉 종가+ATR×2를 오늘 고가가 넘으면 변동성 돌파로 봅니다(ATR 카드는 그 기준가를 표로 같이 보여줍니다).',
-    usage: '손절폭이나 돌파 매매 기준가를 "고정 %"가 아니라 "그 코인 특유의 변동성"에 맞춰 정할 때 씁니다.',
+    usage: '손절폭이나 돌파 매매 기준가를 "고정 %"가 아니라 "그 코인 특유의 변동성"에 맞춰 정할 때 씁니다. 코인마다 다른 가격 스케일을 제거한 정규화 버전이 필요하면 ATR_PCT를 대신 쓰세요.',
+  },
+  BB_PERCENT_B: {
+    meaning:
+      '볼린저밴드 상단/하단 안에서 종가가 차지하는 위치를 0~1 사이 값으로 정규화한 지표입니다(하단=0, 상단=1). 계산에 쓰는 볼린저밴드 자체는 BB_upper/BB_lower와 같은 공식입니다 — 자세한 배경은 BB_upper 가이드를 참고하세요.',
+    params: [{ key: 'period', role: '볼린저밴드(중간선/표준편차) 계산에 쓰는 봉 개수. BB_upper 등과 동일한 의미.' }],
+    formula: '%B = (종가 − 하단) ÷ (상단 − 하단)',
+    thresholdExample:
+      '%B < 0.2 → 하단 근접(과매도). %B > 0.8 → 상단 근접(과매수). BB_upper/lower와 달리 코인 시세와 무관하게 항상 0~1 범위라 여러 코인에 같은 threshold를 그대로 쓸 수 있습니다.',
+    usage: 'BB_upper/BB_lower를 절대가격 필터로 쓰기 애매할 때(코인마다 가격 스케일이 달라서), 대신 이 지표로 "밴드 내 상대 위치"를 오실레이터처럼 씁니다.',
+  },
+  MACD_PPO: {
+    meaning:
+      'MACD Line을 장기 EMA 대비 비율(%)로 표현해 코인 가격과 무관하게 만든 지표입니다. backtrader PPO 지표의 ppo 서브라인을 읽습니다 — 계산 배경은 MACD_line 가이드를 참고하세요.',
+    params: [
+      { key: 'fast', role: '단기 EMA 기간. MACD_line의 fast와 동일한 의미.' },
+      { key: 'slow', role: '장기 EMA 기간. MACD_line의 slow와 동일한 의미.' },
+      { key: 'signal', role: 'PPO 자체를 다시 평활화하는 EMA 기간 — MACD_PPO_signal 지표가 이 값을 씁니다.' },
+    ],
+    formula: 'PPO = (EMA(fast) − EMA(slow)) ÷ EMA(slow) × 100',
+    thresholdExample:
+      'PPO > 0 → 상승 모멘텀 우세. MACD_line과 해석은 같지만 값이 %라서, 코인마다 가격 스케일이 달라도 같은 threshold(예: PPO > 1)를 여러 코인에 그대로 쓸 수 있습니다.',
+    usage: 'MACD_line 대신 여러 코인에 동일한 threshold로 grid search/백테스트를 돌리고 싶을 때 씁니다.',
+  },
+  MACD_PPO_signal: {
+    meaning:
+      'PPO를 다시 signal기간 EMA로 평활화한 시그널 라인입니다. MACD_signal의 정규화 버전 — 계산 배경은 MACD_signal 가이드를 참고하세요.',
+    params: [
+      { key: 'fast', role: 'PPO 계산에 쓰는 단기 EMA 기간(같은 PPO 객체를 공유).' },
+      { key: 'slow', role: 'PPO 계산에 쓰는 장기 EMA 기간.' },
+      { key: 'signal', role: 'PPO를 평활화하는 기간.' },
+    ],
+    formula: 'PPO Signal = PPO의 signal기간 EMA',
+    thresholdExample: 'PPO가 Signal을 상향 돌파하면 흔히 매수 신호로 봅니다. threshold는 보통 0 근처를 씁니다.',
+    usage: 'MACD_PPO ">" 조건과 함께 "PPO > 0"과 "PPO Signal > 0"을 같이 걸어 상승 모멘텀 구간만 남기는 식으로 씁니다.',
+  },
+  ATR_PCT: {
+    meaning:
+      'ATR을 현재가 대비 비율(%)로 표현해 코인마다 다른 가격 스케일을 제거한 변동성 지표입니다 — 계산 배경은 ATR 가이드를 참고하세요.',
+    params: [{ key: 'period', role: 'True Range를 평활할 봉 개수. ATR과 동일한 의미.' }],
+    formula: 'ATR% = ATR ÷ 종가 × 100',
+    thresholdExample:
+      'ATR%=2면 최근 변동폭이 종가의 2% 수준입니다. ATR과 달리 이 값은 코인 가격과 무관해서 여러 코인에 같은 threshold를 그대로 쓸 수 있습니다. RSI처럼 과매수/과매도 방향이 있는 지표는 아니라서, "낮으면 매수/높으면 매도"라는 해석보다는 변동성 수준 자체를 필터로 보는 편이 자연스럽습니다.',
+    usage: '변동성이 코인마다 크게 다를 때, ATR 대신 이 지표로 "변동성이 어느 수준을 넘었는지/밑돌았는지"를 여러 코인에 동일한 기준으로 씁니다.',
   },
   OBV: {
     meaning:
