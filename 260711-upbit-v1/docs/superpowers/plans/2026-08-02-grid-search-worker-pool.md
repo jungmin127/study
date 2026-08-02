@@ -42,7 +42,7 @@
   — 반환값 `{"return_pct": float, "buy_block": dict, "sell_block": dict, "trades": list[dict], "final_value": float}`.
   Task 4(캘리브레이션 스크립트)와 Task 5(`_run_one_combo_worker`)가 이 함수를 그대로 재사용한다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_grid_search.py` 맨 위 import에 `_run_one_combo` 추가:
 
@@ -73,12 +73,12 @@ def test_run_one_combo_returns_expected_shape():
     assert isinstance(result["return_pct"], float)
 ```
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_grid_search.py::test_run_one_combo_returns_expected_shape -v`
 Expected: FAIL with `ImportError: cannot import name '_run_one_combo'`
 
-- [ ] **Step 3: 최소 구현**
+- [x] **Step 3: 최소 구현**
 
 `scripts/grid_search.py`의 `compute_grid_results` 함수(현재 95-136행) 전체를 아래로 교체한다:
 
@@ -134,14 +134,14 @@ def compute_grid_results(
     return results
 ```
 
-- [ ] **Step 4: 통과 확인 (신규 + 기존 전체)**
+- [x] **Step 4: 통과 확인 (신규 + 기존 전체)**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_grid_search.py -v`
 Expected: 전부 PASS (기존 12개 + 신규 1개 = 13개) — `compute_grid_results`를 쓰는 기존 테스트
 2개(`test_compute_grid_results_runs_every_combo`, `test_compute_grid_results_pairs_every_buy_with_every_sell`)도
 동작 변화 없이 그대로 통과해야 한다.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add scripts/grid_search.py tests/test_grid_search.py
@@ -161,7 +161,7 @@ git commit -m "refactor: extract _run_one_combo from compute_grid_results"
 - Produces: `_check_candle_warmup(df, buy_conditions: list[dict], sell_conditions: list[dict]) -> None`
   — 캔들 수가 부족하면 `SystemExit`를 던진다. `main()`이 그리드 생성 직후, 계산 시작 전에 호출한다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_grid_search.py` 맨 위에 `import pytest` 추가(현재 없음), import 목록에
 `_check_candle_warmup` 추가. 파일 끝에 추가:
@@ -182,12 +182,12 @@ def test_check_candle_warmup_passes_when_sufficient():
     _check_candle_warmup(df, buy_conditions, sell_conditions)
 ```
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_grid_search.py::test_check_candle_warmup_raises_when_insufficient -v`
 Expected: FAIL with `ImportError: cannot import name '_check_candle_warmup'`
 
-- [ ] **Step 3: 최소 구현**
+- [x] **Step 3: 최소 구현**
 
 `scripts/grid_search.py`의 import 섹션(11-22행)에 추가:
 
@@ -225,12 +225,12 @@ def _check_candle_warmup(df, buy_conditions: list[dict], sell_conditions: list[d
     _check_candle_warmup(df, buy_conditions, sell_conditions)
 ```
 
-- [ ] **Step 4: 통과 확인**
+- [x] **Step 4: 통과 확인**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_grid_search.py -v`
 Expected: 전부 PASS (15개)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add scripts/grid_search.py tests/test_grid_search.py
@@ -249,7 +249,7 @@ git commit -m "feat: reject grid search when candle count is below required warm
 - Produces: `_watchdog_expired(last_progress_time: float, now: float, timeout_sec: float) -> bool`.
   Task 5의 `compute_grid_results_parallel`이 폴링 루프에서 이 함수로 "워커 응답 없음"을 판정한다.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_grid_search.py` import에 `_watchdog_expired` 추가. 파일 끝에 추가:
 
@@ -266,12 +266,12 @@ def test_watchdog_not_expired_exactly_at_timeout():
     assert _watchdog_expired(last_progress_time=0.0, now=300.0, timeout_sec=300) is False
 ```
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_grid_search.py::test_watchdog_expired_when_timeout_exceeded -v`
 Expected: FAIL with `ImportError: cannot import name '_watchdog_expired'`
 
-- [ ] **Step 3: 최소 구현**
+- [x] **Step 3: 최소 구현**
 
 `_check_candle_warmup` 함수 바로 아래에 추가:
 
@@ -283,12 +283,12 @@ def _watchdog_expired(last_progress_time: float, now: float, timeout_sec: float)
     return (now - last_progress_time) > timeout_sec
 ```
 
-- [ ] **Step 4: 통과 확인**
+- [x] **Step 4: 통과 확인**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_grid_search.py -v`
 Expected: 전부 PASS (18개)
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add scripts/grid_search.py tests/test_grid_search.py
@@ -308,7 +308,7 @@ git commit -m "feat: add pure watchdog timeout predicate for parallel grid searc
 - Produces: `WORKER_COUNT`, `MAX_TASKS_PER_CHILD`, `WATCHDOG_TIMEOUT_SEC`, `PROGRESS_LOG_INTERVAL`
   모듈 상수. Task 5의 `compute_grid_results_parallel`이 기본값으로 사용한다.
 
-- [ ] **Step 1: 캘리브레이션 스크립트 작성**
+- [x] **Step 1: 캘리브레이션 스크립트 작성**
 
 저장소 루트에 `_calibrate_grid_search_memory.py`를 만든다(psutil 미설치 확인됨 — 새 의존성
 추가하지 않고 Windows API를 `ctypes`로 직접 호출):
@@ -401,13 +401,13 @@ if __name__ == "__main__":
 +183MB, 호출당 ~20KB)보다 훨씬 높게 나온 바 있다 — 이 스크립트의 측정치도 비슷한 자릿수로
 나올 가능성이 높다.
 
-- [ ] **Step 2: 스크립트 실행**
+- [x] **Step 2: 스크립트 실행**
 
 Run: `PYTHONPATH=. PYTHONIOENCODING=utf-8 python _calibrate_grid_search_memory.py`
 
 출력 마지막 줄의 "호출당 평균 증가량: X.XX KB"를 기록해둔다.
 
-- [ ] **Step 3: K 계산**
+- [x] **Step 3: K 계산**
 
 아래 식으로 계산한다(16GB RAM, 워커 4개, 백엔드+프론트엔드 개발서버 상시 구동을 전제로 한
 보수적 예산 배분):
@@ -426,7 +426,7 @@ K = int(916 * 1024 / <Step 2에서 측정한 "호출당 평균 증가량(KB)">)
 
 예: 측정치가 177KB/call이면 `K = int(916 * 1024 / 177) = 5,297`.
 
-- [ ] **Step 4: 상수 반영**
+- [x] **Step 4: 상수 반영**
 
 `scripts/grid_search.py`의 `PERIOD_GRID = [10, 14, 20]` 바로 위에 추가:
 
@@ -437,13 +437,13 @@ WATCHDOG_TIMEOUT_SEC = 300
 PROGRESS_LOG_INTERVAL = 1000
 ```
 
-- [ ] **Step 5: 임시 스크립트 삭제**
+- [x] **Step 5: 임시 스크립트 삭제**
 
 ```bash
 rm _calibrate_grid_search_memory.py
 ```
 
-- [ ] **Step 6: 커밋 (상수만)**
+- [x] **Step 6: 커밋 (상수만)**
 
 ```bash
 git add scripts/grid_search.py
@@ -467,7 +467,7 @@ git commit -m "feat: add worker pool constants calibrated from measured memory g
 이 태스크는 `multiprocessing.Pool` 실제 동작을 다루므로 자동 유닛 테스트 대신 수동 스모크
 테스트로 검증한다(이 저장소 기존 관례 — Pool 내부를 mock하는 건 깨지기 쉬움).
 
-- [ ] **Step 1: import 및 워커 글로벌/함수 추가**
+- [x] **Step 1: import 및 워커 글로벌/함수 추가**
 
 `scripts/grid_search.py`의 import 섹션에 추가:
 
@@ -496,7 +496,7 @@ def _run_one_combo_worker(buy_block: dict, sell_block: dict) -> dict:
     return _run_one_combo(_worker_df, _worker_risk_config, buy_block, sell_block)
 ```
 
-- [ ] **Step 2: `compute_grid_results_parallel` 구현**
+- [x] **Step 2: `compute_grid_results_parallel` 구현**
 
 `compute_grid_results` 함수 바로 아래(`_watchdog_expired` 아래)에 추가:
 
@@ -563,7 +563,7 @@ def compute_grid_results_parallel(
         pool.join()
 ```
 
-- [ ] **Step 3: `main()`이 병렬 버전을 쓰도록 교체**
+- [x] **Step 3: `main()`이 병렬 버전을 쓰도록 교체**
 
 `main()`에서 (Task 2에서 추가한 `_check_candle_warmup(...)` 호출 다음 줄) 아래 부분을:
 
@@ -581,13 +581,13 @@ def compute_grid_results_parallel(
     elapsed = time.perf_counter() - t0
 ```
 
-- [ ] **Step 4: 기존 테스트 회귀 확인**
+- [x] **Step 4: 기존 테스트 회귀 확인**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_grid_search.py -v`
 Expected: 전부 PASS (18개, 변경 없음 — `compute_grid_results_parallel`은 자동 테스트 대상이
 아니므로 이 단계에서 개수는 그대로다)
 
-- [ ] **Step 5: 소규모 수동 스모크 테스트**
+- [x] **Step 5: 소규모 수동 스모크 테스트**
 
 작은 실제 그리드로 병렬 경로가 실제로 동작하는지 먼저 확인한다(전체 20,700개 규모는 Task 6에서):
 
@@ -600,7 +600,7 @@ PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/grid_search.py --market KRW-B
 Expected: 크래시 없이 끝까지 실행되고, 진행률 로그가 "완료 N/전체건 (X.X%)" 형식으로 찍히고,
 마지막 줄에 `RESULT_JSON: {...}`가 출력된다. `saved` 리스트에 최대 5개 항목이 있어야 한다.
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add scripts/grid_search.py
@@ -618,7 +618,7 @@ git commit -m "feat: run grid search combos through a recycling worker pool with
 이전 세션에서 크래시가 재현됐던 것과 동일한 조건(1시간봉, 다개월치, 9-오실레이터 20,700개
 조합 전체)으로 실제 실행해 이번 수정이 그 크래시를 막는지 확인한다.
 
-- [ ] **Step 1: 전체 규모 실행**
+- [x] **Step 1: 전체 규모 실행**
 
 Run (백그라운드 권장, 수 분~수십 분 소요):
 ```bash
@@ -626,7 +626,7 @@ PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/grid_search.py --market KRW-E
   --capital 10000000 --start 2026-06-01 --end 2026-07-31 --top-n 20
 ```
 
-- [ ] **Step 2: 확인 항목**
+- [x] **Step 2: 확인 항목**
 
 - 크래시 없이 `RESULT_JSON`까지 도달하는지 (특히 지난번 크래시 구간이던 36~40% 지점을
   무사히 통과하는지)
@@ -635,7 +635,7 @@ PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/grid_search.py --market KRW-E
 - (선택) 작업 관리자/`tasklist`로 워커 프로세스가 4개 떠 있는지, 재시작이 실제로 일어나는지
   확인
 
-- [ ] **Step 3: pytest 전체 스위트 최종 확인**
+- [x] **Step 3: pytest 전체 스위트 최종 확인**
 
 Run: `PYTHONPATH=. python -m pytest -v`
 Expected: 전부 PASS (기존 전체 스위트 + 이 플랜에서 추가한 6개)
@@ -649,7 +649,7 @@ Expected: 전부 PASS (기존 전체 스위트 + 이 플랜에서 추가한 6개
 
 **Interfaces:** 없음(문서만)
 
-- [ ] **Step 1: 소요 시간/병렬화 안내 반영**
+- [x] **Step 1: 소요 시간/병렬화 안내 반영**
 
 `## 실행 절차`의 2번 항목(파싱 결과 표 + 예상 소요 시간 안내 문구)을 Task 6에서 실측한
 `elapsed_sec` 기준으로 갱신한다. 예시(실측치로 교체):
@@ -670,7 +670,7 @@ Expected: 전부 PASS (기존 전체 스위트 + 이 플랜에서 추가한 6개
   전달하라.
 ```
 
-- [ ] **Step 2: 커밋**
+- [x] **Step 2: 커밋**
 
 ```bash
 git add .claude/skills/grid-search/SKILL.md
