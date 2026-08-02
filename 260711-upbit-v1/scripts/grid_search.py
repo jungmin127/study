@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
 import time
 from datetime import datetime, timezone
 
@@ -143,6 +144,24 @@ def _run_one_combo(df, risk_config: dict, buy_block: dict, sell_block: dict) -> 
     }
 
 
+_worker_df = None
+_worker_risk_config: dict | None = None
+
+
+def _init_worker(df, risk_config: dict) -> None:
+    """Pool 워커 프로세스가 (재)시작될 때마다 호출 — df/risk_config를 워커 전역에 저장해
+    태스크마다 재직렬화하지 않는다."""
+    global _worker_df, _worker_risk_config
+    _worker_df = df
+    _worker_risk_config = risk_config
+
+
+def _run_one_combo_worker(buy_block: dict, sell_block: dict) -> dict:
+    """Pool.apply_async에 전달되는 워커 측 진입점. 모듈 최상위 함수여야 Windows spawn에서
+    pickle 가능하다."""
+    return _run_one_combo(_worker_df, _worker_risk_config, buy_block, sell_block)
+
+
 def compute_grid_results(
     df,
     buy_conditions: list[dict],
@@ -167,6 +186,68 @@ def compute_grid_results(
             print(f"    매수조건 {i + 1}/{len(buy_conditions)} 완료 ({done}/{total}건)", flush=True)
 
     return results
+
+
+def compute_grid_results_parallel(
+    df,
+    buy_conditions: list[dict],
+    sell_conditions: list[dict],
+    risk_config: dict,
+    processes: int = WORKER_COUNT,
+    max_tasks_per_child: int = MAX_TASKS_PER_CHILD,
+    watchdog_timeout: float = WATCHDOG_TIMEOUT_SEC,
+) -> list[dict]:
+    """buy_conditions x sell_conditions 전 조합을 워커 풀로 병렬 계산한다(대규모 실행용).
+
+    워커는 max_tasks_per_child번 처리하면 자동 재시작되어 backtrader의 반복 인스턴스화
+    메모리 누적을 방지한다. 마지막 진행 이후 watchdog_timeout초간 응답이 없으면 워커가
+    죽어서 멈춘 것으로 보고 중단한다.
+    """
+    combos = [(b, s) for b in buy_conditions for s in sell_conditions]
+    total = len(combos)
+
+    pool = multiprocessing.Pool(
+        processes=processes,
+        maxtasksperchild=max_tasks_per_child,
+        initializer=_init_worker,
+        initargs=(df, risk_config),
+    )
+    try:
+        async_results = [pool.apply_async(_run_one_combo_worker, (b, s)) for b, s in combos]
+        completed = [False] * total
+        results: list[dict | None] = [None] * total
+        done_count = 0
+        last_logged = 0
+        last_progress = time.monotonic()
+
+        while done_count < total:
+            progressed = False
+            for i, ar in enumerate(async_results):
+                if not completed[i] and ar.ready():
+                    results[i] = ar.get()
+                    completed[i] = True
+                    done_count += 1
+                    progressed = True
+
+            if progressed:
+                last_progress = time.monotonic()
+                if done_count - last_logged >= PROGRESS_LOG_INTERVAL or done_count == total:
+                    pct = done_count / total * 100
+                    print(f"    완료 {done_count:,}/{total:,}건 ({pct:.1f}%)", flush=True)
+                    last_logged = done_count
+            elif _watchdog_expired(last_progress, time.monotonic(), watchdog_timeout):
+                raise RuntimeError(
+                    f"워커 응답 없음 — {watchdog_timeout:.0f}초간 진행 없어 중단합니다. "
+                    "일부 워커가 예기치 않게 종료됐을 수 있습니다."
+                )
+
+            if done_count < total:
+                time.sleep(1)
+
+        return results
+    finally:
+        pool.terminate()
+        pool.join()
 
 
 def _effective_period(params: dict) -> int:
@@ -247,7 +328,7 @@ def main() -> None:
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": args.capital}
 
     t0 = time.perf_counter()
-    results = compute_grid_results(df, buy_conditions, sell_conditions, risk_config)
+    results = compute_grid_results_parallel(df, buy_conditions, sell_conditions, risk_config)
     elapsed = time.perf_counter() - t0
     print(f"\n[3] 전체 계산 완료: {len(results)}건, {elapsed:.1f}초 ({elapsed / 60:.1f}분)", flush=True)
 
