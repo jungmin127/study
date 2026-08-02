@@ -22,6 +22,10 @@ from engine.runner import run_backtest
 from engine.sweep import DEFAULT_RISK_CONFIG
 from upbit_data_service import get_candles
 
+WORKER_COUNT = 4
+MAX_TASKS_PER_CHILD = 11223
+WATCHDOG_TIMEOUT_SEC = 300
+PROGRESS_LOG_INTERVAL = 1000
 PERIOD_GRID = [10, 14, 20]
 
 
