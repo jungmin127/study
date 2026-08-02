@@ -23,6 +23,10 @@ from engine.runner import run_backtest
 from engine.sweep import DEFAULT_RISK_CONFIG
 from upbit_data_service import get_candles
 
+# MAX_TASKS_PER_CHILD은 83.57 KB/call(9-오실레이터 그리드, ETH/1시간봉/2026-06~07 기준 실측)을
+# 전제로 계산됐다. 이 세션에서 측정한 leak rate는 상황에 따라 20~177 KB/call까지 편차가 있었으므로,
+# 더 무거운 데이터셋(캔들 수가 많거나 지표 조합이 늘어나는 경우)에서는 워커당 실제 누적 메모리가
+# 이 값이 전제한 예산(약 916MB)을 초과할 수 있다.
 WORKER_COUNT = 4
 MAX_TASKS_PER_CHILD = 11223
 WATCHDOG_TIMEOUT_SEC = 300
@@ -98,13 +102,34 @@ def build_condition_grid() -> tuple[list[dict], list[dict]]:
     return buy_conditions, sell_conditions
 
 
+def _macd_required_bars(params: dict) -> int:
+    """MACD_PPO/MACD_PPO_signal의 실제 필요 워밍업 봉 수를 계산한다.
+
+    backtrader PPO의 시그널 라인 minperiod는 max(fast,slow) + signal - 1이다(실측 확인:
+    PPO(fast=16,slow=32,signal=12)는 42봉에서 IndexError, 43봉에서 정상). max_required_period()는
+    개별 파라미터의 max만 취해 이 조합형 요구량을 과소평가하므로(예: 위 파라미터에 32만 반환)
+    별도로 계산해 보정한다.
+    """
+    fast = params.get("fast")
+    slow = params.get("slow")
+    signal = params.get("signal")
+    if fast is None or slow is None or signal is None:
+        return 0
+    return max(fast, slow) + signal - 1
+
+
 def _check_candle_warmup(df, buy_conditions: list[dict], sell_conditions: list[dict]) -> None:
     """그리드에 등장하는 파라미터의 최대 워밍업 봉 수보다 캔들이 적으면 명확한 에러로 중단한다.
 
-    사전 체크 없이 계산을 시작하면 backtrader 내부에서 IndexError로 불명확하게 죽는다."""
+    사전 체크 없이 계산을 시작하면 backtrader 내부에서 IndexError로 불명확하게 죽는다.
+    max_required_period()는 MACD류의 조합형 요구량(_macd_required_bars 참고)을 과소평가하므로
+    별도로 보정한다."""
     all_buy_group = {"type": "AND", "conditions": buy_conditions}
     all_sell_group = {"type": "AND", "conditions": sell_conditions}
     required_bars = max(max_required_period(all_buy_group), max_required_period(all_sell_group))
+    for block in buy_conditions + sell_conditions:
+        if block["indicator"] in ("MACD_PPO", "MACD_PPO_signal"):
+            required_bars = max(required_bars, _macd_required_bars(block["params"]))
     if len(df) < required_bars:
         raise SystemExit(
             f"선택된 그리드가 최소 {required_bars}개의 봉을 필요로 하지만, "
@@ -204,8 +229,10 @@ def compute_grid_results_parallel(
     약 5,175회 호출로, 이는 max_tasks_per_child(11223)보다 작아 이번 규모에서는 재시작이
     실제로 일어나지 않는다. max_tasks_per_child는 그래도 필요한 안전장치다: 앞으로 그리드가
     더 커져서 워커 하나가 처리할 조합 수가 이 값을 넘어서면, 그 시점부터 자동 재시작이
-    실제로 개입해 누적 메모리를 주기적으로 회수한다. 마지막 진행 이후 watchdog_timeout초간
-    응답이 없으면 워커가 죽어서 멈춘 것으로 보고 중단한다.
+    실제로 개입해 누적 메모리를 주기적으로 회수한다. 이 임계값 자체가 특정 측정치(83.57 KB/call)를
+    전제로 하므로, 다른 데이터셋에서는 실제 워커당 누적량이 이 전제보다 클 수 있다는 점은 감안해야
+    한다. 마지막 진행 이후 watchdog_timeout초간 응답이 없으면 워커가 죽어서 멈춘 것으로 보고
+    중단한다.
     """
     combos = [(b, s) for b in buy_conditions for s in sell_conditions]
     total = len(combos)
@@ -228,7 +255,13 @@ def compute_grid_results_parallel(
             progressed = False
             for i, ar in enumerate(async_results):
                 if not completed[i] and ar.ready():
-                    results[i] = ar.get()
+                    try:
+                        results[i] = ar.get()
+                    except Exception as exc:
+                        buy_block, sell_block = combos[i]
+                        raise RuntimeError(
+                            f"조합 실패 (buy={buy_block}, sell={sell_block}): {exc}"
+                        ) from exc
                     completed[i] = True
                     done_count += 1
                     progressed = True

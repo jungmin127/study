@@ -4,9 +4,11 @@ from engine.sweep import DEFAULT_RISK_CONFIG
 from scripts.grid_search import (
     build_condition_grid,
     compute_grid_results,
+    compute_grid_results_parallel,
     dedup_top_results,
     _run_one_combo,
     _check_candle_warmup,
+    _macd_required_bars,
     _watchdog_expired,
 )
 from tests.signal_fixtures import make_oscillating_df
@@ -266,6 +268,30 @@ def test_check_candle_warmup_passes_when_sufficient():
     _check_candle_warmup(df, buy_conditions, sell_conditions)
 
 
+def test_macd_required_bars_matches_verified_formula():
+    assert _macd_required_bars({"fast": 16, "slow": 32, "signal": 12}) == 43
+    assert _macd_required_bars({"fast": 12, "slow": 26, "signal": 9}) == 34
+
+
+def test_check_candle_warmup_catches_macd_composite_requirement():
+    df = make_oscillating_df(n=35)  # passes max_required_period's max(32) but not the true 43
+    buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
+    sell_conditions = [
+        {"indicator": "MACD_PPO_signal", "params": {"fast": 16, "slow": 32, "signal": 12}, "operator": ">", "threshold": 1},
+    ]
+    with pytest.raises(SystemExit):
+        _check_candle_warmup(df, buy_conditions, sell_conditions)
+
+
+def test_check_candle_warmup_passes_when_macd_requirement_met():
+    df = make_oscillating_df(n=43)
+    buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
+    sell_conditions = [
+        {"indicator": "MACD_PPO_signal", "params": {"fast": 16, "slow": 32, "signal": 12}, "operator": ">", "threshold": 1},
+    ]
+    _check_candle_warmup(df, buy_conditions, sell_conditions)
+
+
 def test_watchdog_expired_when_timeout_exceeded():
     assert _watchdog_expired(last_progress_time=0.0, now=301.0, timeout_sec=300) is True
 
@@ -276,3 +302,22 @@ def test_watchdog_not_expired_within_timeout():
 
 def test_watchdog_not_expired_exactly_at_timeout():
     assert _watchdog_expired(last_progress_time=0.0, now=300.0, timeout_sec=300) is False
+
+
+def test_compute_grid_results_parallel_raises_on_watchdog_timeout():
+    # n=8000 (not the usual n=200) is deliberate: on this machine time.monotonic() has
+    # ~1ms granularity, so the very first watchdog check (microseconds after last_progress
+    # is set) reads a 0 diff and never trips with a trivially fast task — the loop's
+    # mandatory 1s poll sleep would let a fast combo finish first and mask the timeout.
+    # A combo large enough to still be unfinished after that first 1s sleep (~1.1s+ compute,
+    # verified empirically) makes the watchdog fire deterministically on the second check.
+    df = make_oscillating_df(n=8000)
+    buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
+    sell_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]
+    risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": 1_000_000}
+
+    with pytest.raises(RuntimeError, match="워커 응답 없음"):
+        compute_grid_results_parallel(
+            df, buy_conditions, sell_conditions, risk_config,
+            processes=1, watchdog_timeout=0,
+        )
