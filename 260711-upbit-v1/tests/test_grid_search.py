@@ -1,9 +1,12 @@
+import pytest
+
 from engine.sweep import DEFAULT_RISK_CONFIG
 from scripts.grid_search import (
     build_condition_grid,
     compute_grid_results,
     dedup_top_results,
     _run_one_combo,
+    _check_candle_warmup,
 )
 from tests.signal_fixtures import make_oscillating_df
 
@@ -245,3 +248,18 @@ def test_run_one_combo_returns_expected_shape():
     assert result["sell_block"] == sell_block
     assert isinstance(result["trades"], list)
     assert isinstance(result["return_pct"], float)
+
+
+def test_check_candle_warmup_raises_when_insufficient():
+    df = make_oscillating_df(n=10)
+    buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
+    sell_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]
+    with pytest.raises(SystemExit):
+        _check_candle_warmup(df, buy_conditions, sell_conditions)
+
+
+def test_check_candle_warmup_passes_when_sufficient():
+    df = make_oscillating_df(n=200)
+    buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
+    sell_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]
+    _check_candle_warmup(df, buy_conditions, sell_conditions)

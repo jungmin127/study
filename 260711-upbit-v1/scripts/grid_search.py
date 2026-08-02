@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 from engine.cache import run_backtest_cached
 from engine.condition_strategy import ConditionTreeStrategy
+from engine.condition_tree import max_required_period
 from engine.runner import run_backtest
 from engine.sweep import DEFAULT_RISK_CONFIG
 from upbit_data_service import get_candles
@@ -90,6 +91,20 @@ def build_condition_grid() -> tuple[list[dict], list[dict]]:
             sell_conditions.append({"indicator": indicator, "params": {}, "operator": operator, "threshold": t})
 
     return buy_conditions, sell_conditions
+
+
+def _check_candle_warmup(df, buy_conditions: list[dict], sell_conditions: list[dict]) -> None:
+    """그리드에 등장하는 파라미터의 최대 워밍업 봉 수보다 캔들이 적으면 명확한 에러로 중단한다.
+
+    사전 체크 없이 계산을 시작하면 backtrader 내부에서 IndexError로 불명확하게 죽는다."""
+    all_buy_group = {"type": "AND", "conditions": buy_conditions}
+    all_sell_group = {"type": "AND", "conditions": sell_conditions}
+    required_bars = max(max_required_period(all_buy_group), max_required_period(all_sell_group))
+    if len(df) < required_bars:
+        raise SystemExit(
+            f"선택된 그리드가 최소 {required_bars}개의 봉을 필요로 하지만, "
+            f"해당 기간에는 {len(df)}개의 봉만 있습니다. 기간을 늘리세요."
+        )
 
 
 def _run_one_combo(df, risk_config: dict, buy_block: dict, sell_block: dict) -> dict:
@@ -216,6 +231,7 @@ def main() -> None:
         f"[2] 매수 조건 {len(buy_conditions)}개 x 매도 조건 {len(sell_conditions)}개 = 총 {total_combos:,}개 조합",
         flush=True,
     )
+    _check_candle_warmup(df, buy_conditions, sell_conditions)
 
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": args.capital}
 
