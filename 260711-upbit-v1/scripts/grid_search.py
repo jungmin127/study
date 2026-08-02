@@ -107,6 +107,13 @@ def _check_candle_warmup(df, buy_conditions: list[dict], sell_conditions: list[d
         )
 
 
+def _watchdog_expired(last_progress_time: float, now: float, timeout_sec: float) -> bool:
+    """마지막 진행(워커 결과 완료) 이후 timeout_sec를 초과했으면 True.
+
+    워커가 죽어서 응답이 없는 상황을 감지하기 위한 순수 판정 함수."""
+    return (now - last_progress_time) > timeout_sec
+
+
 def _run_one_combo(df, risk_config: dict, buy_block: dict, sell_block: dict) -> dict:
     """조합 하나(매수 블록 1개 x 매도 블록 1개)에 대해 run_backtest를 1회 호출한다.
 

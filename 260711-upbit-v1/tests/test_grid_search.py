@@ -7,6 +7,7 @@ from scripts.grid_search import (
     dedup_top_results,
     _run_one_combo,
     _check_candle_warmup,
+    _watchdog_expired,
 )
 from tests.signal_fixtures import make_oscillating_df
 
@@ -263,3 +264,15 @@ def test_check_candle_warmup_passes_when_sufficient():
     buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
     sell_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]
     _check_candle_warmup(df, buy_conditions, sell_conditions)
+
+
+def test_watchdog_expired_when_timeout_exceeded():
+    assert _watchdog_expired(last_progress_time=0.0, now=301.0, timeout_sec=300) is True
+
+
+def test_watchdog_not_expired_within_timeout():
+    assert _watchdog_expired(last_progress_time=0.0, now=299.0, timeout_sec=300) is False
+
+
+def test_watchdog_not_expired_exactly_at_timeout():
+    assert _watchdog_expired(last_progress_time=0.0, now=300.0, timeout_sec=300) is False
