@@ -199,9 +199,13 @@ def compute_grid_results_parallel(
 ) -> list[dict]:
     """buy_conditions x sell_conditions 전 조합을 워커 풀로 병렬 계산한다(대규모 실행용).
 
-    워커는 max_tasks_per_child번 처리하면 자동 재시작되어 backtrader의 반복 인스턴스화
-    메모리 누적을 방지한다. 마지막 진행 이후 watchdog_timeout초간 응답이 없으면 워커가
-    죽어서 멈춘 것으로 보고 중단한다.
+    조합을 processes개 워커로 분산하는 것 자체가 워커 하나가 누적하는 backtrader 메모리를
+    (전체 조합 수 / processes) 만큼으로 이미 제한한다 — 20,700개 조합/워커 4개 기준 워커당
+    약 5,175회 호출로, 이는 max_tasks_per_child(11223)보다 작아 이번 규모에서는 재시작이
+    실제로 일어나지 않는다. max_tasks_per_child는 그래도 필요한 안전장치다: 앞으로 그리드가
+    더 커져서 워커 하나가 처리할 조합 수가 이 값을 넘어서면, 그 시점부터 자동 재시작이
+    실제로 개입해 누적 메모리를 주기적으로 회수한다. 마지막 진행 이후 watchdog_timeout초간
+    응답이 없으면 워커가 죽어서 멈춘 것으로 보고 중단한다.
     """
     combos = [(b, s) for b in buy_conditions for s in sell_conditions]
     total = len(combos)
