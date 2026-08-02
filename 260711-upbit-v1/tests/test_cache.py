@@ -17,6 +17,13 @@ from engine.cache import (
     save_segment_classification,
     save_sweep_result,
 )
+from engine.cache import (
+    create_grid_search_job,
+    finish_grid_search_job,
+    get_grid_search_job,
+    list_grid_search_jobs,
+    update_grid_search_job_progress,
+)
 
 
 class _StrategyA(bt.Strategy):
@@ -557,3 +564,92 @@ def test_get_run_config_returns_stored_config(tmp_path, monkeypatch):
 def test_get_run_config_returns_none_for_missing_run(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     assert get_run_config("does-not-exist") is None
+
+
+def test_create_and_get_grid_search_job_roundtrips(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    job = get_grid_search_job("job-1")
+    assert job["id"] == "job-1"
+    assert job["market"] == "KRW-SOL"
+    assert job["capital"] == 1_000_000.0
+    assert job["top_n"] == 20
+    assert job["status"] == "running"
+    assert job["done_combos"] == 0
+    assert job["total_combos"] is None
+    assert job["finished_at"] is None
+    assert job["result_json"] is None
+
+
+def test_get_grid_search_job_returns_none_for_missing_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    assert get_grid_search_job("does-not-exist") is None
+
+
+def test_update_grid_search_job_progress_updates_counts(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    update_grid_search_job_progress("job-1", done_combos=1005, total_combos=20700)
+
+    job = get_grid_search_job("job-1")
+    assert job["done_combos"] == 1005
+    assert job["total_combos"] == 20700
+    assert job["status"] == "running"
+
+
+def test_finish_grid_search_job_marks_completed_with_results(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    finish_grid_search_job(
+        "job-1", status="completed", elapsed_sec=1617.9,
+        result_json='[{"rank": 1, "run_id": "abc", "return_pct": 33.65, "title": "[Grid] ..."}]',
+    )
+
+    job = get_grid_search_job("job-1")
+    assert job["status"] == "completed"
+    assert job["elapsed_sec"] == 1617.9
+    assert job["finished_at"] is not None
+    assert job["result_json"] == [{"rank": 1, "run_id": "abc", "return_pct": 33.65, "title": "[Grid] ..."}]
+
+
+def test_finish_grid_search_job_marks_failed_with_error_message(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    finish_grid_search_job("job-1", status="failed", error_message="워커 응답 없음")
+
+    job = get_grid_search_job("job-1")
+    assert job["status"] == "failed"
+    assert job["error_message"] == "워커 응답 없음"
+    assert job["result_json"] is None
+
+
+def test_list_grid_search_jobs_returns_newest_first(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-BTC", timeframe="days", capital=1_000_000.0,
+        start="2026-01-01", end="2026-02-01", top_n=20,
+    )
+    create_grid_search_job(
+        job_id="job-2", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    jobs = list_grid_search_jobs()
+    assert [j["id"] for j in jobs] == ["job-2", "job-1"]

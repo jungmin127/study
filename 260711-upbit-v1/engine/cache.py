@@ -74,6 +74,26 @@ CREATE TABLE IF NOT EXISTS segment_classification (
 );
 """
 
+_SCHEMA += """
+CREATE TABLE IF NOT EXISTS grid_search_jobs (
+    id             TEXT PRIMARY KEY,
+    market         TEXT NOT NULL,
+    timeframe      TEXT NOT NULL,
+    capital        REAL NOT NULL,
+    start          TEXT NOT NULL,
+    end            TEXT NOT NULL,
+    top_n          INTEGER NOT NULL,
+    status         TEXT NOT NULL,
+    total_combos   INTEGER,
+    done_combos    INTEGER NOT NULL DEFAULT 0,
+    started_at     TEXT NOT NULL,
+    finished_at    TEXT,
+    elapsed_sec    REAL,
+    error_message  TEXT,
+    result_json    TEXT
+);
+"""
+
 
 _JSON_PRIMITIVES = (str, int, float, bool, type(None))
 
@@ -536,3 +556,105 @@ def list_segment_classification() -> list[dict]:
         }
         for r in rows
     ]
+
+
+def create_grid_search_job(
+    job_id: str, market: str, timeframe: str, capital: float,
+    start: str, end: str, top_n: int,
+) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO grid_search_jobs "
+            "(id, market, timeframe, capital, start, end, top_n, status, done_combos, started_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 0, datetime('now'))",
+            (job_id, market, timeframe, capital, start, end, top_n),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_grid_search_job_progress(job_id: str, done_combos: int, total_combos: int) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE grid_search_jobs SET done_combos = ?, total_combos = ? WHERE id = ?",
+            (done_combos, total_combos, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def finish_grid_search_job(
+    job_id: str,
+    status: str,
+    elapsed_sec: float | None = None,
+    result_json: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE grid_search_jobs "
+            "SET status = ?, finished_at = datetime('now'), elapsed_sec = ?, "
+            "    result_json = ?, error_message = ? "
+            "WHERE id = ?",
+            (status, elapsed_sec, result_json, error_message, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _row_to_grid_search_job_dict(row: tuple) -> dict:
+    (job_id, market, timeframe, capital, start, end, top_n, status,
+     total_combos, done_combos, started_at, finished_at, elapsed_sec,
+     error_message, result_json) = row
+    return {
+        "id": job_id,
+        "market": market,
+        "timeframe": timeframe,
+        "capital": capital,
+        "start": start,
+        "end": end,
+        "top_n": top_n,
+        "status": status,
+        "total_combos": total_combos,
+        "done_combos": done_combos,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "elapsed_sec": elapsed_sec,
+        "error_message": error_message,
+        "result_json": json.loads(result_json) if result_json else None,
+    }
+
+
+def get_grid_search_job(job_id: str) -> dict | None:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT id, market, timeframe, capital, start, end, top_n, status, "
+            "       total_combos, done_combos, started_at, finished_at, elapsed_sec, "
+            "       error_message, result_json "
+            "FROM grid_search_jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return _row_to_grid_search_job_dict(row) if row else None
+
+
+def list_grid_search_jobs() -> list[dict]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT id, market, timeframe, capital, start, end, top_n, status, "
+            "       total_combos, done_combos, started_at, finished_at, elapsed_sec, "
+            "       error_message, result_json "
+            "FROM grid_search_jobs ORDER BY started_at DESC, rowid DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_grid_search_job_dict(r) for r in rows]
