@@ -92,43 +92,50 @@ def build_condition_grid() -> tuple[list[dict], list[dict]]:
     return buy_conditions, sell_conditions
 
 
+def _run_one_combo(df, risk_config: dict, buy_block: dict, sell_block: dict) -> dict:
+    """조합 하나(매수 블록 1개 x 매도 블록 1개)에 대해 run_backtest를 1회 호출한다.
+
+    순차 실행(compute_grid_results)과 병렬 워커(compute_grid_results_parallel) 양쪽에서
+    공유하는 단일 진입점 — 조합당 실제로 무엇을 계산하는지는 여기 한 곳에만 있다.
+    """
+    buy_group = {"type": "AND", "conditions": [buy_block]}
+    sell_group = {"type": "AND", "conditions": [sell_block]}
+    result = run_backtest(
+        df,
+        ConditionTreeStrategy,
+        risk_config,
+        {"buy_conditions": buy_group, "sell_conditions": sell_group},
+    )
+    initial_capital = float(risk_config.get("initial_capital", 10000))
+    return_pct = (result["final_value"] - initial_capital) / initial_capital * 100
+    return {
+        "return_pct": return_pct,
+        "buy_block": buy_block,
+        "sell_block": sell_block,
+        "trades": result["trades"],
+        "final_value": result["final_value"],
+    }
+
+
 def compute_grid_results(
     df,
     buy_conditions: list[dict],
     sell_conditions: list[dict],
     risk_config: dict,
 ) -> list[dict]:
-    """buy_conditions x sell_conditions 전 조합을 run_backtest로 계산한다.
+    """buy_conditions x sell_conditions 전 조합을 순차로 계산한다(테스트/소규모 실행용).
+
+    대규모 실행(main())은 compute_grid_results_parallel을 쓴다.
 
     Returns:
-        각 조합의 결과 딕셔너리 리스트:
-        {"return_pct": float, "buy_block": dict, "sell_block": dict,
-         "trades": list[dict], "final_value": float}
+        각 조합의 결과 딕셔너리 리스트: _run_one_combo와 동일한 shape.
     """
     results: list[dict] = []
-    initial_capital = float(risk_config.get("initial_capital", 10000))
     total = len(buy_conditions) * len(sell_conditions)
 
     for i, buy_block in enumerate(buy_conditions):
-        buy_group = {"type": "AND", "conditions": [buy_block]}
         for sell_block in sell_conditions:
-            sell_group = {"type": "AND", "conditions": [sell_block]}
-            result = run_backtest(
-                df,
-                ConditionTreeStrategy,
-                risk_config,
-                {"buy_conditions": buy_group, "sell_conditions": sell_group},
-            )
-            return_pct = (result["final_value"] - initial_capital) / initial_capital * 100
-            results.append(
-                {
-                    "return_pct": return_pct,
-                    "buy_block": buy_block,
-                    "sell_block": sell_block,
-                    "trades": result["trades"],
-                    "final_value": result["final_value"],
-                }
-            )
+            results.append(_run_one_combo(df, risk_config, buy_block, sell_block))
         if (i + 1) % 5 == 0 or (i + 1) == len(buy_conditions):
             done = (i + 1) * len(sell_conditions)
             print(f"    매수조건 {i + 1}/{len(buy_conditions)} 완료 ({done}/{total}건)", flush=True)

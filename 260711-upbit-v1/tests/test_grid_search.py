@@ -1,5 +1,10 @@
 from engine.sweep import DEFAULT_RISK_CONFIG
-from scripts.grid_search import build_condition_grid, compute_grid_results, dedup_top_results
+from scripts.grid_search import (
+    build_condition_grid,
+    compute_grid_results,
+    dedup_top_results,
+    _run_one_combo,
+)
 from tests.signal_fixtures import make_oscillating_df
 
 
@@ -225,3 +230,18 @@ def test_dedup_keeps_smallest_fast_slow_signal_sum_for_macd_style_params():
     deduped = dedup_top_results(results, top_n=20)
     assert len(deduped) == 1
     assert deduped[0]["buy_block"]["params"] == {"fast": 12, "slow": 26, "signal": 9}
+
+
+def test_run_one_combo_returns_expected_shape():
+    df = make_oscillating_df(n=200)
+    risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": 1_000_000}
+    buy_block = {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}
+    sell_block = {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}
+
+    result = _run_one_combo(df, risk_config, buy_block, sell_block)
+
+    assert set(result.keys()) == {"return_pct", "buy_block", "sell_block", "trades", "final_value"}
+    assert result["buy_block"] == buy_block
+    assert result["sell_block"] == sell_block
+    assert isinstance(result["trades"], list)
+    assert isinstance(result["return_pct"], float)
