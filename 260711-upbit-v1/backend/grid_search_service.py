@@ -77,40 +77,53 @@ _active: dict | None = None  # {"job_id": str, "proc": Popen, "canceled": thread
 
 def _reader_loop(job_id: str, proc, canceled: threading.Event) -> None:
     """서브프로세스 stdout을 줄 단위로 읽으며 진행률/결과를 DB에 반영하고, 프로세스
-    종료 후 최종 상태(completed/failed/canceled)를 기록한다."""
+    종료 후 최종 상태(completed/failed/canceled)를 기록한다. 도중에 예외(예: 진행률을
+    DB에 쓰다가 발생하는 SQLite 잠금 에러, 손상된 RESULT_JSON 파싱 실패)가 나도 _active를
+    반드시 비운다 — 안 그러면 단일 실행 슬롯이 영구히 막혀 서버를 재시작할 때까지 새
+    grid search를 하나도 시작할 수 없게 된다."""
     error_lines: list[str] = []
     result: dict | None = None
+    unexpected_error: str | None = None
 
-    assert proc.stdout is not None
-    for raw_line in proc.stdout:
-        line = raw_line.rstrip("\n")
+    try:
+        assert proc.stdout is not None
+        for raw_line in proc.stdout:
+            line = raw_line.rstrip("\n")
 
-        progress = _parse_progress_line(line)
-        if progress is not None:
-            done, total = progress
-            update_grid_search_job_progress(job_id, done_combos=done, total_combos=total)
-            continue
+            progress = _parse_progress_line(line)
+            if progress is not None:
+                done, total = progress
+                update_grid_search_job_progress(job_id, done_combos=done, total_combos=total)
+                continue
 
-        early_total = _parse_total_combos_line(line)
-        if early_total is not None:
-            update_grid_search_job_progress(job_id, done_combos=0, total_combos=early_total)
-            continue
+            early_total = _parse_total_combos_line(line)
+            if early_total is not None:
+                update_grid_search_job_progress(job_id, done_combos=0, total_combos=early_total)
+                continue
 
-        parsed_result = _parse_result_json_line(line)
-        if parsed_result is not None:
-            result = parsed_result
-            continue
+            parsed_result = _parse_result_json_line(line)
+            if parsed_result is not None:
+                result = parsed_result
+                continue
 
-        if line.strip():
-            error_lines.append(line.strip())
+            if line.strip():
+                error_lines.append(line.strip())
 
-    proc.wait()
+        proc.wait()
+    except Exception as exc:
+        unexpected_error = f"진행률 처리 중 예외 발생: {exc}"
+        try:
+            proc.terminate()
+        except Exception:
+            pass
 
     global _active
     with _lock:
         _active = None
 
-    if canceled.is_set():
+    if unexpected_error is not None:
+        finish_grid_search_job(job_id, status="failed", error_message=unexpected_error)
+    elif canceled.is_set():
         finish_grid_search_job(job_id, status="canceled")
     elif proc.returncode == 0 and result is not None:
         finish_grid_search_job(

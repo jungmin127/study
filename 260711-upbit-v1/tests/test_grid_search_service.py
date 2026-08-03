@@ -179,3 +179,36 @@ def test_cancel_job_sends_ctrl_break_and_reader_loop_marks_canceled(monkeypatch)
 def test_cancel_job_raises_when_no_job_is_active():
     with pytest.raises(gss.JobNotActiveError):
         gss.cancel_job("does-not-exist")
+
+
+def test_reader_loop_resets_active_and_marks_failed_on_unexpected_exception(monkeypatch):
+    class _NoOpThread:
+        def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+
+    def _raise_progress(*args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(gss, "update_grid_search_job_progress", _raise_progress)
+
+    _FakePopen.stdout_lines = ["    완료 1,005/20,700건 (4.9%)\n"]
+    _FakePopen.returncode = 0
+
+    job_id = gss.start_job(
+        market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+    proc = gss._active["proc"]
+    canceled_event = gss._active["canceled"]
+
+    gss._reader_loop(job_id, proc, canceled_event)
+
+    assert gss._active is None
+    job = get_grid_search_job(job_id)
+    assert job["status"] == "failed"
+    assert "예외" in job["error_message"]
