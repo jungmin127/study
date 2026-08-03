@@ -1,14 +1,16 @@
 ---
 name: grid-search
-description: Sweep oscillator buy/sell threshold and period grids for an Upbit backtest strategy and save the top results. Trigger when the user sends a message starting with "grid search" followed by comma-separated 코인명,운용자금,봉데이터,운용기간,상위N개 (e.g. "grid search 이더리움,1000만원,1시간,2026-06-01~2026-07-31,20"). 업비트 백테스트 전략의 매수/매도 오실레이터 지표 조합을 그리드서치로 탐색해 상위 결과를 저장할 때 사용합니다.
+description: Parse a grid search request (coin/capital/timeframe/date-range/topN) and hand the user a prefilled link to the Grid Search web tab, which actually runs it. Trigger when the user sends a message starting with "grid search" followed by comma-separated 코인명,운용자금,봉데이터,운용기간,상위N개 (e.g. "grid search 이더리움,1000만원,1시간,2026-06-01~2026-07-31,20"). 업비트 백테스트 전략의 매수/매도 오실레이터 지표 조합 그리드서치 요청을 파싱해 웹 탭(/grid-search) 실행 링크로 안내할 때 사용합니다.
 ---
 
 # Grid Search
 
 `grid search` 명령을 받으면 오실레이터 9종(RSI/STOCH_K/STOCH_D/CCI/WILLIAMS_R/BB_PERCENT_B/
 MACD_PPO/MACD_PPO_signal/ATR_PCT — ATR_PCT만 매수·매도 양방향) + 매도전용 3종
-(STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS)의 전 교차 그리드(20,700개 조합)를
-`scripts/grid_search.py`로 계산하고, 중복 거래를 제거한 상위 N개를 "백테스트 결과"에 저장한다.
+(STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS)의 전 교차 그리드(20,700개 조합) 요청을
+파싱/검증하고, 실제 계산은 프론트엔드 "Grid Search" 탭(`/grid-search`)에서 사용자가 직접
+실행하도록 프리필된 링크로 안내한다. 이 스킬 자신은 `scripts/grid_search.py`를 실행하지도,
+결과를 저장하지도 않는다.
 
 ## 명령 형식
 
