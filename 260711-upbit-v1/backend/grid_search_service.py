@@ -40,3 +40,156 @@ def _parse_result_json_line(line: str) -> dict | None:
     if not stripped.startswith(_RESULT_JSON_PREFIX):
         return None
     return json.loads(stripped[len(_RESULT_JSON_PREFIX):])
+
+
+import os
+import signal
+import subprocess
+import sys
+import threading
+import uuid
+from pathlib import Path
+
+from engine.cache import (
+    create_grid_search_job,
+    finish_grid_search_job,
+    update_grid_search_job_progress,
+)
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+class JobAlreadyRunningError(Exception):
+    def __init__(self, job_id: str):
+        self.job_id = job_id
+        super().__init__(f"이미 실행 중인 grid search가 있습니다: {job_id}")
+
+
+class JobNotActiveError(Exception):
+    def __init__(self, job_id: str):
+        self.job_id = job_id
+        super().__init__(f"실행 중인 job이 아닙니다: {job_id}")
+
+
+_lock = threading.Lock()
+_active: dict | None = None  # {"job_id": str, "proc": Popen, "canceled": threading.Event}
+
+
+def _reader_loop(job_id: str, proc, canceled: threading.Event) -> None:
+    """서브프로세스 stdout을 줄 단위로 읽으며 진행률/결과를 DB에 반영하고, 프로세스
+    종료 후 최종 상태(completed/failed/canceled)를 기록한다."""
+    error_lines: list[str] = []
+    result: dict | None = None
+
+    assert proc.stdout is not None
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip("\n")
+
+        progress = _parse_progress_line(line)
+        if progress is not None:
+            done, total = progress
+            update_grid_search_job_progress(job_id, done_combos=done, total_combos=total)
+            continue
+
+        early_total = _parse_total_combos_line(line)
+        if early_total is not None:
+            update_grid_search_job_progress(job_id, done_combos=0, total_combos=early_total)
+            continue
+
+        parsed_result = _parse_result_json_line(line)
+        if parsed_result is not None:
+            result = parsed_result
+            continue
+
+        if line.strip():
+            error_lines.append(line.strip())
+
+    proc.wait()
+
+    global _active
+    with _lock:
+        _active = None
+
+    if canceled.is_set():
+        finish_grid_search_job(job_id, status="canceled")
+    elif proc.returncode == 0 and result is not None:
+        finish_grid_search_job(
+            job_id,
+            status="completed",
+            elapsed_sec=result.get("elapsed_sec"),
+            result_json=json.dumps(result.get("saved", [])),
+        )
+    else:
+        message = (
+            error_lines[-1] if error_lines
+            else f"grid search가 종료 코드 {proc.returncode}로 실패했습니다."
+        )
+        finish_grid_search_job(job_id, status="failed", error_message=message)
+
+
+def start_job(market: str, timeframe: str, capital: float, start: str, end: str, top_n: int) -> str:
+    """grid search job을 시작하고 job_id를 반환한다. 이미 실행 중인 job이 있으면
+    JobAlreadyRunningError를 던진다."""
+    global _active
+    with _lock:
+        if _active is not None:
+            raise JobAlreadyRunningError(_active["job_id"])
+
+        job_id = uuid.uuid4().hex
+        create_grid_search_job(
+            job_id=job_id, market=market, timeframe=timeframe, capital=capital,
+            start=start, end=end, top_n=top_n,
+        )
+
+        env = {**os.environ, "PYTHONPATH": str(REPO_ROOT), "PYTHONIOENCODING": "utf-8"}
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+        proc = subprocess.Popen(
+            [
+                sys.executable, "scripts/grid_search.py",
+                "--market", market, "--timeframe", timeframe,
+                "--capital", str(capital), "--start", start, "--end", end,
+                "--top-n", str(top_n),
+            ],
+            cwd=str(REPO_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            creationflags=creationflags,
+        )
+        canceled = threading.Event()
+        _active = {"job_id": job_id, "proc": proc, "canceled": canceled}
+
+    # thread.start()는 반드시 `with _lock:` 블록 밖에서 호출한다. 테스트의 동기 실행
+    # 더블(_SyncThread)은 .start() 안에서 _reader_loop를 즉시 실행하는데, _reader_loop도
+    # 끝에서 `with _lock:`을 잡는다 — thread.start()가 잠금 블록 안에 있으면 같은 스레드가
+    # 아직 풀리지 않은 threading.Lock을 다시 잡으려다 자기 자신과 데드락한다(실제 운영에서는
+    # 스레드가 분리되어 있어 드러나지 않는 버그였다).
+    thread = threading.Thread(target=_reader_loop, args=(job_id, proc, canceled), daemon=True)
+    thread.start()
+
+    return job_id
+
+
+def cancel_job(job_id: str) -> None:
+    """실행 중인 job을 취소한다. Windows에서는 CTRL_BREAK_EVENT로 그레이스풀 종료를
+    시도하고(기존 pool.terminate() 정리 로직을 타게 함), 15초 내 안 죽으면 강제 종료한다."""
+    with _lock:
+        if _active is None or _active["job_id"] != job_id:
+            raise JobNotActiveError(job_id)
+        proc = _active["proc"]
+        _active["canceled"].set()
+
+    if sys.platform == "win32":
+        proc.send_signal(signal.CTRL_BREAK_EVENT)
+    else:
+        proc.terminate()
+
+    def _force_kill_if_still_running() -> None:
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+
+    threading.Thread(target=_force_kill_if_still_running, daemon=True).start()
