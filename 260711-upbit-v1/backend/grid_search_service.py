@@ -116,10 +116,6 @@ def _reader_loop(job_id: str, proc, canceled: threading.Event) -> None:
         except Exception:
             pass
 
-    global _active
-    with _lock:
-        _active = None
-
     if unexpected_error is not None:
         finish_grid_search_job(job_id, status="failed", error_message=unexpected_error)
     elif canceled.is_set():
@@ -137,6 +133,10 @@ def _reader_loop(job_id: str, proc, canceled: threading.Event) -> None:
             else f"grid search가 종료 코드 {proc.returncode}로 실패했습니다."
         )
         finish_grid_search_job(job_id, status="failed", error_message=message)
+
+    global _active
+    with _lock:
+        _active = None
 
 
 def start_job(market: str, timeframe: str, capital: float, start: str, end: str, top_n: int) -> str:

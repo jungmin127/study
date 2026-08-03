@@ -255,3 +255,31 @@ def test_reader_loop_resets_active_and_marks_failed_on_unexpected_exception(monk
     job = get_grid_search_job(job_id)
     assert job["status"] == "failed"
     assert "예외" in job["error_message"]
+
+
+def test_reader_loop_finishes_db_row_before_clearing_active_slot(monkeypatch):
+    active_at_finish_time: list[dict | None] = []
+
+    original_finish = gss.finish_grid_search_job
+
+    def _tracking_finish(job_id, **kwargs):
+        active_at_finish_time.append(gss._active)
+        return original_finish(job_id, **kwargs)
+
+    monkeypatch.setattr(gss, "finish_grid_search_job", _tracking_finish)
+
+    _FakePopen.stdout_lines = [
+        "    완료 20,700/20,700건 (100.0%)\n",
+        'RESULT_JSON: {"total_combos": 20700, "elapsed_sec": 1.0, "saved": []}\n',
+    ]
+    _FakePopen.returncode = 0
+
+    job_id = gss.start_job(
+        market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    assert len(active_at_finish_time) == 1
+    assert active_at_finish_time[0] is not None
+    assert active_at_finish_time[0]["job_id"] == job_id
+    assert gss._active is None
