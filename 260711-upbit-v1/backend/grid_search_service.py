@@ -8,6 +8,7 @@ grid_search_jobs 테이블에 기록하는 오케스트레이션 레이어. 스�
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import signal
@@ -57,6 +58,8 @@ def _parse_result_json_line(line: str) -> dict | None:
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+_logger = logging.getLogger(__name__)
+
 
 class JobAlreadyRunningError(Exception):
     def __init__(self, job_id: str):
@@ -80,6 +83,7 @@ def _reader_loop(job_id: str, proc, canceled: threading.Event) -> None:
     DB에 쓰다가 발생하는 SQLite 잠금 에러, 손상된 RESULT_JSON 파싱 실패)가 나도 _active를
     반드시 비운다 — 안 그러면 단일 실행 슬롯이 영구히 막혀 서버를 재시작할 때까지 새
     grid search를 하나도 시작할 수 없게 된다."""
+    global _active
     error_lines: list[str] = []
     result: dict | None = None
     unexpected_error: str | None = None
@@ -134,8 +138,14 @@ def _reader_loop(job_id: str, proc, canceled: threading.Event) -> None:
                 else f"grid search가 종료 코드 {proc.returncode}로 실패했습니다."
             )
             finish_grid_search_job(job_id, status="failed", error_message=message)
+    except Exception:
+        _logger.exception(
+            "grid search job %s의 최종 상태를 DB에 기록하지 못했습니다 — "
+            "해당 job의 DB 행이 running 상태로 남아있을 수 있습니다 (재시작 시 자동 정리됨)",
+            job_id,
+        )
+        raise
     finally:
-        global _active
         with _lock:
             _active = None
 

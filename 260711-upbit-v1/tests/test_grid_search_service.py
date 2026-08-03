@@ -285,7 +285,7 @@ def test_reader_loop_finishes_db_row_before_clearing_active_slot(monkeypatch):
     assert gss._active is None
 
 
-def test_reader_loop_clears_active_even_when_finish_grid_search_job_raises(monkeypatch):
+def test_reader_loop_clears_active_even_when_finish_grid_search_job_raises(monkeypatch, caplog):
     def _raise_finish(*args, **kwargs):
         raise RuntimeError("database is locked")
 
@@ -298,9 +298,11 @@ def test_reader_loop_clears_active_even_when_finish_grid_search_job_raises(monke
     _FakePopen.returncode = 0
 
     with pytest.raises(RuntimeError):
-        gss.start_job(
-            market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
-            start="2026-06-05", end="2026-08-03", top_n=20,
-        )
+        with caplog.at_level("ERROR", logger="backend.grid_search_service"):
+            gss.start_job(
+                market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+                start="2026-06-05", end="2026-08-03", top_n=20,
+            )
 
     assert gss._active is None
+    assert any("최종 상태를 DB에 기록하지 못했습니다" in record.message for record in caplog.records)
