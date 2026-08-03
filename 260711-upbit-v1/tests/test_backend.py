@@ -1332,12 +1332,6 @@ def test_create_grid_search_job_returns_409_when_already_running(monkeypatch, tm
     assert resp.status_code == 409
 
 
-def test_get_grid_search_job_returns_404_for_missing_id(monkeypatch, tmp_path):
-    client = _client(monkeypatch, tmp_path)
-    resp = client.get("/api/v1/grid-search/jobs/does-not-exist")
-    assert resp.status_code == 404
-
-
 def test_list_grid_search_jobs_returns_saved_jobs(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     from engine.cache import create_grid_search_job

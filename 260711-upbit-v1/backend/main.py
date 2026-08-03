@@ -922,14 +922,6 @@ def list_grid_search_jobs_endpoint() -> list[dict]:
     return [_grid_search_job_response(j) for j in list_grid_search_jobs()]
 
 
-@app.get("/api/v1/grid-search/jobs/{job_id}")
-def get_grid_search_job_endpoint(job_id: str) -> dict:
-    job = get_grid_search_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="해당 job을 찾을 수 없습니다")
-    return _grid_search_job_response(job)
-
-
 @app.post("/api/v1/grid-search/jobs/{job_id}/cancel")
 def cancel_grid_search_job_endpoint(job_id: str) -> dict:
     try:
