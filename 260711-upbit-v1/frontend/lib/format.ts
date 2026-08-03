@@ -38,6 +38,8 @@ const TIMEFRAME_LABELS: Record<string, string> = {
   days: '1일',
 };
 
+export const TIMEFRAME_CODES: string[] = Object.keys(TIMEFRAME_LABELS);
+
 export function formatTimeframe(timeframe: string): string {
   return TIMEFRAME_LABELS[timeframe] ?? timeframe;
 }

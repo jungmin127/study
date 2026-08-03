@@ -7,20 +7,14 @@ import CoinSelect, { sortMarkets } from '@/components/CoinSelect';
 import { ApiError } from '@/lib/api/client';
 import { getMarkets } from '@/lib/api/eda';
 import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
-import { defaultDate, formatCapital } from '@/lib/format';
+import { defaultDate, formatCapital, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
 import type { GridSearchJobRequest } from '@/lib/types/eda';
 import type { Market } from '@/lib/types/eda';
 
-const TIMEFRAME_OPTIONS = [
-  { label: '1분', timeframe: 'minutes1' },
-  { label: '3분', timeframe: 'minutes3' },
-  { label: '5분', timeframe: 'minutes5' },
-  { label: '15분', timeframe: 'minutes15' },
-  { label: '30분', timeframe: 'minutes30' },
-  { label: '1시간', timeframe: 'minutes60' },
-  { label: '4시간', timeframe: 'minutes240' },
-  { label: '1일', timeframe: 'days' },
-];
+const TIMEFRAME_OPTIONS = TIMEFRAME_CODES.map((timeframe) => ({
+  label: formatTimeframe(timeframe),
+  timeframe,
+}));
 
 export interface GridSearchFormInitial {
   market: string;
