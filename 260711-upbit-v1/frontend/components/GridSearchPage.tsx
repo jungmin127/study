@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/api/client';
 import { cancelGridSearchJob, createGridSearchJob, getGridSearchJobs } from '@/lib/api/eda';
 import type { GridSearchJob, GridSearchJobRequest } from '@/lib/types/eda';
 import GridSearchForm from '@/components/GridSearchForm';
+import GridSearchProgress from '@/components/GridSearchProgress';
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -72,14 +73,7 @@ export default function GridSearchPage() {
         onSubmit={handleSubmit}
       />
       {submitError && <p className="text-sm text-destructive">{submitError}</p>}
-      {runningJob && (
-        <p className="text-sm">
-          진행 중: {runningJob.market} {runningJob.done_combos}/{runningJob.total_combos ?? '?'}건
-          <button type="button" className="ml-2 underline" onClick={handleCancel}>
-            취소
-          </button>
-        </p>
-      )}
+      {runningJob && <GridSearchProgress job={runningJob} onCancel={handleCancel} />}
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       <div className="text-sm text-muted-foreground">요청 이력은 다음 단계에서 추가됩니다.</div>
     </div>
