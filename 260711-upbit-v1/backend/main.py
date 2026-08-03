@@ -672,8 +672,16 @@ def _validate_backtest_request(req: RunBacktestRequest) -> list[str]:
     if unknown:
         errors.append(f"지원하지 않는 지표입니다: {', '.join(unknown)}")
 
-    if req.start >= req.end:
-        errors.append("시작일은 종료일보다 빨라야 합니다.")
+    parsed_dates: dict[str, datetime] = {}
+    for label, field, value in (("시작일", "start", req.start), ("종료일", "end", req.end)):
+        try:
+            parsed_dates[field] = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            errors.append(f"{label} 형식이 올바르지 않습니다(YYYY-MM-DD): {value}")
+
+    if "start" in parsed_dates and "end" in parsed_dates:
+        if parsed_dates["start"] >= parsed_dates["end"]:
+            errors.append("시작일은 종료일보다 빨라야 합니다.")
 
     if req.initial_capital <= 0:
         errors.append("운용자금은 0보다 커야 합니다.")

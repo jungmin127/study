@@ -321,6 +321,30 @@ def test_run_backtest_rejects_unsupported_timeframe(monkeypatch, tmp_path):
     assert "지원하지 않는 봉데이터" in resp.json()["detail"]
 
 
+def test_run_backtest_rejects_malformed_date(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(start="01-01-2026"),
+    )
+    assert resp.status_code == 400
+    assert "형식이 올바르지 않습니다" in resp.json()["detail"]
+
+
+def test_run_backtest_accepts_non_zero_padded_valid_date_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    _patch_get_candles(monkeypatch)
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(start="2026-6-5", end="2026-12-01"),
+    )
+    assert resp.status_code == 200
+
+
 def test_run_backtest_rejects_empty_sell_conditions(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _patch_get_candles(monkeypatch)
