@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from engine.cache import (
     delete_backtest_run,
+    finish_grid_search_job,
     get_grid_search_job,
     get_run_config,
     list_backtest_runs,
@@ -94,6 +95,26 @@ def _start_segment_batch() -> None:
     _run_segment_batch_safely로 감싸 실패 시에도 서버 로그에 남도록 한다(성공/실패
     모두 조용히 사라지면 배치가 계속 도는 중인지 죽었는지 구분할 수 없다)."""
     threading.Thread(target=_run_segment_batch_safely, daemon=True).start()
+
+
+def _fail_orphaned_grid_search_jobs() -> None:
+    """이 프로세스가 죽으면 stdout 리더 스레드도 함께 사라진다 — 재기동 시 남아 있는
+    running 행은 추적 불가능한 고아이므로 실패로 정리한다(스크립트 자체는 계속
+    돌고 있을 수 있고, 결과는 "백테스트 결과" 탭의 [Grid] 항목에서 확인 가능)."""
+    for job in list_grid_search_jobs():
+        if job["status"] == "running":
+            finish_grid_search_job(
+                job["id"], status="failed",
+                error_message=(
+                    "백엔드가 재시작되어 진행률 추적이 끊겼습니다. "
+                    "실제 결과는 '백테스트 결과' 탭의 [Grid] 항목을 확인하세요."
+                ),
+            )
+
+
+@app.on_event("startup")
+def _cleanup_orphaned_grid_search_jobs() -> None:
+    _fail_orphaned_grid_search_jobs()
 
 INDICATOR_CATALOG: list[dict] = [
     {

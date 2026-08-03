@@ -156,21 +156,25 @@ def start_job(market: str, timeframe: str, capital: float, start: str, end: str,
 
         env = {**os.environ, "PYTHONPATH": str(REPO_ROOT), "PYTHONIOENCODING": "utf-8"}
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-        proc = subprocess.Popen(
-            [
-                sys.executable, "scripts/grid_search.py",
-                "--market", market, "--timeframe", timeframe,
-                "--capital", str(capital), "--start", start, "--end", end,
-                "--top-n", str(top_n),
-            ],
-            cwd=str(REPO_ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            env=env,
-            creationflags=creationflags,
-        )
+        try:
+            proc = subprocess.Popen(
+                [
+                    sys.executable, "scripts/grid_search.py",
+                    "--market", market, "--timeframe", timeframe,
+                    "--capital", str(capital), "--start", start, "--end", end,
+                    "--top-n", str(top_n),
+                ],
+                cwd=str(REPO_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                env=env,
+                creationflags=creationflags,
+            )
+        except Exception as exc:
+            finish_grid_search_job(job_id, status="failed", error_message=f"grid search 실행 실패: {exc}")
+            raise
         canceled = threading.Event()
         _active = {"job_id": job_id, "proc": proc, "canceled": canceled}
 

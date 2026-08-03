@@ -181,6 +181,47 @@ def test_cancel_job_raises_when_no_job_is_active():
         gss.cancel_job("does-not-exist")
 
 
+def test_start_job_marks_failed_when_popen_itself_raises(monkeypatch):
+    import uuid as uuid_module
+
+    monkeypatch.setattr(gss.uuid, "uuid4", lambda: uuid_module.UUID("11111111-1111-1111-1111-111111111111"))
+
+    def _raise_popen(*args, **kwargs):
+        raise OSError("no such file or directory")
+
+    monkeypatch.setattr(gss.subprocess, "Popen", _raise_popen)
+
+    with pytest.raises(OSError):
+        gss.start_job(
+            market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+            start="2026-06-05", end="2026-08-03", top_n=20,
+        )
+
+    job = get_grid_search_job("11111111111111111111111111111111")
+    assert job["status"] == "failed"
+    assert "grid search 실행 실패" in job["error_message"]
+    assert gss._active is None
+
+
+def test_start_job_spawns_script_with_required_env_and_flags(monkeypatch):
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+    _FakePopen.stdout_lines = []
+    _FakePopen.returncode = 0
+
+    gss.start_job(
+        market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    proc = gss._active["proc"]
+    assert proc.args[0] == gss.sys.executable
+    assert proc.args[1] == "scripts/grid_search.py"
+    assert proc.kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert proc.kwargs["env"]["PYTHONPATH"] == str(gss.REPO_ROOT)
+    assert proc.kwargs["cwd"] == str(gss.REPO_ROOT)
+    assert proc.kwargs["creationflags"] == gss.subprocess.CREATE_NEW_PROCESS_GROUP
+
+
 def test_reader_loop_resets_active_and_marks_failed_on_unexpected_exception(monkeypatch):
     class _NoOpThread:
         def __init__(self, target=None, args=(), kwargs=None, daemon=None):

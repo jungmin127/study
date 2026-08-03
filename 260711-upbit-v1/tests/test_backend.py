@@ -725,6 +725,32 @@ def test_startup_event_spawns_segment_batch_as_daemon_thread(monkeypatch):
     assert calls == [(backend_module._run_segment_batch_safely, True)]
 
 
+def test_startup_fails_orphaned_running_grid_search_jobs(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    class _FakeThread:
+        def __init__(self, target=None, daemon=None):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(backend_module.threading, "Thread", _FakeThread)
+
+    from engine.cache import create_grid_search_job, get_grid_search_job
+    create_grid_search_job(
+        job_id="orphan-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    with TestClient(app):
+        pass
+
+    job = get_grid_search_job("orphan-1")
+    assert job["status"] == "failed"
+    assert "재시작" in job["error_message"]
+
+
 def test_run_segment_batch_safely_swallows_exceptions(monkeypatch):
     def _raise():
         raise RuntimeError("업비트 API 실패")
