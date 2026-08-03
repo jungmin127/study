@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { formatTimeframe } from '@/lib/format';
 import type { GridSearchJob } from '@/lib/types/eda';
 
 function formatElapsed(seconds: number): string {
@@ -31,7 +32,7 @@ export default function GridSearchProgress({ job, onCancel }: GridSearchProgress
     <Card>
       <CardHeader>
         <CardTitle>
-          진행 중: {job.market} · {job.timeframe} · {job.start}~{job.end}
+          진행 중: {job.market} · {formatTimeframe(job.timeframe)} · {job.start}~{job.end}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
