@@ -283,3 +283,24 @@ def test_reader_loop_finishes_db_row_before_clearing_active_slot(monkeypatch):
     assert active_at_finish_time[0] is not None
     assert active_at_finish_time[0]["job_id"] == job_id
     assert gss._active is None
+
+
+def test_reader_loop_clears_active_even_when_finish_grid_search_job_raises(monkeypatch):
+    def _raise_finish(*args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(gss, "finish_grid_search_job", _raise_finish)
+
+    _FakePopen.stdout_lines = [
+        "    완료 20,700/20,700건 (100.0%)\n",
+        'RESULT_JSON: {"total_combos": 20700, "elapsed_sec": 1.0, "saved": []}\n',
+    ]
+    _FakePopen.returncode = 0
+
+    with pytest.raises(RuntimeError):
+        gss.start_job(
+            market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+            start="2026-06-05", end="2026-08-03", top_n=20,
+        )
+
+    assert gss._active is None
