@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { returnRateColor } from '@/lib/return-rate-color';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatTimeframe } from '@/lib/format';
 import type { GridSearchJob } from '@/lib/types/eda';
 
 const STATUS_LABEL: Record<GridSearchJob['status'], string> = {
@@ -60,7 +60,7 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge variant={STATUS_VARIANT[job.status]}>{STATUS_LABEL[job.status]}</Badge>
                 <span className="font-medium">{job.market}</span>
-                <span className="text-muted-foreground">{job.timeframe}</span>
+                <span className="text-muted-foreground">{formatTimeframe(job.timeframe)}</span>
                 <span className="text-muted-foreground">
                   {job.start}~{job.end}
                 </span>

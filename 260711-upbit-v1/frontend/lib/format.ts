@@ -27,6 +27,21 @@ const TIMEFRAME_MINUTES: Record<string, number> = {
   days: 1440,
 };
 
+const TIMEFRAME_LABELS: Record<string, string> = {
+  minutes1: '1분',
+  minutes3: '3분',
+  minutes5: '5분',
+  minutes15: '15분',
+  minutes30: '30분',
+  minutes60: '1시간',
+  minutes240: '4시간',
+  days: '1일',
+};
+
+export function formatTimeframe(timeframe: string): string {
+  return TIMEFRAME_LABELS[timeframe] ?? timeframe;
+}
+
 export function formatHoldingPeriod(bars: number, timeframe: string): string {
   if (!timeframe.startsWith('minutes')) {
     return `${bars}봉`;
