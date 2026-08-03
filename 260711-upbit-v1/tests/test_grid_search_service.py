@@ -91,6 +91,8 @@ def _reset_grid_search_service_state(monkeypatch, tmp_path):
     monkeypatch.setattr(gss, "_active", None)
     monkeypatch.setattr(gss.threading, "Thread", _SyncThread)
     monkeypatch.setattr(gss.subprocess, "Popen", _FakePopen)
+    _FakePopen.stdout_lines = []
+    _FakePopen.returncode = 0
 
 
 def test_start_job_completes_and_saves_result():
