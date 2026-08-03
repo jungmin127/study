@@ -32,12 +32,13 @@ export default function GridSearchPage() {
   }, [refresh]);
 
   const runningJob = jobs.find((j) => j.status === 'running') ?? null;
+  const isJobRunning = runningJob !== null;
 
   useEffect(() => {
-    if (!runningJob) return;
+    if (!isJobRunning) return;
     const id = setInterval(refresh, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [runningJob, refresh]);
+  }, [isJobRunning, refresh]);
 
   async function handleSubmit(request: GridSearchJobRequest) {
     setSubmitError(null);
