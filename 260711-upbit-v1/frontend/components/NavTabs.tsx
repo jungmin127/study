@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, BookOpen, FlaskConical, Settings } from 'lucide-react';
+import { BarChart3, BookOpen, FlaskConical, Grid3x3, Settings } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const STEPS = [
   { href: '/', title: '백테스트 설정', icon: Settings },
+  { href: '/grid-search', title: 'Grid Search', icon: Grid3x3 },
   { href: '/backtests', title: '백테스트 결과', icon: FlaskConical },
   { href: '/analysis', title: '분석', icon: BarChart3 },
   { href: '/guide', title: '지표 가이드', icon: BookOpen },
