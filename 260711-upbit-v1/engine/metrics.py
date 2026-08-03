@@ -24,6 +24,8 @@ _TIMEFRAME_MINUTES: dict[str, float] = {
     "days": 1440,
 }
 
+VALID_TIMEFRAMES: frozenset[str] = frozenset(_TIMEFRAME_MINUTES)
+
 
 def bars_to_days(bars: int | float, timeframe: str) -> float:
     """bar 수를 일(day) 단위로 변환."""

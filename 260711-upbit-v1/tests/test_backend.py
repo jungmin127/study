@@ -1294,6 +1294,28 @@ def test_create_grid_search_job_rejects_top_n_out_of_range(monkeypatch, tmp_path
     assert resp.status_code == 400
 
 
+def test_create_grid_search_job_rejects_unsupported_timeframe(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-SOL"}])
+
+    resp = client.post("/api/v1/grid-search/jobs", json={
+        "market": "KRW-SOL", "timeframe": "minutes999", "capital": 1_000_000,
+        "start": "2026-06-05", "end": "2026-08-03", "top_n": 20,
+    })
+    assert resp.status_code == 400
+
+
+def test_create_grid_search_job_rejects_malformed_date(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-SOL"}])
+
+    resp = client.post("/api/v1/grid-search/jobs", json={
+        "market": "KRW-SOL", "timeframe": "minutes60", "capital": 1_000_000,
+        "start": "2026/06/05", "end": "2026-08-03", "top_n": 20,
+    })
+    assert resp.status_code == 400
+
+
 def test_create_grid_search_job_returns_409_when_already_running(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-SOL"}])
