@@ -3,6 +3,8 @@ import type {
   BacktestDetail,
   BacktestRunSummary,
   Combo,
+  GridSearchJob,
+  GridSearchJobRequest,
   IndicatorCatalogItem,
   Market,
   RunBacktestRequest,
@@ -78,4 +80,19 @@ export function refreshBacktestRun(runId: string): Promise<{ run_id: string }> {
 
 export function getSegmentSizeAnalysis(): Promise<SegmentSizeEntry[]> {
   return apiFetch<SegmentSizeEntry[]>('/api/v1/analysis/segments/size');
+}
+
+export function createGridSearchJob(req: GridSearchJobRequest): Promise<GridSearchJob> {
+  return apiFetch<GridSearchJob>('/api/v1/grid-search/jobs', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export function getGridSearchJobs(): Promise<GridSearchJob[]> {
+  return apiFetch<GridSearchJob[]>('/api/v1/grid-search/jobs');
+}
+
+export function cancelGridSearchJob(jobId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/v1/grid-search/jobs/${jobId}/cancel`, { method: 'POST' });
 }

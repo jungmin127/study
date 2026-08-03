@@ -146,3 +146,37 @@ export interface BacktestRunSummary {
   buy_conditions: ConditionGroup;
   sell_conditions: ConditionGroup;
 }
+
+export interface GridSearchJobRequest {
+  market: string;
+  timeframe: string;
+  capital: number;
+  start: string;
+  end: string;
+  top_n: number;
+}
+
+export interface GridSearchSavedResult {
+  rank: number;
+  run_id: string;
+  return_pct: number;
+  title: string;
+}
+
+export interface GridSearchJob {
+  id: string;
+  market: string;
+  timeframe: string;
+  capital: number;
+  start: string;
+  end: string;
+  top_n: number;
+  status: 'running' | 'completed' | 'failed' | 'canceled';
+  total_combos: number | null;
+  done_combos: number;
+  started_at: string;
+  finished_at: string | null;
+  elapsed_sec: number | null;
+  error_message: string | null;
+  result_json: GridSearchSavedResult[] | null;
+}
