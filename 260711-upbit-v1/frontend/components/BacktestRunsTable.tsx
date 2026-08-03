@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { summarizeGroup } from '@/lib/condition-summary';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatTimeframe } from '@/lib/format';
 import { deleteBacktestRun } from '@/lib/api/eda';
 import type { BacktestRunSummary } from '@/lib/types/eda';
 
@@ -332,7 +332,7 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
                   <span className="block text-xs text-muted-foreground">{marketNames[run.market]}</span>
                 )}
               </TableCell>
-              <TableCell>{run.timeframe}</TableCell>
+              <TableCell>{formatTimeframe(run.timeframe)}</TableCell>
               <TableCell>
                 {run.start.slice(0, 10)} ~ {run.end.slice(0, 10)}
               </TableCell>

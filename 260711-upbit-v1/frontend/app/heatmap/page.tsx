@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { returnRateColor } from '@/lib/return-rate-color';
+import { formatTimeframe } from '@/lib/format';
 
 export default async function HeatmapPage() {
   const rows = await getHeatmap();
@@ -45,7 +46,7 @@ export default async function HeatmapPage() {
                     {row.is_combined && <Badge className="ml-2" variant="secondary">혼합</Badge>}
                   </TableCell>
                   <TableCell>{row.market}</TableCell>
-                  <TableCell>{row.timeframe}</TableCell>
+                  <TableCell>{formatTimeframe(row.timeframe)}</TableCell>
                   <TableCell className={`text-right tabular-nums ${returnRateColor(row.return_rate)}`}>
                     {row.return_rate?.toFixed(2) ?? '-'}
                   </TableCell>

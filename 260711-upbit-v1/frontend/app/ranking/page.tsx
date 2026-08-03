@@ -1,6 +1,7 @@
 import { getRanking } from '@/lib/api/eda';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { returnRateColor } from '@/lib/return-rate-color';
+import { formatTimeframe } from '@/lib/format';
 
 export default async function RankingPage() {
   const rows = await getRanking();
@@ -17,7 +18,7 @@ export default async function RankingPage() {
               <CardHeader>
                 <CardTitle className="flex items-center justify-between text-base">
                   <span>
-                    #{i + 1} {row.market} · {row.timeframe}
+                    #{i + 1} {row.market} · {formatTimeframe(row.timeframe)}
                   </span>
                   <span className={returnRateColor(row.return_rate)}>
                     {row.return_rate?.toFixed(2) ?? '-'}%

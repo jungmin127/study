@@ -7,7 +7,7 @@ import RefreshBacktestButton from '@/components/RefreshBacktestButton';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { returnRateColor } from '@/lib/return-rate-color';
-import { formatDateTime, formatHoldingPeriod } from '@/lib/format';
+import { formatDateTime, formatHoldingPeriod, formatTimeframe } from '@/lib/format';
 import type { BacktestMetrics } from '@/lib/types/eda';
 
 function fmtPct(value: number): string {
@@ -89,7 +89,7 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
       <h1 className="mb-1 text-lg font-semibold">백테스트 상세</h1>
       <div className="mb-1 flex flex-wrap items-center gap-3">
         <p className="text-sm text-muted-foreground">
-          {detail.market} · {detail.timeframe} · {detail.start.slice(0, 10)} ~ {detail.end.slice(0, 10)}
+          {detail.market} · {formatTimeframe(detail.timeframe)} · {detail.start.slice(0, 10)} ~ {detail.end.slice(0, 10)}
         </p>
         <RefreshBacktestButton runId={params.runId} />
       </div>
