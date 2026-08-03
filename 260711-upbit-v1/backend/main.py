@@ -873,13 +873,18 @@ def _validate_grid_search_request(req: GridSearchJobRequest) -> list[str]:
     errors: list[str] = []
     if req.timeframe not in VALID_TIMEFRAMES:
         errors.append(f"지원하지 않는 봉데이터입니다: {req.timeframe}")
-    for label, value in (("시작일", req.start), ("종료일", req.end)):
+
+    parsed_dates: dict[str, datetime] = {}
+    for label, field, value in (("시작일", "start", req.start), ("종료일", "end", req.end)):
         try:
-            datetime.strptime(value, "%Y-%m-%d")
+            parsed_dates[field] = datetime.strptime(value, "%Y-%m-%d")
         except ValueError:
             errors.append(f"{label} 형식이 올바르지 않습니다(YYYY-MM-DD): {value}")
-    if req.start >= req.end:
-        errors.append("시작일은 종료일보다 빨라야 합니다.")
+
+    if "start" in parsed_dates and "end" in parsed_dates:
+        if parsed_dates["start"] >= parsed_dates["end"]:
+            errors.append("시작일은 종료일보다 빨라야 합니다.")
+
     if req.capital <= 0:
         errors.append("운용자금은 0보다 커야 합니다.")
     if not (1 <= req.top_n <= 50):

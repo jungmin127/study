@@ -1303,6 +1303,7 @@ def test_create_grid_search_job_rejects_unsupported_timeframe(monkeypatch, tmp_p
         "start": "2026-06-05", "end": "2026-08-03", "top_n": 20,
     })
     assert resp.status_code == 400
+    assert "지원하지 않는 봉데이터" in resp.json()["detail"]
 
 
 def test_create_grid_search_job_rejects_malformed_date(monkeypatch, tmp_path):
@@ -1314,6 +1315,25 @@ def test_create_grid_search_job_rejects_malformed_date(monkeypatch, tmp_path):
         "start": "2026-06-05", "end": "2026/08/03", "top_n": 20,
     })
     assert resp.status_code == 400
+    assert "형식이 올바르지 않습니다" in resp.json()["detail"]
+
+
+def test_create_grid_search_job_accepts_non_zero_padded_valid_date_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-SOL"}])
+    monkeypatch.setattr(backend_module, "start_job", lambda **kwargs: "job-1")
+
+    from engine.cache import create_grid_search_job
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-6-5", end="2026-12-01", top_n=20,
+    )
+
+    resp = client.post("/api/v1/grid-search/jobs", json={
+        "market": "KRW-SOL", "timeframe": "minutes60", "capital": 1_000_000,
+        "start": "2026-6-5", "end": "2026-12-01", "top_n": 20,
+    })
+    assert resp.status_code == 200
 
 
 def test_create_grid_search_job_returns_409_when_already_running(monkeypatch, tmp_path):
