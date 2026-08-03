@@ -305,13 +305,21 @@ def test_watchdog_not_expired_exactly_at_timeout():
 
 
 def test_compute_grid_results_parallel_raises_on_watchdog_timeout():
-    # n=8000 (not the usual n=200) is deliberate: on this machine time.monotonic() has
-    # ~1ms granularity, so the very first watchdog check (microseconds after last_progress
-    # is set) reads a 0 diff and never trips with a trivially fast task — the loop's
-    # mandatory 1s poll sleep would let a fast combo finish first and mask the timeout.
-    # A combo large enough to still be unfinished after that first 1s sleep (~1.1s+ compute,
-    # verified empirically) makes the watchdog fire deterministically on the second check.
-    df = make_oscillating_df(n=8000)
+    # The polling loop's very first `ar.ready()` check reads a 0 elapsed-time diff (it
+    # happens microseconds after `last_progress` is set), so with watchdog_timeout=0 it
+    # never trips on a trivially fast combo before the loop's mandatory 1s poll sleep lets
+    # that combo finish first and mask the timeout entirely. The watchdog only fires
+    # deterministically if the combo is STILL unfinished after that first 1s sleep, i.e.
+    # combo compute time must clear the 1s sleep with real margin.
+    #
+    # n=8000 (~1.02s in-process, measured on this machine) sat right on that 1s boundary —
+    # multiprocessing overhead (worker spawn, df pickling, IPC) usually pushed total task
+    # time past 1s, but not reliably: a fast run could finish within the first sleep(1)
+    # window, making the test flaky (fails ~1 in a few runs, both isolated and under full
+    # suite). n=20000 (~2.54s in-process, more once multiprocessing overhead is added)
+    # gives a 1.5s+ margin over the 1s sleep cadence, so it reliably survives into a second
+    # or third poll iteration regardless of run-to-run timing variance.
+    df = make_oscillating_df(n=20000)
     buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
     sell_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": 1_000_000}
