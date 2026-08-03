@@ -59,7 +59,7 @@ N개 보기"). job이 쌓일수록 스크롤이 길어지고, 코인/봉타입�
 | 상태 | 완료/취소/실패 배지(기존 `STATUS_LABEL`/`STATUS_VARIANT` 그대로) | - |
 | 코인 | `market`에서 `KRW-` 접두어 제거(예: `DOGE`) | - |
 | 봉타입 | `formatTimeframe(timeframe)` | - |
-| 기간 | `${start} ~ ${end}` | - |
+| 기간 | `${start} ~ ${end}` (정렬은 `start` 기준) | ✅ |
 | 실행시각 | `formatDateTime(started_at)` | ✅ |
 | 1위 조건 | 완료 job의 `result_json[0].title`을 파싱해 "매수 ..." / "매도 ..." 형태로 렌더링(아래
   타이틀 파싱 참고). 완료가 아니거나 결과가 없으면 `-`. | - |
