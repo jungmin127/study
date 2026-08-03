@@ -657,6 +657,9 @@ def _validate_backtest_request(req: RunBacktestRequest) -> list[str]:
     Task 7의 /validate 엔드포인트와 이 함수를 공유한다."""
     errors: list[str] = []
 
+    if req.timeframe not in VALID_TIMEFRAMES:
+        errors.append(f"지원하지 않는 봉데이터입니다: {req.timeframe}")
+
     buy_dict = req.buy_conditions.model_dump()
     sell_dict = req.sell_conditions.model_dump()
 

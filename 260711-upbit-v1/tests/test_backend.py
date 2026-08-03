@@ -309,6 +309,18 @@ def test_run_backtest_rejects_empty_buy_conditions(monkeypatch, tmp_path):
     assert "매수 조건" in resp.json()["detail"]
 
 
+def test_run_backtest_rejects_unsupported_timeframe(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post(
+        "/api/v1/backtests/run",
+        json=_run_request(timeframe="minutes999"),
+    )
+    assert resp.status_code == 400
+    assert "지원하지 않는 봉데이터" in resp.json()["detail"]
+
+
 def test_run_backtest_rejects_empty_sell_conditions(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _patch_get_candles(monkeypatch)
