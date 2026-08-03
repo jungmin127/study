@@ -1212,3 +1212,106 @@ def test_run_backtest_allows_funding_rate_with_partial_leading_nan(monkeypatch, 
     resp = client.post("/api/v1/backtests/run", json=_run_request(market="KRW-ETH", buy_conditions=buy))
 
     assert resp.status_code == 200
+
+
+def test_create_grid_search_job_returns_running_job(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-SOL"}])
+
+    from engine.cache import create_grid_search_job
+    monkeypatch.setattr(backend_module, "start_job", lambda **kwargs: "job-1")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    resp = client.post("/api/v1/grid-search/jobs", json={
+        "market": "KRW-SOL", "timeframe": "minutes60", "capital": 1_000_000,
+        "start": "2026-06-05", "end": "2026-08-03", "top_n": 20,
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == "job-1"
+    assert body["status"] == "running"
+
+
+def test_create_grid_search_job_rejects_market_not_in_krw_list(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post("/api/v1/grid-search/jobs", json={
+        "market": "KRW-SOL", "timeframe": "minutes60", "capital": 1_000_000,
+        "start": "2026-06-05", "end": "2026-08-03", "top_n": 20,
+    })
+    assert resp.status_code == 400
+
+
+def test_create_grid_search_job_rejects_reversed_date_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-SOL"}])
+
+    resp = client.post("/api/v1/grid-search/jobs", json={
+        "market": "KRW-SOL", "timeframe": "minutes60", "capital": 1_000_000,
+        "start": "2026-08-03", "end": "2026-06-05", "top_n": 20,
+    })
+    assert resp.status_code == 400
+
+
+def test_create_grid_search_job_rejects_top_n_out_of_range(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-SOL"}])
+
+    resp = client.post("/api/v1/grid-search/jobs", json={
+        "market": "KRW-SOL", "timeframe": "minutes60", "capital": 1_000_000,
+        "start": "2026-06-05", "end": "2026-08-03", "top_n": 51,
+    })
+    assert resp.status_code == 400
+
+
+def test_create_grid_search_job_returns_409_when_already_running(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-SOL"}])
+
+    def _raise(**kwargs):
+        raise backend_module.JobAlreadyRunningError("job-existing")
+
+    monkeypatch.setattr(backend_module, "start_job", _raise)
+
+    resp = client.post("/api/v1/grid-search/jobs", json={
+        "market": "KRW-SOL", "timeframe": "minutes60", "capital": 1_000_000,
+        "start": "2026-06-05", "end": "2026-08-03", "top_n": 20,
+    })
+    assert resp.status_code == 409
+
+
+def test_get_grid_search_job_returns_404_for_missing_id(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/grid-search/jobs/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_list_grid_search_jobs_returns_saved_jobs(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from engine.cache import create_grid_search_job
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    resp = client.get("/api/v1/grid-search/jobs")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["id"] == "job-1"
+
+
+def test_cancel_grid_search_job_returns_409_when_not_active(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _raise(job_id):
+        raise backend_module.JobNotActiveError(job_id)
+
+    monkeypatch.setattr(backend_module, "cancel_job", _raise)
+
+    resp = client.post("/api/v1/grid-search/jobs/job-1/cancel")
+    assert resp.status_code == 409

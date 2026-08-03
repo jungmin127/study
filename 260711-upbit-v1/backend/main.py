@@ -16,10 +16,12 @@ from pydantic import BaseModel
 
 from engine.cache import (
     delete_backtest_run,
+    get_grid_search_job,
     get_run_config,
     list_backtest_runs,
     list_combined_ranking,
     list_distinct_combos,
+    list_grid_search_jobs,
     list_latest_sweep_results,
     list_segment_classification,
     list_sweep_history,
@@ -51,6 +53,7 @@ from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
 from upbit_data_service import get_candles, get_current_prices, get_krw_markets, get_krw_markets_with_ticker
+from backend.grid_search_service import JobAlreadyRunningError, JobNotActiveError, cancel_job, start_job
 
 def _to_utc_iso(value: str) -> str:
     """naive 문자열(오프셋 표기 없이 UTC 값만 담고 있는 경우가 대부분)에도 항상
@@ -834,3 +837,75 @@ def validate_backtest_endpoint(req: RunBacktestRequest) -> dict:
         }
 
     return {"valid": True, "errors": []}
+
+
+class GridSearchJobRequest(BaseModel):
+    market: str
+    timeframe: str
+    capital: float
+    start: str
+    end: str
+    top_n: int = 20
+
+
+def _validate_grid_search_request(req: GridSearchJobRequest) -> list[str]:
+    errors: list[str] = []
+    if req.start >= req.end:
+        errors.append("시작일은 종료일보다 빨라야 합니다.")
+    if req.capital <= 0:
+        errors.append("운용자금은 0보다 커야 합니다.")
+    if not (1 <= req.top_n <= 50):
+        errors.append("상위N개는 1~50 사이여야 합니다.")
+    krw_markets = {m["market"] for m in get_krw_markets()}
+    if req.market not in krw_markets:
+        errors.append(f"{req.market}은(는) 업비트 KRW 마켓 목록에 없습니다.")
+    return errors
+
+
+def _grid_search_job_response(job: dict) -> dict:
+    return {
+        **job,
+        "started_at": _to_utc_iso(job["started_at"]),
+        "finished_at": _to_utc_iso(job["finished_at"]) if job["finished_at"] else None,
+    }
+
+
+@app.post("/api/v1/grid-search/jobs")
+def create_grid_search_job_endpoint(req: GridSearchJobRequest) -> dict:
+    errors = _validate_grid_search_request(req)
+    if errors:
+        raise HTTPException(status_code=400, detail=" / ".join(errors))
+
+    try:
+        job_id = start_job(
+            market=req.market, timeframe=req.timeframe, capital=req.capital,
+            start=req.start, end=req.end, top_n=req.top_n,
+        )
+    except JobAlreadyRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    job = get_grid_search_job(job_id)
+    assert job is not None
+    return _grid_search_job_response(job)
+
+
+@app.get("/api/v1/grid-search/jobs")
+def list_grid_search_jobs_endpoint() -> list[dict]:
+    return [_grid_search_job_response(j) for j in list_grid_search_jobs()]
+
+
+@app.get("/api/v1/grid-search/jobs/{job_id}")
+def get_grid_search_job_endpoint(job_id: str) -> dict:
+    job = get_grid_search_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="해당 job을 찾을 수 없습니다")
+    return _grid_search_job_response(job)
+
+
+@app.post("/api/v1/grid-search/jobs/{job_id}/cancel")
+def cancel_grid_search_job_endpoint(job_id: str) -> dict:
+    try:
+        cancel_job(job_id)
+    except JobNotActiveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "canceling"}
