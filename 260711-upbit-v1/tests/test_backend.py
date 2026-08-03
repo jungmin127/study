@@ -1311,7 +1311,7 @@ def test_create_grid_search_job_rejects_malformed_date(monkeypatch, tmp_path):
 
     resp = client.post("/api/v1/grid-search/jobs", json={
         "market": "KRW-SOL", "timeframe": "minutes60", "capital": 1_000_000,
-        "start": "2026/06/05", "end": "2026-08-03", "top_n": 20,
+        "start": "2026-06-05", "end": "2026/08/03", "top_n": 20,
     })
     assert resp.status_code == 400
 
