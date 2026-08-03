@@ -8,7 +8,20 @@ grid_search_jobs 테이블에 기록하는 오케스트레이션 레이어. 스�
 from __future__ import annotations
 
 import json
+import os
 import re
+import signal
+import subprocess
+import sys
+import threading
+import uuid
+from pathlib import Path
+
+from engine.cache import (
+    create_grid_search_job,
+    finish_grid_search_job,
+    update_grid_search_job_progress,
+)
 
 _PROGRESS_RE = re.compile(r"완료\s+([\d,]+)/([\d,]+)건")
 _TOTAL_COMBOS_RE = re.compile(r"총\s+([\d,]+)개\s+조합")
@@ -41,20 +54,6 @@ def _parse_result_json_line(line: str) -> dict | None:
         return None
     return json.loads(stripped[len(_RESULT_JSON_PREFIX):])
 
-
-import os
-import signal
-import subprocess
-import sys
-import threading
-import uuid
-from pathlib import Path
-
-from engine.cache import (
-    create_grid_search_job,
-    finish_grid_search_job,
-    update_grid_search_job_progress,
-)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
