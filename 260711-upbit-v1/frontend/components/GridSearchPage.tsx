@@ -7,6 +7,7 @@ import { cancelGridSearchJob, createGridSearchJob, getGridSearchJobs } from '@/l
 import type { GridSearchJob, GridSearchJobRequest } from '@/lib/types/eda';
 import GridSearchForm from '@/components/GridSearchForm';
 import GridSearchProgress from '@/components/GridSearchProgress';
+import GridSearchHistory from '@/components/GridSearchHistory';
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -75,7 +76,7 @@ export default function GridSearchPage() {
       {submitError && <p className="text-sm text-destructive">{submitError}</p>}
       {runningJob && <GridSearchProgress job={runningJob} onCancel={handleCancel} />}
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-      <div className="text-sm text-muted-foreground">요청 이력은 다음 단계에서 추가됩니다.</div>
+      <GridSearchHistory jobs={jobs} />
     </div>
   );
 }
