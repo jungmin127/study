@@ -18,6 +18,7 @@ export function formatDateTime(iso: string): string {
 // 타임프레임별 1 bar당 분(minute) 수. engine/metrics.py의 _TIMEFRAME_MINUTES와 동일하게 유지한다.
 const TIMEFRAME_MINUTES: Record<string, number> = {
   minutes1: 1,
+  minutes3: 3,
   minutes5: 5,
   minutes15: 15,
   minutes30: 30,

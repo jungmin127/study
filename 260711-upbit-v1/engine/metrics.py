@@ -15,6 +15,7 @@ import pandas as pd
 # 타임프레임별 1 bar당 분(minute) 수
 _TIMEFRAME_MINUTES: dict[str, float] = {
     "minutes1": 1,
+    "minutes3": 3,
     "minutes5": 5,
     "minutes15": 15,
     "minutes30": 30,

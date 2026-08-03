@@ -106,6 +106,14 @@ def test_avg_holding_period_converts_bars_to_days_for_intraday_timeframe():
     assert result["avg_holding_period"] == pytest.approx(0.06)
 
 
+def test_avg_holding_period_converts_bars_to_days_for_minutes3_timeframe():
+    equity_curve = [{"timestamp": "2026-01-01T00:00:00", "value": 10000.0}]
+    trades = [{"pnl": 1.0, "holdingPeriod": 10}]
+    result = calculate_metrics(equity_curve, trades, 10000.0, _df([100]), "minutes3")
+    # minutes3: 1봉=3분. 10봉=30분=1/48일 → 0.0208... → 반올림해서 0.02
+    assert result["avg_holding_period"] == pytest.approx(0.02)
+
+
 def test_cagr_does_not_overflow_for_extreme_ratio_over_short_period():
     # 미청산 포지션이 짧은 기간 동안 크게 다른 현재가로 재평가되면 ratio(final/initial)가
     # 극단적으로 커질 수 있다. days가 짧을 때 ratio ** (365/days)가 float 범위를
