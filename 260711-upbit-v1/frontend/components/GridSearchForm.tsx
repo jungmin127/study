@@ -7,6 +7,7 @@ import CoinSelect, { sortMarkets } from '@/components/CoinSelect';
 import { ApiError } from '@/lib/api/client';
 import { getMarkets } from '@/lib/api/eda';
 import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
+import { defaultDate, formatCapital } from '@/lib/format';
 import type { GridSearchJobRequest } from '@/lib/types/eda';
 import type { Market } from '@/lib/types/eda';
 
@@ -20,17 +21,6 @@ const TIMEFRAME_OPTIONS = [
   { label: '4시간', timeframe: 'minutes240' },
   { label: '1일', timeframe: 'days' },
 ];
-
-function formatCapital(digits: string): string {
-  if (!digits) return '';
-  return Number(digits).toLocaleString('ko-KR');
-}
-
-function defaultDate(daysAgo: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  return d.toISOString().slice(0, 10);
-}
 
 export interface GridSearchFormInitial {
   market: string;

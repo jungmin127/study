@@ -21,6 +21,7 @@ import type { IndicatorCatalogItem, Market } from '@/lib/types/eda';
 import { getIndicatorCatalog, getMarkets, runBacktest, validateBacktest } from '@/lib/api/eda';
 import { ApiError } from '@/lib/api/client';
 import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
+import { defaultDate, formatCapital } from '@/lib/format';
 
 const CANDLE_UNITS = [
   { label: '15분', timeframe: 'minutes15' },
@@ -30,17 +31,6 @@ const CANDLE_UNITS = [
 ];
 
 const EMPTY_CONDITION_GROUP: ConditionGroup = { type: 'AND', conditions: [] };
-
-function defaultDate(daysAgo: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  return d.toISOString().slice(0, 10);
-}
-
-function formatCapital(digits: string): string {
-  if (!digits) return '';
-  return Number(digits).toLocaleString('ko-KR');
-}
 
 function parsePreset(searchParams: URLSearchParams) {
   function parseConditionGroup(raw: string | null): ConditionGroup {

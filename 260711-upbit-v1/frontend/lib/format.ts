@@ -50,3 +50,14 @@ export function formatHoldingPeriod(bars: number, timeframe: string): string {
   const days = (bars * minutesPerBar) / 1440;
   return `${bars}봉 (${days.toFixed(1)}일)`;
 }
+
+export function defaultDate(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
+export function formatCapital(digits: string): string {
+  if (!digits) return '';
+  return Number(digits).toLocaleString('ko-KR');
+}
