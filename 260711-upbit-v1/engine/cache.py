@@ -635,6 +635,18 @@ def remove_grid_search_result(job_id: str, run_id: str) -> bool:
         conn.close()
 
 
+def delete_grid_search_job(job_id: str) -> bool:
+    """job_id에 해당하는 grid search job 행을 삭제한다.
+    삭제된 행이 있었으면 True를 반환한다."""
+    conn = _connect()
+    try:
+        cur = conn.execute("DELETE FROM grid_search_jobs WHERE id = ?", (job_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def _row_to_grid_search_job_dict(row: tuple) -> dict:
     (job_id, market, timeframe, capital, start, end, top_n, status,
      total_combos, done_combos, started_at, finished_at, elapsed_sec,

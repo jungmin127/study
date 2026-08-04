@@ -21,6 +21,7 @@ from engine.cache import (
 )
 from engine.cache import (
     create_grid_search_job,
+    delete_grid_search_job,
     finish_grid_search_job,
     get_grid_search_job,
     list_grid_search_jobs,
@@ -733,3 +734,19 @@ def test_list_grid_search_jobs_returns_newest_first(monkeypatch, tmp_path):
 
     jobs = list_grid_search_jobs()
     assert [j["id"] for j in jobs] == ["job-2", "job-1"]
+
+
+def test_delete_grid_search_job_removes_the_job(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    assert delete_grid_search_job("job-1") is True
+    assert get_grid_search_job("job-1") is None
+
+
+def test_delete_grid_search_job_returns_false_for_missing_job(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    assert delete_grid_search_job("does-not-exist") is False
