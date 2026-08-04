@@ -102,3 +102,9 @@ export function deleteGridSearchResult(jobId: string, runId: string): Promise<{ 
     method: 'DELETE',
   });
 }
+
+export function deleteGridSearchJob(jobId: string): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>(`/api/v1/grid-search/jobs/${jobId}`, {
+    method: 'DELETE',
+  });
+}
