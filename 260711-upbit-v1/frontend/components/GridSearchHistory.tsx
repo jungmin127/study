@@ -51,9 +51,20 @@ function sortJobs(list: GridSearchJob[], key: SortKey | null, dir: SortDir): Gri
   });
 }
 
-function canExpand(job: GridSearchJob): boolean {
-  if (job.status === 'failed' && !!job.error_message) return true;
-  return (job.result_json?.length ?? 0) > 1;
+type Expansion =
+  | { kind: 'error'; message: string }
+  | { kind: 'results'; results: GridSearchSavedResult[] }
+  | null;
+
+function expansionFor(job: GridSearchJob): Expansion {
+  if (job.status === 'failed' && job.error_message) {
+    return { kind: 'error', message: job.error_message };
+  }
+  const results = job.result_json ?? [];
+  if (results.length > 1) {
+    return { kind: 'results', results: results.slice(1) };
+  }
+  return null;
 }
 
 function ResultTitle({ result }: { result: GridSearchSavedResult }) {
@@ -135,6 +146,10 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
     return <p className="text-sm text-muted-foreground">아직 실행한 grid search가 없습니다.</p>;
   }
 
+  if (historyJobs.length === 0) {
+    return <p className="text-sm text-muted-foreground">아직 완료된 이력이 없습니다.</p>;
+  }
+
   return (
     <div>
       <h2 className="mb-2 text-sm font-semibold">요청 이력</h2>
@@ -190,14 +205,25 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
             {sorted.map((job) => {
               const results = job.result_json ?? [];
               const top = results[0];
-              const expandable = canExpand(job);
+              const expansion = expansionFor(job);
+              const expandable = expansion !== null;
               const isExpanded = expanded.has(job.id);
 
               return (
                 <Fragment key={job.id}>
                   <TableRow
                     className={expandable ? 'cursor-pointer' : ''}
+                    role={expandable ? 'button' : undefined}
+                    tabIndex={expandable ? 0 : undefined}
+                    aria-expanded={expandable ? isExpanded : undefined}
                     onClick={() => expandable && toggle(job.id)}
+                    onKeyDown={(e) => {
+                      if (!expandable) return;
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggle(job.id);
+                      }
+                    }}
                   >
                     <TableCell>
                       {expandable &&
@@ -229,18 +255,18 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
                       )}
                     </TableCell>
                   </TableRow>
-                  {isExpanded && job.status === 'failed' && job.error_message && (
+                  {isExpanded && expansion?.kind === 'error' && (
                     <TableRow>
                       <TableCell colSpan={8} className="whitespace-normal text-sm text-destructive">
-                        {job.error_message}
+                        {expansion.message}
                       </TableCell>
                     </TableRow>
                   )}
-                  {isExpanded && results.length > 1 && (
+                  {isExpanded && expansion?.kind === 'results' && (
                     <TableRow>
                       <TableCell colSpan={8}>
                         <div className="space-y-1">
-                          {results.slice(1).map((r) => (
+                          {expansion.results.map((r) => (
                             <div key={r.run_id} className="flex items-center gap-2 text-sm">
                               <span className="text-muted-foreground">{r.rank}위</span>
                               <span className={returnRateColor(r.return_pct)}>{r.return_pct.toFixed(2)}%</span>
