@@ -22,7 +22,7 @@ import BacktestCoinFilter, { type CoinFilterOption } from '@/components/Backtest
 import { returnRateColor } from '@/lib/return-rate-color';
 import { formatDateTime, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
 import { parseGridResultTitle } from '@/lib/grid-result-title';
-import { deleteGridSearchResult } from '@/lib/api/eda';
+import { deleteGridSearchJob, deleteGridSearchResult } from '@/lib/api/eda';
 import type { GridSearchJob, GridSearchSavedResult } from '@/lib/types/eda';
 
 const STATUS_LABEL: Record<GridSearchJob['status'], string> = {
@@ -105,6 +105,9 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [jobDeleteTarget, setJobDeleteTarget] = useState<string | null>(null);
+  const [jobDeleteBusy, setJobDeleteBusy] = useState(false);
+  const [jobDeleteError, setJobDeleteError] = useState<string | null>(null);
 
   const timeframeFilter = timeframeFilterValue === ALL_TIMEFRAMES ? null : timeframeFilterValue;
 
@@ -136,6 +139,9 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
   }, [historyJobs, coinFilter, timeframeFilter]);
 
   const sorted = useMemo(() => sortJobs(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
+
+  const jobDeleteJob = useMemo(() => jobs.find((j) => j.id === jobDeleteTarget) ?? null, [jobs, jobDeleteTarget]);
+  const jobDeleteResultCount = jobDeleteJob?.result_json?.length ?? 0;
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -196,6 +202,22 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
     setDeleteTarget(null);
   }
 
+  async function handleConfirmJobDelete() {
+    if (!jobDeleteTarget) return;
+    const jobId = jobDeleteTarget;
+    setJobDeleteBusy(true);
+    setJobDeleteError(null);
+    try {
+      await deleteGridSearchJob(jobId);
+      setJobDeleteBusy(false);
+      setJobDeleteTarget(null);
+      await onRefresh();
+    } catch {
+      setJobDeleteBusy(false);
+      setJobDeleteError('삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    }
+  }
+
   if (jobs.length === 0) {
     return <p className="text-sm text-muted-foreground">아직 실행한 grid search가 없습니다.</p>;
   }
@@ -253,6 +275,7 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
                   1위 수익률 <SortIcon sortKeyOf="return_pct" />
                 </button>
               </TableHead>
+              <TableHead>삭제</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -309,17 +332,31 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setJobDeleteTarget(job.id);
+                        }}
+                        aria-label="이 grid search 이력 삭제"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                   {isExpanded && expansion?.kind === 'error' && (
                     <TableRow>
-                      <TableCell colSpan={8} className="whitespace-normal text-sm text-destructive">
+                      <TableCell colSpan={9} className="whitespace-normal text-sm text-destructive">
                         {expansion.message}
                       </TableCell>
                     </TableRow>
                   )}
                   {isExpanded && expansion?.kind === 'results' && (
                     <TableRow>
-                      <TableCell colSpan={8}>
+                      <TableCell colSpan={9}>
                         <div className="space-y-2">
                           <div className="flex items-center gap-3">
                             <div className="flex items-center gap-1.5">
@@ -409,6 +446,34 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmDelete} disabled={bulkDeleting}>
               {bulkDeleting ? '삭제 중...' : '삭제'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={jobDeleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setJobDeleteTarget(null);
+            setJobDeleteError(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {jobDeleteResultCount > 0
+                ? `이 grid search 이력과 저장된 결과 ${jobDeleteResultCount}개를 모두 삭제하시겠습니까?`
+                : '이 grid search 이력을 삭제하시겠습니까?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>삭제 후에는 되돌릴 수 없습니다.</AlertDialogDescription>
+          </AlertDialogHeader>
+          {jobDeleteError && <p className="text-sm text-destructive">{jobDeleteError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmJobDelete} disabled={jobDeleteBusy}>
+              {jobDeleteBusy ? '삭제 중...' : '삭제'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
