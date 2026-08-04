@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 import backend.main as backend_module
 import engine.cache as cache_module
 from backend.main import app
-from engine.cache import save_result, save_sweep_result
+from engine.cache import save_result, save_sweep_result, finish_grid_search_job
 from engine.cache import save_segment_classification
 from tests.signal_fixtures import make_oscillating_df
 
@@ -1413,3 +1413,59 @@ def test_cancel_grid_search_job_returns_409_when_not_active(monkeypatch, tmp_pat
 
     resp = client.post("/api/v1/grid-search/jobs/job-1/cancel")
     assert resp.status_code == 409
+
+
+def test_delete_grid_search_result_removes_run_and_updates_job(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from engine.cache import create_grid_search_job
+
+    save_result(
+        run_id="run-a", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="[Grid] 매수 A / 매도 B",
+    )
+    create_grid_search_job(
+        job_id="job-1", market="KRW-BTC", timeframe="days", capital=1_000_000.0,
+        start="2026-01-01", end="2026-01-10", top_n=20,
+    )
+    finish_grid_search_job(
+        "job-1", status="completed", elapsed_sec=10.0,
+        result_json='[{"rank": 1, "run_id": "run-a", "return_pct": 5.0, "title": "[Grid] 매수 A / 매도 B"}]',
+    )
+
+    resp = client.delete("/api/v1/grid-search/jobs/job-1/results/run-a")
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": True}
+
+    job_resp = client.get("/api/v1/grid-search/jobs")
+    job = next(j for j in job_resp.json() if j["id"] == "job-1")
+    assert job["result_json"] == []
+
+    backtests_resp = client.get("/api/v1/backtests")
+    assert backtests_resp.json() == []
+
+
+def test_delete_grid_search_result_returns_404_for_missing_job(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.delete("/api/v1/grid-search/jobs/does-not-exist/results/run-a")
+    assert resp.status_code == 404
+
+
+def test_delete_grid_search_result_returns_404_when_run_id_not_in_job(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from engine.cache import create_grid_search_job
+
+    create_grid_search_job(
+        job_id="job-1", market="KRW-BTC", timeframe="days", capital=1_000_000.0,
+        start="2026-01-01", end="2026-01-10", top_n=20,
+    )
+    finish_grid_search_job(
+        "job-1", status="completed", elapsed_sec=10.0,
+        result_json='[{"rank": 1, "run_id": "run-a", "return_pct": 5.0, "title": "x"}]',
+    )
+
+    resp = client.delete("/api/v1/grid-search/jobs/job-1/results/run-b")
+    assert resp.status_code == 404

@@ -27,6 +27,7 @@ from engine.cache import (
     list_segment_classification,
     list_sweep_history,
     load_result,
+    remove_grid_search_result,
     run_backtest_cached,
     save_result,
 )
@@ -945,3 +946,16 @@ def cancel_grid_search_job_endpoint(job_id: str) -> dict:
     except JobNotActiveError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"status": "canceling"}
+
+
+@app.delete("/api/v1/grid-search/jobs/{job_id}/results/{run_id}")
+def delete_grid_search_result_endpoint(job_id: str, run_id: str) -> dict:
+    job = get_grid_search_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="해당 job_id의 grid search를 찾을 수 없습니다")
+    results = job.get("result_json") or []
+    if not any(r["run_id"] == run_id for r in results):
+        raise HTTPException(status_code=404, detail="해당 job에 이 run_id의 결과가 없습니다")
+    delete_backtest_run(run_id)
+    remove_grid_search_result(job_id, run_id)
+    return {"deleted": True}
