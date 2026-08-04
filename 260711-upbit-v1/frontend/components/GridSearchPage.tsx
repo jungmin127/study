@@ -77,7 +77,7 @@ export default function GridSearchPage() {
       {submitError && <p className="text-sm text-destructive">{submitError}</p>}
       {runningJob && <GridSearchProgress job={runningJob} onCancel={handleCancel} />}
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-      <GridSearchHistory jobs={jobs} />
+      <GridSearchHistory jobs={jobs} onRefresh={refresh} />
     </div>
   );
 }

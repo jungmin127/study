@@ -2,14 +2,27 @@
 
 import { Fragment, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import BacktestCoinFilter, { type CoinFilterOption } from '@/components/BacktestCoinFilter';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { formatDateTime, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
 import { parseGridResultTitle } from '@/lib/grid-result-title';
+import { deleteGridSearchResult } from '@/lib/api/eda';
 import type { GridSearchJob, GridSearchSavedResult } from '@/lib/types/eda';
 
 const STATUS_LABEL: Record<GridSearchJob['status'], string> = {
@@ -61,8 +74,8 @@ function expansionFor(job: GridSearchJob): Expansion {
     return { kind: 'error', message: job.error_message };
   }
   const results = job.result_json ?? [];
-  if (results.length > 1) {
-    return { kind: 'results', results: results.slice(1) };
+  if (results.length > 0) {
+    return { kind: 'results', results };
   }
   return null;
 }
@@ -71,22 +84,32 @@ function ResultTitle({ result }: { result: GridSearchSavedResult }) {
   const parsed = parseGridResultTitle(result.title);
   if (!parsed) return <>{result.title}</>;
   return (
-    <>
-      <strong>매수</strong> {parsed.buyRest} / <strong>매도</strong> {parsed.sellRest}
-    </>
+    <div className="space-y-0.5">
+      <div>
+        <strong>매수</strong> {parsed.buyRest}
+      </div>
+      <div>
+        <strong>매도</strong> {parsed.sellRest}
+      </div>
+    </div>
   );
 }
 
 interface GridSearchHistoryProps {
   jobs: GridSearchJob[];
+  onRefresh: () => void | Promise<void>;
 }
 
-export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
+export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistoryProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [coinFilter, setCoinFilter] = useState<string | null>(null);
   const [timeframeFilterValue, setTimeframeFilterValue] = useState<string>(ALL_TIMEFRAMES);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [selected, setSelected] = useState<Record<string, Set<string>>>({});
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   const timeframeFilter = timeframeFilterValue === ALL_TIMEFRAMES ? null : timeframeFilterValue;
 
@@ -140,6 +163,41 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
   function SortIcon({ sortKeyOf }: { sortKeyOf: SortKey }) {
     if (sortKey !== sortKeyOf) return <ArrowUpDown className="size-3.5" />;
     return sortDir === 'desc' ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />;
+  }
+
+  function toggleResultSelection(jobId: string, runId: string, checked: boolean) {
+    setSelected((prev) => {
+      const current = new Set(prev[jobId] ?? []);
+      if (checked) current.add(runId);
+      else current.delete(runId);
+      return { ...prev, [jobId]: current };
+    });
+  }
+
+  function toggleAllForJob(jobId: string, runIds: string[], checked: boolean) {
+    setSelected((prev) => ({ ...prev, [jobId]: checked ? new Set(runIds) : new Set() }));
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    const jobId = deleteTarget;
+    const ids = Array.from(selected[jobId] ?? []);
+    setBulkDeleting(true);
+    setBulkError(null);
+    const results = await Promise.allSettled(ids.map((runId) => deleteGridSearchResult(jobId, runId)));
+    const failedCount = results.filter((r) => r.status === 'rejected').length;
+    setBulkDeleting(false);
+    if (failedCount > 0) {
+      setBulkError(`${failedCount}건 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.`);
+      return;
+    }
+    setSelected((prev) => {
+      const next = { ...prev };
+      delete next[jobId];
+      return next;
+    });
+    setDeleteTarget(null);
+    await onRefresh();
   }
 
   if (jobs.length === 0) {
@@ -208,6 +266,7 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
               const expansion = expansionFor(job);
               const expandable = expansion !== null;
               const isExpanded = expanded.has(job.id);
+              const jobSelected = selected[job.id] ?? new Set<string>();
 
               return (
                 <Fragment key={job.id}>
@@ -238,7 +297,7 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
                       {job.start} ~ {job.end}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{formatDateTime(job.started_at)}</TableCell>
-                    <TableCell className="max-w-[320px] truncate">
+                    <TableCell className="max-w-[320px] whitespace-normal">
                       {top ? (
                         <Link href={`/backtests/${top.run_id}`} className="underline" onClick={(e) => e.stopPropagation()}>
                           <ResultTitle result={top} />
@@ -265,16 +324,49 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
                   {isExpanded && expansion?.kind === 'results' && (
                     <TableRow>
                       <TableCell colSpan={8}>
-                        <div className="space-y-1">
-                          {expansion.results.map((r) => (
-                            <div key={r.run_id} className="flex items-center gap-2 text-sm">
-                              <span className="text-muted-foreground">{r.rank}위</span>
-                              <span className={returnRateColor(r.return_pct)}>{r.return_pct.toFixed(2)}%</span>
-                              <Link href={`/backtests/${r.run_id}`} className="truncate underline">
-                                <ResultTitle result={r} />
-                              </Link>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1.5">
+                              <Checkbox
+                                checked={jobSelected.size > 0 && jobSelected.size === expansion.results.length}
+                                onCheckedChange={(checked) =>
+                                  toggleAllForJob(
+                                    job.id,
+                                    expansion.results.map((r) => r.run_id),
+                                    checked === true
+                                  )
+                                }
+                                aria-label="이 job의 결과 전체 선택"
+                              />
+                              <span className="text-xs text-muted-foreground">전체 선택</span>
                             </div>
-                          ))}
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={jobSelected.size === 0}
+                              onClick={() => setDeleteTarget(job.id)}
+                            >
+                              <Trash2 className="size-3.5" />
+                              선택 삭제{jobSelected.size > 0 ? ` (${jobSelected.size})` : ''}
+                            </Button>
+                          </div>
+                          <div className="space-y-1">
+                            {expansion.results.map((r) => (
+                              <div key={r.run_id} className="flex items-start gap-2 text-sm">
+                                <Checkbox
+                                  className="mt-0.5"
+                                  checked={jobSelected.has(r.run_id)}
+                                  onCheckedChange={(checked) => toggleResultSelection(job.id, r.run_id, checked === true)}
+                                  aria-label={`${r.rank}위 결과 선택`}
+                                />
+                                <span className="shrink-0 text-muted-foreground">{r.rank}위</span>
+                                <span className={`shrink-0 ${returnRateColor(r.return_pct)}`}>{r.return_pct.toFixed(2)}%</span>
+                                <Link href={`/backtests/${r.run_id}`} className="whitespace-normal underline">
+                                  <ResultTitle result={r} />
+                                </Link>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -285,6 +377,32 @@ export default function GridSearchHistory({ jobs }: GridSearchHistoryProps) {
           </TableBody>
         </Table>
       )}
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setBulkError(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              선택한 {deleteTarget ? (selected[deleteTarget]?.size ?? 0) : 0}개의 그리드서치 결과를 삭제하시겠습니까?
+            </AlertDialogTitle>
+            <AlertDialogDescription>삭제 후에는 되돌릴 수 없습니다.</AlertDialogDescription>
+          </AlertDialogHeader>
+          {bulkError && <p className="text-sm text-destructive">{bulkError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? '삭제 중...' : '삭제'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
