@@ -117,12 +117,16 @@ function expansionFor(job: GridSearchJob): Expansion {
    job.id`로 설정, 다이얼로그 오픈.
 2. 다이얼로그에서 "삭제" 확인 → `selected[job.id]`의 각 `run_id`에 대해
    `deleteGridSearchResult(job.id, runId)`를 `Promise.allSettled`로 병렬 호출.
-3. 실패 건수가 있으면 다이얼로그 안에 인라인 에러 표시(`BacktestRunsTable`과 동일 문구
-   패턴: "N건 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요."), 다이얼로그는 열어둔 채
-   유지(재시도 가능하도록).
-4. 전부 성공하면 다이얼로그 닫고, 해당 job의 선택 상태 초기화, `await onRefresh()` 호출해서
-   부모의 `jobs` 상태를 최신화(삭제된 항목이 새로고침 없이도 즉시 사라짐).
-5. 모든 결과가 삭제돼 `result_json`이 빈 배열이 되는 경우도 허용한다 — 이 job은 이후
+3. 성공/실패 여부와 무관하게 `await onRefresh()`를 먼저 호출해 부모의 `jobs` 상태를
+   최신화한다 — 성공한 항목은 새로고침 없이도 즉시 목록에서 사라진다(부분 실패 시에도
+   이미 지워진 항목이 화면에 유령처럼 남지 않도록).
+4. 실패 건수가 있으면 실패한 `run_id`만 남겨 해당 job의 선택 상태를 좁히고(성공한 항목은
+   선택에서 제거), 다이얼로그 안에 인라인 에러 표시(`BacktestRunsTable`과 동일 문구 패턴:
+   "N건 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요."), 다이얼로그는 열어둔 채 유지 —
+   재시도하면 실패했던 항목만 다시 시도한다(이미 지워진 항목을 다시 삭제 시도해 404
+   루프에 빠지는 것을 방지).
+5. 전부 성공하면 다이얼로그 닫고, 해당 job의 선택 상태 초기화.
+6. 모든 결과가 삭제돼 `result_json`이 빈 배열이 되는 경우도 허용한다 — 이 job은 이후
    `expansionFor()`가 `null`을 돌려주므로 chevron이 사라지고, 메인 행의 "1위 조건"/"1위
    수익률"은 기존에 이미 있는 "결과 없음"(`-`) 처리 경로를 그대로 탄다(별도 분기 불필요).
 
@@ -154,6 +158,13 @@ def remove_grid_search_result(job_id: str, run_id: str) -> bool:
     finally:
         conn.close()
 ```
+
+> **구현 후 수정(최종 리뷰에서 발견):** 위 함수는 SELECT → 필터링 → UPDATE가 원자적이지
+> 않다. 프론트엔드가 "전체 선택 후 선택 삭제"로 여러 `run_id`를 동시에(`Promise.allSettled`)
+> 지우면, 같은 job 행을 두 개 이상의 요청이 동시에 읽고 쓰면서 먼저 커밋된 삭제가 나중
+> 커밋에 덮어써지는 lost-update가 실제로 재현됐다(20개 동시 삭제 시 일부만 반영됨). 이를
+> 막기 위해 `conn.execute("BEGIN IMMEDIATE")`를 `SELECT` 직전에 추가해 같은 job에 대한
+> 동시 쓰기를 직렬화한다 — 커밋된 최종 코드는 `engine/cache.py`를 참고.
 
 **`backend/main.py` — `DELETE /api/v1/grid-search/jobs/{job_id}/results/{run_id}`**
 
