@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from engine.cache import (
     delete_backtest_run,
+    delete_grid_search_job,
     finish_grid_search_job,
     get_grid_search_job,
     get_run_config,
@@ -958,4 +959,15 @@ def delete_grid_search_result_endpoint(job_id: str, run_id: str) -> dict:
         raise HTTPException(status_code=404, detail="해당 job에 이 run_id의 결과가 없습니다")
     delete_backtest_run(run_id)
     remove_grid_search_result(job_id, run_id)
+    return {"deleted": True}
+
+
+@app.delete("/api/v1/grid-search/jobs/{job_id}")
+def delete_grid_search_job_endpoint(job_id: str) -> dict:
+    job = get_grid_search_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="해당 job_id의 grid search를 찾을 수 없습니다")
+    for result in job.get("result_json") or []:
+        delete_backtest_run(result["run_id"])
+    delete_grid_search_job(job_id)
     return {"deleted": True}
