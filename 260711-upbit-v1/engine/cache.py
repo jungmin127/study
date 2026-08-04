@@ -608,6 +608,30 @@ def finish_grid_search_job(
         conn.close()
 
 
+def remove_grid_search_result(job_id: str, run_id: str) -> bool:
+    """job_id의 저장된 결과 목록(result_json)에서 run_id 항목을 제거한다.
+    제거된 항목이 있었으면 True를 반환한다."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT result_json FROM grid_search_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None or row[0] is None:
+            return False
+        results = json.loads(row[0])
+        filtered = [r for r in results if r.get("run_id") != run_id]
+        if len(filtered) == len(results):
+            return False
+        conn.execute(
+            "UPDATE grid_search_jobs SET result_json = ? WHERE id = ?",
+            (json.dumps(filtered), job_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def _row_to_grid_search_job_dict(row: tuple) -> dict:
     (job_id, market, timeframe, capital, start, end, top_n, status,
      total_combos, done_combos, started_at, finished_at, elapsed_sec,

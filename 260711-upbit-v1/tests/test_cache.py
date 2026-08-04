@@ -22,6 +22,7 @@ from engine.cache import (
     finish_grid_search_job,
     get_grid_search_job,
     list_grid_search_jobs,
+    remove_grid_search_result,
     update_grid_search_job_progress,
 )
 
@@ -638,6 +639,58 @@ def test_finish_grid_search_job_marks_failed_with_error_message(monkeypatch, tmp
     assert job["status"] == "failed"
     assert job["error_message"] == "워커 응답 없음"
     assert job["result_json"] is None
+
+
+def test_remove_grid_search_result_removes_matching_entry(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+    finish_grid_search_job(
+        "job-1", status="completed", elapsed_sec=100.0,
+        result_json=(
+            '[{"rank": 1, "run_id": "run-a", "return_pct": 10.0, "title": "a"}, '
+            '{"rank": 2, "run_id": "run-b", "return_pct": 5.0, "title": "b"}]'
+        ),
+    )
+
+    assert remove_grid_search_result("job-1", "run-a") is True
+
+    job = get_grid_search_job("job-1")
+    assert job["result_json"] == [{"rank": 2, "run_id": "run-b", "return_pct": 5.0, "title": "b"}]
+
+
+def test_remove_grid_search_result_returns_false_for_missing_run_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+    finish_grid_search_job(
+        "job-1", status="completed", elapsed_sec=100.0,
+        result_json='[{"rank": 1, "run_id": "run-a", "return_pct": 10.0, "title": "a"}]',
+    )
+
+    assert remove_grid_search_result("job-1", "does-not-exist") is False
+
+    job = get_grid_search_job("job-1")
+    assert job["result_json"] == [{"rank": 1, "run_id": "run-a", "return_pct": 10.0, "title": "a"}]
+
+
+def test_remove_grid_search_result_returns_false_when_result_json_is_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    assert remove_grid_search_result("job-1", "run-a") is False
+
+
+def test_remove_grid_search_result_returns_false_for_missing_job(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    assert remove_grid_search_result("does-not-exist", "run-a") is False
 
 
 def test_list_grid_search_jobs_returns_newest_first(monkeypatch, tmp_path):
