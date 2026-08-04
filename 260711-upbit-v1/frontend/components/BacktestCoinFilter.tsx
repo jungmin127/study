@@ -7,7 +7,7 @@ import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@
 
 export interface CoinFilterOption {
   market: string;
-  koreanName: string;
+  koreanName?: string;
 }
 
 interface BacktestCoinFilterProps {
@@ -24,7 +24,9 @@ export default function BacktestCoinFilter({ options, value, onChange }: Backtes
     const q = query.trim().toLowerCase();
     if (!q) return options;
     return options.filter(
-      (o) => o.koreanName.toLowerCase().includes(q) || o.market.replace('KRW-', '').toLowerCase().includes(q)
+      (o) =>
+        (o.koreanName?.toLowerCase().includes(q) ?? false) ||
+        o.market.replace('KRW-', '').toLowerCase().includes(q)
     );
   }, [options, query]);
 
@@ -41,7 +43,10 @@ export default function BacktestCoinFilter({ options, value, onChange }: Backtes
         <span className="truncate text-sm">
           {selected ? (
             <>
-              {selected.market} <span className="text-xs text-muted-foreground">({selected.koreanName})</span>
+              {selected.market}
+              {selected.koreanName && (
+                <span className="text-xs text-muted-foreground"> ({selected.koreanName})</span>
+              )}
             </>
           ) : (
             <span className="text-muted-foreground">코인별 필터</span>
@@ -74,7 +79,7 @@ export default function BacktestCoinFilter({ options, value, onChange }: Backtes
                 className={o.market === value ? 'bg-muted' : ''}
               >
                 <span className="font-medium">{o.market}</span>
-                <span className="ml-2 text-xs text-muted-foreground">{o.koreanName}</span>
+                {o.koreanName && <span className="ml-2 text-xs text-muted-foreground">{o.koreanName}</span>}
               </CommandItem>
             ))}
           </CommandList>
