@@ -84,14 +84,9 @@ function ResultTitle({ result }: { result: GridSearchSavedResult }) {
   const parsed = parseGridResultTitle(result.title);
   if (!parsed) return <>{result.title}</>;
   return (
-    <div className="space-y-0.5">
-      <div>
-        <strong>매수</strong> {parsed.buyRest}
-      </div>
-      <div>
-        <strong>매도</strong> {parsed.sellRest}
-      </div>
-    </div>
+    <>
+      <strong>매수</strong> {parsed.buyRest} / <strong>매도</strong> {parsed.sellRest}
+    </>
   );
 }
 
@@ -351,22 +346,36 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
                               선택 삭제{jobSelected.size > 0 ? ` (${jobSelected.size})` : ''}
                             </Button>
                           </div>
-                          <div className="space-y-1">
-                            {expansion.results.map((r) => (
-                              <div key={r.run_id} className="flex items-start gap-2 text-sm">
-                                <Checkbox
-                                  className="mt-0.5"
-                                  checked={jobSelected.has(r.run_id)}
-                                  onCheckedChange={(checked) => toggleResultSelection(job.id, r.run_id, checked === true)}
-                                  aria-label={`${r.rank}위 결과 선택`}
-                                />
-                                <span className="shrink-0 text-muted-foreground">{r.rank}위</span>
-                                <span className={`shrink-0 ${returnRateColor(r.return_pct)}`}>{r.return_pct.toFixed(2)}%</span>
-                                <Link href={`/backtests/${r.run_id}`} className="whitespace-normal underline">
-                                  <ResultTitle result={r} />
-                                </Link>
-                              </div>
-                            ))}
+                          <div className="grid grid-cols-[auto_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 text-sm">
+                            {expansion.results.map((r) => {
+                              const parsed = parseGridResultTitle(r.title);
+                              return (
+                                <Fragment key={r.run_id}>
+                                  <Checkbox
+                                    checked={jobSelected.has(r.run_id)}
+                                    onCheckedChange={(checked) => toggleResultSelection(job.id, r.run_id, checked === true)}
+                                    aria-label={`${r.rank}위 결과 선택`}
+                                  />
+                                  <span className="text-muted-foreground">{r.rank}위</span>
+                                  <span className={returnRateColor(r.return_pct)}>{r.return_pct.toFixed(2)}%</span>
+                                  {parsed ? (
+                                    <>
+                                      <span>
+                                        <strong>매수</strong> {parsed.buyRest}
+                                      </span>
+                                      <span>
+                                        <strong>매도</strong> {parsed.sellRest}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="col-span-2">{r.title}</span>
+                                  )}
+                                  <Link href={`/backtests/${r.run_id}`} className="underline">
+                                    보기
+                                  </Link>
+                                </Fragment>
+                              );
+                            })}
                           </div>
                         </div>
                       </TableCell>
