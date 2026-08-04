@@ -185,10 +185,12 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
     setBulkDeleting(true);
     setBulkError(null);
     const results = await Promise.allSettled(ids.map((runId) => deleteGridSearchResult(jobId, runId)));
-    const failedCount = results.filter((r) => r.status === 'rejected').length;
+    const failedIds = ids.filter((_, i) => results[i].status === 'rejected');
     setBulkDeleting(false);
-    if (failedCount > 0) {
-      setBulkError(`${failedCount}건 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.`);
+    await onRefresh();
+    if (failedIds.length > 0) {
+      setSelected((prev) => ({ ...prev, [jobId]: new Set(failedIds) }));
+      setBulkError(`${failedIds.length}건 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.`);
       return;
     }
     setSelected((prev) => {
@@ -197,7 +199,6 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
       return next;
     });
     setDeleteTarget(null);
-    await onRefresh();
   }
 
   if (jobs.length === 0) {
