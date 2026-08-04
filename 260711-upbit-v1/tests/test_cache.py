@@ -1,3 +1,5 @@
+import json
+import threading
 from datetime import datetime, timezone
 
 import backtrader as bt
@@ -691,6 +693,31 @@ def test_remove_grid_search_result_returns_false_when_result_json_is_none(monkey
 def test_remove_grid_search_result_returns_false_for_missing_job(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     assert remove_grid_search_result("does-not-exist", "run-a") is False
+
+
+def test_remove_grid_search_result_is_safe_under_concurrent_deletes(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+    entries = [
+        {"rank": i + 1, "run_id": f"run-{i}", "return_pct": float(i), "title": f"t{i}"}
+        for i in range(20)
+    ]
+    finish_grid_search_job("job-1", status="completed", elapsed_sec=1.0, result_json=json.dumps(entries))
+
+    threads = [
+        threading.Thread(target=remove_grid_search_result, args=("job-1", f"run-{i}"))
+        for i in range(20)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    job = get_grid_search_job("job-1")
+    assert job["result_json"] == []
 
 
 def test_list_grid_search_jobs_returns_newest_first(monkeypatch, tmp_path):

@@ -153,12 +153,13 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
     setBulkError(null);
     const ids = Array.from(selected);
     const results = await Promise.allSettled(ids.map((id) => deleteBacktestRun(id)));
-    const failedCount = results.filter((r) => r.status === 'rejected').length;
+    const failedIds = ids.filter((_, i) => results[i].status === 'rejected');
     setBulkDeleting(false);
-    setSelected(new Set());
-    if (failedCount > 0) {
-      setBulkError(`${failedCount}건 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.`);
+    if (failedIds.length > 0) {
+      setSelected(new Set(failedIds));
+      setBulkError(`${failedIds.length}건 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.`);
     } else {
+      setSelected(new Set());
       setConfirmOpen(false);
     }
     router.refresh();

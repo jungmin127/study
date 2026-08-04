@@ -613,14 +613,17 @@ def remove_grid_search_result(job_id: str, run_id: str) -> bool:
     제거된 항목이 있었으면 True를 반환한다."""
     conn = _connect()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT result_json FROM grid_search_jobs WHERE id = ?", (job_id,)
         ).fetchone()
         if row is None or row[0] is None:
+            conn.rollback()
             return False
         results = json.loads(row[0])
         filtered = [r for r in results if r.get("run_id") != run_id]
         if len(filtered) == len(results):
+            conn.rollback()
             return False
         conn.execute(
             "UPDATE grid_search_jobs SET result_json = ? WHERE id = ?",
