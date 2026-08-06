@@ -160,6 +160,25 @@ def create_bb_percent_b(df: pd.DataFrame, **params) -> pd.Series:
     return (df["close"] - lower) / (upper - lower)
 
 
+def create_obv(df: pd.DataFrame, **params) -> pd.Series:
+    direction = np.sign(df["close"].diff())
+    return (direction * df["volume"]).fillna(0).cumsum()
+
+
+def create_volume_sma(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    return df["volume"].rolling(period).mean()
+
+
+def create_trade_value(df: pd.DataFrame, **params) -> pd.Series:
+    return df["trade_value"]
+
+
+def create_trade_value_sma(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    return df["trade_value"].rolling(period).mean()
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -180,6 +199,10 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "BB_lower": create_bb_lower,
     "BB_middle": create_bb_middle,
     "BB_PERCENT_B": create_bb_percent_b,
+    "OBV": create_obv,
+    "VOLUME_SMA": create_volume_sma,
+    "TRADE_VALUE": create_trade_value,
+    "TRADE_VALUE_SMA": create_trade_value_sma,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]
