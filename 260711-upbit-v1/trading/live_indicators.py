@@ -77,6 +77,48 @@ def create_macd_ppo_signal(df: pd.DataFrame, **params) -> pd.Series:
     return ppo.ewm(span=signal, adjust=False, min_periods=signal).mean()
 
 
+def create_stoch_k(df: pd.DataFrame, **params) -> pd.Series:
+    k_period = int(params.get("k_period", 14))
+    d_period = int(params.get("d_period", 3))
+    lowest_low = df["low"].rolling(k_period).min()
+    highest_high = df["high"].rolling(k_period).max()
+    fast_k = 100 * (df["close"] - lowest_low) / (highest_high - lowest_low)
+    # backtrader의 Stochastic(StochasticFast가 아님)은 %K 자체가 이미 period_dfast로
+    # 스무딩된 값을 노출한다 — fast_k를 그대로 쓰면 안 됨.
+    return fast_k.rolling(d_period).mean()
+
+
+def create_stoch_d(df: pd.DataFrame, **params) -> pd.Series:
+    slow_k = create_stoch_k(df, **params)
+    # period_dslow는 backtrader 기본값 3으로 고정(이 프로젝트의 STOCH 팩토리가
+    # 파라미터화하지 않음, engine/indicators/momentum.py 참고).
+    return slow_k.rolling(3).mean()
+
+
+def create_cci(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    tp = (df["high"] + df["low"] + df["close"]) / 3
+    tp_mean = tp.rolling(period).mean()
+    # backtrader의 MeanDev는 각 시점의 |tp-tpmean|을 먼저 전체 시계열로 만든 뒤 그
+    # 절대편차 시계열을 다시 이동평균한다 — 각 윈도우 내부에서 자기 평균을 새로 구해
+    # 편차를 재는 것과 다르다(둘은 값이 다르다, 반드시 이 순서를 지킬 것).
+    mean_dev = (tp - tp_mean).abs().rolling(period).mean()
+    return (tp - tp_mean) / (0.015 * mean_dev)
+
+
+def create_williams_r(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 14))
+    hh = df["high"].rolling(period).max()
+    ll = df["low"].rolling(period).min()
+    return -100 * (hh - df["close"]) / (hh - ll)
+
+
+def create_momentum_pct(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 5))
+    close = df["close"]
+    return (close - close.shift(period)) / close.shift(period) * 100
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -86,6 +128,11 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "MACD_signal": create_macd_signal,
     "MACD_PPO": create_macd_ppo,
     "MACD_PPO_signal": create_macd_ppo_signal,
+    "STOCH_K": create_stoch_k,
+    "STOCH_D": create_stoch_d,
+    "CCI": create_cci,
+    "WILLIAMS_R": create_williams_r,
+    "MOMENTUM_PCT": create_momentum_pct,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]
