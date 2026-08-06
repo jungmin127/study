@@ -352,6 +352,30 @@ def create_market_trend(df: pd.DataFrame, **params) -> pd.Series:
     return btc_close - btc_close.rolling(period).mean()
 
 
+def _rolling_pearson_corr(a: pd.Series, b: pd.Series, period: int) -> pd.Series:
+    """두 종가 시리즈의 봉 대비 등락률(ROC100, period=1)을 최근 period봉 모아 피어슨
+    상관계수를 구한다. pandas rolling corr는 윈도우 내 분산이 0이면 NaN을 내는데,
+    engine/indicators/market.py의 RollingCorrelation은 이 경우 0.0을 반환하므로(페그·
+    스테이블코인 마켓 대응) 여기서도 같은 값으로 보정한다."""
+    roc_a = a.pct_change() * 100
+    roc_b = b.pct_change() * 100
+    corr = roc_a.rolling(period).corr(roc_b)
+    std_a = roc_a.rolling(period).std()
+    std_b = roc_b.rolling(period).std()
+    is_flat = (std_a == 0) | (std_b == 0)
+    return corr.where(~is_flat, 0.0)
+
+
+def create_btc_correlation(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    return _rolling_pearson_corr(df["close"], df["btc_close"], period)
+
+
+def create_usdt_correlation(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    return _rolling_pearson_corr(df["close"], df["usdt_close"], period)
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -387,6 +411,8 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "VPVR_VAH": create_vpvr_vah,
     "VPVR_VAL": create_vpvr_val,
     "MARKET_TREND": create_market_trend,
+    "BTC_CORRELATION": create_btc_correlation,
+    "USDT_CORRELATION": create_usdt_correlation,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]
