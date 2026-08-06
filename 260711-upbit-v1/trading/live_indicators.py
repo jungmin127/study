@@ -179,6 +179,44 @@ def create_trade_value_sma(df: pd.DataFrame, **params) -> pd.Series:
     return df["trade_value"].rolling(period).mean()
 
 
+def create_vpin(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    closes = df["close"].tolist()
+    volumes = df["volume"].tolist()
+
+    recent_volumes: deque = deque(maxlen=period)
+    bucket_cum_volume = 0.0
+    last_bucket_close: float | None = None
+    bucket_deltas: deque = deque(maxlen=period)
+    bucket_imbalance_ratios: deque = deque(maxlen=period)
+
+    out: list[float] = []
+    prev_vpin = float("nan")
+    for close, volume in zip(closes, volumes):
+        recent_volumes.append(volume)
+        bucket_cum_volume += volume
+        target = statistics.mean(recent_volumes) if len(recent_volumes) == period else None
+        if target is not None and bucket_cum_volume >= target:
+            bucket_close = close
+            bucket_volume = bucket_cum_volume
+            if last_bucket_close is not None:
+                delta = bucket_close - last_bucket_close
+                bucket_deltas.append(delta)
+                sigma = statistics.stdev(bucket_deltas) if len(bucket_deltas) >= 2 else 0.0
+                z = delta / sigma if sigma > 0 else 0.0
+                buy_ratio = statistics.NormalDist().cdf(z)
+                buy_volume = bucket_volume * buy_ratio
+                sell_volume = bucket_volume - buy_volume
+                imbalance_ratio = abs(buy_volume - sell_volume) / bucket_volume if bucket_volume else 0.0
+                bucket_imbalance_ratios.append(imbalance_ratio)
+            last_bucket_close = bucket_close
+            bucket_cum_volume = 0.0
+        val = statistics.mean(bucket_imbalance_ratios) if len(bucket_imbalance_ratios) == period else prev_vpin
+        out.append(val)
+        prev_vpin = val
+    return pd.Series(out, index=df.index)
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -203,6 +241,7 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "VOLUME_SMA": create_volume_sma,
     "TRADE_VALUE": create_trade_value,
     "TRADE_VALUE_SMA": create_trade_value_sma,
+    "VPIN": create_vpin,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]

@@ -1,3 +1,8 @@
+import statistics
+
+import pandas as pd
+import pytest
+
 from tests.live_indicator_fixtures import assert_matches_backtrader, run_backtrader_probe
 from tests.signal_fixtures import make_oscillating_df
 from trading.live_indicators import (
@@ -6,6 +11,7 @@ from trading.live_indicators import (
     create_trade_value,
     create_trade_value_sma,
     create_volume_sma,
+    create_vpin,
 )
 
 
@@ -57,3 +63,37 @@ def test_trade_value_sma_warmup_is_nan_before_period_bars():
     result = create_trade_value_sma(df, period=5)
     assert result.iloc[:4].isna().all()
     assert result.iloc[5:].notna().all()
+
+
+def test_vpin_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("VPIN", {"period": 20}, create_vpin(df, period=20))
+
+
+def test_vpin_matches_hand_traced_bucket_sequence():
+    # engine/indicators/volume.py의 VolumeBarVPIN을 검증한 것과 동일한 손 계산 시퀀스
+    # (tests/test_indicators.py::test_vpin_matches_hand_traced_bucket_sequence 참고).
+    volumes = [10, 10, 2, 2, 2, 1, 1, 10]
+    closes = [100, 100, 100, 100, 100, 100, 100, 105]
+    idx = pd.date_range("2026-01-01", periods=8, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": closes, "high": closes, "low": closes,
+        "close": closes, "volume": volumes,
+    })
+    values = create_vpin(df, period=2)
+
+    assert values.iloc[:4].isna().all()
+    assert values.iloc[4] == pytest.approx(0.0)
+    assert values.iloc[5] == values.iloc[4]
+    assert values.iloc[6] == pytest.approx(0.0)
+
+    sigma = statistics.stdev([0.0, 5.0])
+    z = 5.0 / sigma
+    buy_ratio = statistics.NormalDist().cdf(z)
+    imbalance_bucket_8 = abs(2 * buy_ratio - 1)
+    expected_bar8 = imbalance_bucket_8 / 2
+    assert values.iloc[7] == pytest.approx(expected_bar8)
+
+
+def test_live_indicator_factory_registers_vpin():
+    assert LIVE_INDICATOR_FACTORY["VPIN"] is create_vpin
