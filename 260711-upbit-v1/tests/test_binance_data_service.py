@@ -370,3 +370,9 @@ def test_merge_funding_rate_all_nan_when_funding_df_empty():
     df = pd.DataFrame({"candle_time": pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC")})
     merged = bds.merge_funding_rate(df, pd.DataFrame(columns=bds._FUNDING_COLUMNS))
     assert merged["funding_rate_value"].isna().all()
+
+
+def test_timeframe_duration_is_public():
+    from binance_data_service import timeframe_duration
+    assert timeframe_duration("minutes60") == timedelta(minutes=60)
+    assert timeframe_duration("days") == timedelta(days=1)

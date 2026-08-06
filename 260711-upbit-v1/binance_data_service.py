@@ -50,7 +50,7 @@ def _interval_for_timeframe(timeframe: str) -> str:
     return _TIMEFRAME_TO_INTERVAL[timeframe]
 
 
-def _timeframe_duration(timeframe: str) -> timedelta:
+def timeframe_duration(timeframe: str) -> timedelta:
     if timeframe == "days":
         return timedelta(days=1)
     if timeframe.startswith("minutes"):
@@ -215,7 +215,7 @@ def get_binance_close(symbol: str, timeframe: str, start: datetime, end: datetim
         else:
             cached = pd.DataFrame(columns=_CLOSE_COLUMNS)
 
-    duration = _timeframe_duration(timeframe)
+    duration = timeframe_duration(timeframe)
     now = datetime.now(timezone.utc)
     closed = cached[cached["candle_time"] + duration <= now].reset_index(drop=True)
 
@@ -377,4 +377,4 @@ def merge_funding_rate(df: pd.DataFrame, funding_df: pd.DataFrame) -> pd.DataFra
     return merged.drop(columns="funding_time")
 
 
-__all__ = ["get_binance_close", "binance_symbol", "BinanceSymbolNotFoundError", "get_binance_funding_rate", "merge_funding_rate"]
+__all__ = ["get_binance_close", "binance_symbol", "BinanceSymbolNotFoundError", "get_binance_funding_rate", "merge_funding_rate", "timeframe_duration"]
