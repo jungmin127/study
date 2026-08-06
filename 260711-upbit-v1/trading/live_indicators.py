@@ -38,10 +38,54 @@ def create_wma(df: pd.DataFrame, **params) -> pd.Series:
     )
 
 
+def create_rsi(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 14))
+    delta = df["close"].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    rs = avg_gain / avg_loss
+    return 100 - 100 / (1 + rs)
+
+
+def create_macd_line(df: pd.DataFrame, **params) -> pd.Series:
+    fast = int(params.get("fast", 12))
+    slow = int(params.get("slow", 26))
+    ema_fast = df["close"].ewm(span=fast, adjust=False, min_periods=fast).mean()
+    ema_slow = df["close"].ewm(span=slow, adjust=False, min_periods=slow).mean()
+    return ema_fast - ema_slow
+
+
+def create_macd_signal(df: pd.DataFrame, **params) -> pd.Series:
+    signal = int(params.get("signal", 9))
+    macd_line = create_macd_line(df, **params)
+    return macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+
+
+def create_macd_ppo(df: pd.DataFrame, **params) -> pd.Series:
+    fast = int(params.get("fast", 12))
+    slow = int(params.get("slow", 26))
+    ema_fast = df["close"].ewm(span=fast, adjust=False, min_periods=fast).mean()
+    ema_slow = df["close"].ewm(span=slow, adjust=False, min_periods=slow).mean()
+    return (ema_fast - ema_slow) / ema_slow * 100
+
+
+def create_macd_ppo_signal(df: pd.DataFrame, **params) -> pd.Series:
+    signal = int(params.get("signal", 9))
+    ppo = create_macd_ppo(df, **params)
+    return ppo.ewm(span=signal, adjust=False, min_periods=signal).mean()
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
     "WMA": create_wma,
+    "RSI": create_rsi,
+    "MACD_line": create_macd_line,
+    "MACD_signal": create_macd_signal,
+    "MACD_PPO": create_macd_ppo,
+    "MACD_PPO_signal": create_macd_ppo_signal,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]
