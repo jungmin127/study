@@ -346,6 +346,12 @@ def create_vpvr_val(df: pd.DataFrame, **params) -> pd.Series:
     return _volume_profile(df, period)[2]
 
 
+def create_market_trend(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 10))
+    btc_close = df["btc_close"]
+    return btc_close - btc_close.rolling(period).mean()
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -380,6 +386,7 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "VPVR_POC": create_vpvr_poc,
     "VPVR_VAH": create_vpvr_vah,
     "VPVR_VAL": create_vpvr_val,
+    "MARKET_TREND": create_market_trend,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]

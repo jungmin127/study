@@ -6,6 +6,7 @@ import backtrader as bt
 
 from engine.condition_tree import get_indicator_value
 from engine.indicators import INDICATOR_FACTORY
+from engine.runner import build_data_feed_class
 from tests.signal_fixtures import make_oscillating_df
 
 
@@ -40,6 +41,50 @@ def assert_matches_backtrader(indicator: str, params: dict, pandas_series, tol: 
     내로 일치하는지 검증한다. 라이브 엔진은 매 캔들 마감 시 항상 '지금까지의 마지막 값'만
     쓰므로, 이 골든테스트도 마지막 값 비교면 충분하다."""
     bt_values = run_backtrader_probe(indicator, params)
+    pandas_last = pandas_series.iloc[-1]
+    bt_last = bt_values[-1]
+    assert abs(pandas_last - bt_last) < tol, (
+        f"{indicator}({params}) 불일치: pandas={pandas_last!r} vs backtrader={bt_last!r} "
+        f"(오차={abs(pandas_last - bt_last)!r})"
+    )
+
+
+def run_backtrader_probe_with_aux(indicator: str, params: dict, aux_line: str, aux_series) -> list[float]:
+    """run_backtrader_probe()와 같지만, MARKET_TREND/BTC_CORRELATION/USDT_CORRELATION/
+    FEAR_GREED_CMC/KOREA_PREMIUM/FUNDING_RATE처럼 btc_close/usdt_close/fear_greed_value/
+    korea_premium_value/funding_rate_value 같은 추가 데이터 라인이 필요한 지표용
+    (tests/test_indicators.py의 _run_probe_with_aux()와 동일한 패턴)."""
+    df = make_oscillating_df()
+    df[aux_line] = aux_series
+    df_bt = df.set_index("candle_time")
+    df_bt.index = df_bt.index.tz_localize(None)
+
+    class _Probe(bt.Strategy):
+        def __init__(self) -> None:
+            create_fn = INDICATOR_FACTORY[indicator]
+            self.probe = create_fn(self.data, **params)
+            self.seen_values: list[float] = []
+
+        def next(self) -> None:
+            self.seen_values.append(get_indicator_value(indicator, self.probe))
+
+    cerebro = bt.Cerebro()
+    cerebro.adddata(
+        build_data_feed_class((aux_line,))(
+            dataname=df_bt, open="open", high="high", low="low", close="close",
+            volume="volume", openinterest=-1, **{aux_line: aux_line},
+        )
+    )
+    cerebro.addstrategy(_Probe)
+    results = cerebro.run()
+    return results[0].seen_values
+
+
+def assert_matches_backtrader_with_aux(
+    indicator: str, params: dict, aux_line: str, aux_series, pandas_series, tol: float = 1e-6
+) -> None:
+    """assert_matches_backtrader()와 같지만 보조 라인이 필요한 지표용."""
+    bt_values = run_backtrader_probe_with_aux(indicator, params, aux_line, aux_series)
     pandas_last = pandas_series.iloc[-1]
     bt_last = bt_values[-1]
     assert abs(pandas_last - bt_last) < tol, (
