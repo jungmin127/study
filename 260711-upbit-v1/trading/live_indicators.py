@@ -119,6 +119,47 @@ def create_momentum_pct(df: pd.DataFrame, **params) -> pd.Series:
     return (close - close.shift(period)) / close.shift(period) * 100
 
 
+def create_atr(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 14))
+    prev_close = df["close"].shift(1)
+    true_range = pd.concat([
+        df["high"] - df["low"],
+        (df["high"] - prev_close).abs(),
+        (df["low"] - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return true_range.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+
+def create_atr_pct(df: pd.DataFrame, **params) -> pd.Series:
+    atr = create_atr(df, **params)
+    return atr / df["close"] * 100
+
+
+def create_bb_middle(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    return df["close"].rolling(period).mean()
+
+
+def create_bb_upper(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    mid = create_bb_middle(df, **params)
+    std = df["close"].rolling(period).std(ddof=0)
+    return mid + 2 * std
+
+
+def create_bb_lower(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    mid = create_bb_middle(df, **params)
+    std = df["close"].rolling(period).std(ddof=0)
+    return mid - 2 * std
+
+
+def create_bb_percent_b(df: pd.DataFrame, **params) -> pd.Series:
+    upper = create_bb_upper(df, **params)
+    lower = create_bb_lower(df, **params)
+    return (df["close"] - lower) / (upper - lower)
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -133,6 +174,12 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "CCI": create_cci,
     "WILLIAMS_R": create_williams_r,
     "MOMENTUM_PCT": create_momentum_pct,
+    "ATR": create_atr,
+    "ATR_PCT": create_atr_pct,
+    "BB_upper": create_bb_upper,
+    "BB_lower": create_bb_lower,
+    "BB_middle": create_bb_middle,
+    "BB_PERCENT_B": create_bb_percent_b,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]
