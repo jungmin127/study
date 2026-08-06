@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from external_data_service import get_fear_greed_cmc
+from binance_data_service import binance_symbol, get_binance_funding_rate
 
 
 def create_sma(df: pd.DataFrame, **params) -> pd.Series:
@@ -419,6 +420,28 @@ def fetch_live_fear_greed_value(now: datetime | None = None) -> float | None:
     if now - latest["date"] > FEAR_GREED_STALE_AFTER:
         return None
     return float(latest["fear_greed_value"])
+
+
+FUNDING_RATE_STALE_AFTER = timedelta(hours=16)
+
+
+def fetch_live_funding_rate_value(market: str, now: datetime | None = None) -> float | None:
+    """바이낸스 무기한 선물 펀딩비의 가장 최근 값(퍼센트 단위)을 조회한다. API 호출이
+    실패하거나 가장 최근 값의 funding_time이 FUNDING_RATE_STALE_AFTER(16시간,
+    merge_funding_rate()가 백테스트 병합에 쓰는 tolerance와 동일한 근거)보다 오래됐으면
+    None을 반환한다(스펙 결정 8)."""
+    now = now or datetime.now(timezone.utc)
+    symbol = binance_symbol(market)
+    try:
+        df = get_binance_funding_rate(symbol, now - timedelta(hours=24), now)
+    except RuntimeError:
+        return None
+    if df.empty:
+        return None
+    latest = df.iloc[-1]
+    if now - latest["funding_time"] > FUNDING_RATE_STALE_AFTER:
+        return None
+    return float(latest["funding_rate"])
 
 
 LIVE_INDICATOR_FACTORY: dict[str, object] = {

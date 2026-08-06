@@ -73,7 +73,7 @@ def test_live_indicator_factory_registers_external_group():
 from datetime import datetime, timedelta, timezone
 
 import trading.live_indicators as live_indicators
-from trading.live_indicators import fetch_live_fear_greed_value
+from trading.live_indicators import fetch_live_fear_greed_value, fetch_live_funding_rate_value
 
 
 def test_fetch_live_fear_greed_value_returns_latest_when_fresh(monkeypatch):
@@ -117,3 +117,49 @@ def test_fetch_live_fear_greed_value_returns_none_on_api_failure(monkeypatch):
 
     monkeypatch.setattr(live_indicators, "get_fear_greed_cmc", raise_runtime_error)
     assert fetch_live_fear_greed_value(now=now) is None
+
+
+def test_fetch_live_funding_rate_value_returns_latest_when_fresh(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def fake_get_binance_funding_rate(symbol, start, end):
+        assert symbol == "ETHUSDT"
+        return pd.DataFrame({
+            "funding_time": [now - timedelta(hours=2)],
+            "funding_rate": [0.012],
+        })
+
+    monkeypatch.setattr(live_indicators, "get_binance_funding_rate", fake_get_binance_funding_rate)
+    assert fetch_live_funding_rate_value("KRW-ETH", now=now) == pytest.approx(0.012)
+
+
+def test_fetch_live_funding_rate_value_returns_none_when_stale(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def fake_get_binance_funding_rate(symbol, start, end):
+        return pd.DataFrame({
+            "funding_time": [now - timedelta(hours=20)],
+            "funding_rate": [0.012],
+        })
+
+    monkeypatch.setattr(live_indicators, "get_binance_funding_rate", fake_get_binance_funding_rate)
+    assert fetch_live_funding_rate_value("KRW-ETH", now=now) is None
+
+
+def test_fetch_live_funding_rate_value_returns_none_when_empty(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        live_indicators, "get_binance_funding_rate",
+        lambda symbol, start, end: pd.DataFrame(columns=["funding_time", "funding_rate"]),
+    )
+    assert fetch_live_funding_rate_value("KRW-ETH", now=now) is None
+
+
+def test_fetch_live_funding_rate_value_returns_none_on_api_failure(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def raise_runtime_error(symbol, start, end):
+        raise RuntimeError("바이낸스 펀딩비 API 호출 실패")
+
+    monkeypatch.setattr(live_indicators, "get_binance_funding_rate", raise_runtime_error)
+    assert fetch_live_funding_rate_value("KRW-ETH", now=now) is None
