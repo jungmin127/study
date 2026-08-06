@@ -27,7 +27,7 @@ def create_sma(df: pd.DataFrame, **params) -> pd.Series:
 
 def create_ema(df: pd.DataFrame, **params) -> pd.Series:
     period = int(params.get("period", 14))
-    return df["close"].ewm(span=period, adjust=False).mean()
+    return df["close"].ewm(span=period, adjust=False, min_periods=period).mean()
 
 
 def create_wma(df: pd.DataFrame, **params) -> pd.Series:

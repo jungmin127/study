@@ -32,6 +32,20 @@ def test_sma_warmup_is_nan_before_period_bars():
     assert result.iloc[13:].notna().all()
 
 
+def test_ema_warmup_is_nan_before_period_bars():
+    df = make_oscillating_df()
+    result = create_ema(df, period=14)
+    assert result.iloc[:13].isna().all()
+    assert result.iloc[13:].notna().all()
+
+
+def test_wma_warmup_is_nan_before_period_bars():
+    df = make_oscillating_df()
+    result = create_wma(df, period=14)
+    assert result.iloc[:13].isna().all()
+    assert result.iloc[13:].notna().all()
+
+
 def test_live_indicator_factory_registers_trend_indicators():
     assert LIVE_INDICATOR_FACTORY["SMA"] is create_sma
     assert LIVE_INDICATOR_FACTORY["EMA"] is create_ema
