@@ -75,3 +75,33 @@ def test_btc_correlation_uses_default_period_20_when_omitted():
 def test_live_indicator_factory_registers_correlations():
     assert LIVE_INDICATOR_FACTORY["BTC_CORRELATION"] is create_btc_correlation
     assert LIVE_INDICATOR_FACTORY["USDT_CORRELATION"] is create_usdt_correlation
+
+
+def test_market_trend_propagates_nan_when_btc_close_has_gap_at_end():
+    df = make_oscillating_df()
+    btc_close = df["close"] * 2 + 1000
+    btc_close = btc_close.copy()
+    btc_close.iloc[-1] = float("nan")
+    df["btc_close"] = btc_close
+    result = create_market_trend(df, period=5)
+    assert pd.isna(result.iloc[-1])
+
+
+def test_btc_correlation_propagates_nan_when_btc_close_has_gap_at_end():
+    df = make_oscillating_df()
+    btc_df = make_oscillating_df(base=50000.0, amplitude=3000.0, period=45, ripple_period=9)
+    btc_close = btc_df["close"].copy()
+    btc_close.iloc[-1] = float("nan")
+    df["btc_close"] = btc_close
+    result = create_btc_correlation(df, period=10)
+    assert pd.isna(result.iloc[-1])
+
+
+def test_usdt_correlation_propagates_nan_when_usdt_close_has_gap_mid_window():
+    df = make_oscillating_df()
+    usdt_df = make_oscillating_df(base=1300.0, amplitude=40.0, period=30, ripple_period=4)
+    usdt_close = usdt_df["close"].copy()
+    usdt_close.iloc[-5] = float("nan")  # a gap inside the rolling window, not at the very edge
+    df["usdt_close"] = usdt_close
+    result = create_usdt_correlation(df, period=10)
+    assert pd.isna(result.iloc[-1])

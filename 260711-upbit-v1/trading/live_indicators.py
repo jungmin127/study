@@ -9,8 +9,13 @@ trading/live_indicators.py
 일부는 trade_value/btc_close/usdt_close/fear_greed_value/korea_premium_value/
 funding_rate_value)을 가진 pandas.DataFrame을 받아 같은 이름의 pandas.Series(워밍업
 구간 NaN)를 반환하며 I/O를 하지 않는다. 예외는 fetch_live_*() 3개(FEAR_GREED_CMC/
-FUNDING_RATE/KOREA_PREMIUM의 원시값을 실제로 조회) — 이 셋만 외부 API를 호출하고,
-지연·실패 시 오래된 값을 forward-fill하지 않고 None을 반환한다(스펙 결정 8).
+FUNDING_RATE의 원시값과, KOREA_PREMIUM의 두 입력 중 binance_close를 실제로 조회) —
+이 셋만 외부 API를 호출하고, 지연·실패 시 오래된 값을 forward-fill하지 않고 None을
+반환한다(스펙 결정 8). 단 KOREA_PREMIUM은 compute_korea_premium_value()에 binance_close
+외에 usdt_close(KRW-USDT aux 마켓 종가)도 필요한데, 이를 실시간으로 공급할 수단은 이
+브랜치에 아직 없다(aux-market 웹소켓 피드는 향후 서브플랜에서 구축 예정) — 따라서
+KOREA_PREMIUM은 원시값의 절반(binance_close)만 조회 가능할 뿐, 아직 엔드투엔드로
+라이브 계산되지 않는다.
 LIVE_INDICATOR_FACTORY 레지스트리는 engine.indicators.INDICATOR_FACTORY와 같은 패턴이며
 항목 수도 동일하다(39개).
 """
@@ -370,8 +375,8 @@ def _rolling_pearson_corr(a: pd.Series, b: pd.Series, period: int) -> pd.Series:
     상관계수를 구한다. pandas rolling corr는 윈도우 내 분산이 0이면 NaN을 내는데,
     engine/indicators/market.py의 RollingCorrelation은 이 경우 0.0을 반환하므로(페그·
     스테이블코인 마켓 대응) 여기서도 같은 값으로 보정한다."""
-    roc_a = a.pct_change() * 100
-    roc_b = b.pct_change() * 100
+    roc_a = a.pct_change(fill_method=None) * 100
+    roc_b = b.pct_change(fill_method=None) * 100
     corr = roc_a.rolling(period).corr(roc_b)
     std_a = roc_a.rolling(period).std()
     std_b = roc_b.rolling(period).std()
@@ -520,4 +525,10 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "FUNDING_RATE": create_funding_rate,
 }
 
-__all__ = ["LIVE_INDICATOR_FACTORY"]
+__all__ = [
+    "LIVE_INDICATOR_FACTORY",
+    "compute_korea_premium_value",
+    "fetch_live_fear_greed_value",
+    "fetch_live_funding_rate_value",
+    "fetch_live_binance_close",
+]
