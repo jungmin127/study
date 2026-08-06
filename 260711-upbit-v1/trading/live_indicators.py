@@ -217,6 +217,46 @@ def create_vpin(df: pd.DataFrame, **params) -> pd.Series:
     return pd.Series(out, index=df.index)
 
 
+def create_fib_382(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    hh = df["high"].rolling(period).max()
+    ll = df["low"].rolling(period).min()
+    return hh - (hh - ll) * 0.382
+
+
+def create_fib_500(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    hh = df["high"].rolling(period).max()
+    ll = df["low"].rolling(period).min()
+    return hh - (hh - ll) * 0.5
+
+
+def create_fib_618(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 20))
+    hh = df["high"].rolling(period).max()
+    ll = df["low"].rolling(period).min()
+    return hh - (hh - ll) * 0.618
+
+
+def create_pivot_p(df: pd.DataFrame, **params) -> pd.Series:
+    prev_high = df["high"].shift(1)
+    prev_low = df["low"].shift(1)
+    prev_close = df["close"].shift(1)
+    return (prev_high + prev_low + prev_close) / 3.0
+
+
+def create_pivot_r1(df: pd.DataFrame, **params) -> pd.Series:
+    pivot = create_pivot_p(df, **params)
+    prev_low = df["low"].shift(1)
+    return pivot * 2 - prev_low
+
+
+def create_pivot_s1(df: pd.DataFrame, **params) -> pd.Series:
+    pivot = create_pivot_p(df, **params)
+    prev_high = df["high"].shift(1)
+    return pivot * 2 - prev_high
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -242,6 +282,12 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "TRADE_VALUE": create_trade_value,
     "TRADE_VALUE_SMA": create_trade_value_sma,
     "VPIN": create_vpin,
+    "FIB_382": create_fib_382,
+    "FIB_500": create_fib_500,
+    "FIB_618": create_fib_618,
+    "PIVOT_P": create_pivot_p,
+    "PIVOT_R1": create_pivot_r1,
+    "PIVOT_S1": create_pivot_s1,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]
