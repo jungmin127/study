@@ -163,3 +163,64 @@ def test_fetch_live_funding_rate_value_returns_none_on_api_failure(monkeypatch):
 
     monkeypatch.setattr(live_indicators, "get_binance_funding_rate", raise_runtime_error)
     assert fetch_live_funding_rate_value("KRW-ETH", now=now) is None
+
+
+from binance_data_service import BinanceSymbolNotFoundError
+from trading.live_indicators import fetch_live_binance_close
+
+
+def test_fetch_live_binance_close_returns_latest_when_fresh(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def fake_get_binance_close(symbol, timeframe, start, end):
+        assert symbol == "ETHUSDT"
+        assert timeframe == "minutes60"
+        return pd.DataFrame({
+            "candle_time": [now - timedelta(minutes=30)],
+            "close": [3500.5],
+        })
+
+    monkeypatch.setattr(live_indicators, "get_binance_close", fake_get_binance_close)
+    assert fetch_live_binance_close("KRW-ETH", "minutes60", now=now) == pytest.approx(3500.5)
+
+
+def test_fetch_live_binance_close_returns_none_when_stale(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def fake_get_binance_close(symbol, timeframe, start, end):
+        return pd.DataFrame({
+            "candle_time": [now - timedelta(hours=5)],
+            "close": [3500.5],
+        })
+
+    monkeypatch.setattr(live_indicators, "get_binance_close", fake_get_binance_close)
+    assert fetch_live_binance_close("KRW-ETH", "minutes60", now=now) is None
+
+
+def test_fetch_live_binance_close_returns_none_when_empty(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        live_indicators, "get_binance_close",
+        lambda symbol, timeframe, start, end: pd.DataFrame(columns=["candle_time", "close"]),
+    )
+    assert fetch_live_binance_close("KRW-ETH", "minutes60", now=now) is None
+
+
+def test_fetch_live_binance_close_returns_none_when_symbol_not_found(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def raise_not_found(symbol, timeframe, start, end):
+        raise BinanceSymbolNotFoundError(symbol)
+
+    monkeypatch.setattr(live_indicators, "get_binance_close", raise_not_found)
+    assert fetch_live_binance_close("KRW-SOMECOIN", "minutes60", now=now) is None
+
+
+def test_fetch_live_binance_close_returns_none_on_api_failure(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def raise_runtime_error(symbol, timeframe, start, end):
+        raise RuntimeError("바이낸스 API 호출 실패")
+
+    monkeypatch.setattr(live_indicators, "get_binance_close", raise_runtime_error)
+    assert fetch_live_binance_close("KRW-ETH", "minutes60", now=now) is None

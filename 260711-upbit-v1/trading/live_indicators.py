@@ -21,7 +21,13 @@ import numpy as np
 import pandas as pd
 
 from external_data_service import get_fear_greed_cmc
-from binance_data_service import binance_symbol, get_binance_funding_rate
+from binance_data_service import (
+    BinanceSymbolNotFoundError,
+    binance_symbol,
+    get_binance_close,
+    get_binance_funding_rate,
+    timeframe_duration,
+)
 
 
 def create_sma(df: pd.DataFrame, **params) -> pd.Series:
@@ -442,6 +448,31 @@ def fetch_live_funding_rate_value(market: str, now: datetime | None = None) -> f
     if now - latest["funding_time"] > FUNDING_RATE_STALE_AFTER:
         return None
     return float(latest["funding_rate"])
+
+
+BINANCE_CLOSE_STALE_MULTIPLIER = 2
+
+
+def fetch_live_binance_close(market: str, timeframe: str, now: datetime | None = None) -> float | None:
+    """KOREA_PREMIUM 계산(compute_korea_premium_value())에 필요한, 대상 코인의 바이낸스
+    현물 종가 최신값. 심볼이 바이낸스에 없거나(BinanceSymbolNotFoundError) API 호출이
+    실패하거나, 가장 최근 봉이 timeframe 길이의 BINANCE_CLOSE_STALE_MULTIPLIER(2)배보다
+    오래됐으면 None을 반환한다(스펙 결정 8). usdt_close(KRW-USDT aux 마켓 종가)와 결합해
+    korea_premium_value를 만드는 건 compute_korea_premium_value()의 몫 — 이 함수는 원시
+    종가 조회 + 결측 판정만 한다."""
+    now = now or datetime.now(timezone.utc)
+    symbol = binance_symbol(market)
+    duration = timeframe_duration(timeframe)
+    try:
+        df = get_binance_close(symbol, timeframe, now - 5 * duration, now)
+    except (RuntimeError, BinanceSymbolNotFoundError):
+        return None
+    if df.empty:
+        return None
+    latest = df.iloc[-1]
+    if now - latest["candle_time"] > BINANCE_CLOSE_STALE_MULTIPLIER * duration:
+        return None
+    return float(latest["close"])
 
 
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
