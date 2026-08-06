@@ -257,6 +257,95 @@ def create_pivot_s1(df: pd.DataFrame, **params) -> pd.Series:
     return pivot * 2 - prev_high
 
 
+NUM_BINS = 24
+VALUE_AREA_PCT = 0.7
+
+
+def _volume_profile(df: pd.DataFrame, period: int) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """VPVR_POC/VAH/VAL 3개가 공유하는 계산. engine/indicators/price_levels.py의
+    VolumeProfile(bt.Indicator)과 같은 알고리즘을 순수 파이썬 루프로 옮긴 것이다.
+    backtrader 쪽도 POC/VAH/VAL 요청마다 VolumeProfile 인스턴스를 따로 만들어 3번
+    재계산하므로(engine/indicators/price_levels.py의 create_vpvr_* 참고), 여기서도 매
+    호출마다 재계산하는 게 backtrader와 일관된 동작이다."""
+    highs = df["high"].tolist()
+    lows = df["low"].tolist()
+    volumes = df["volume"].tolist()
+    n = len(highs)
+    poc_out: list[float] = [float("nan")] * n
+    vah_out: list[float] = [float("nan")] * n
+    val_out: list[float] = [float("nan")] * n
+
+    hi_win: deque = deque(maxlen=period)
+    lo_win: deque = deque(maxlen=period)
+    vol_win: deque = deque(maxlen=period)
+
+    for i in range(n):
+        hi_win.append(highs[i])
+        lo_win.append(lows[i])
+        vol_win.append(volumes[i])
+        if len(hi_win) < period:
+            continue
+
+        window_high = max(hi_win)
+        window_low = min(lo_win)
+        if window_high == window_low:
+            poc_out[i] = vah_out[i] = val_out[i] = window_high
+            continue
+
+        bin_width = (window_high - window_low) / NUM_BINS
+        bin_volumes = [0.0] * NUM_BINS
+        for h, l, v in zip(hi_win, lo_win, vol_win):
+            if h == l:
+                idx = min(int((h - window_low) / bin_width), NUM_BINS - 1)
+                bin_volumes[idx] += v
+                continue
+            for b in range(NUM_BINS):
+                bin_bottom = window_low + b * bin_width
+                bin_top = bin_bottom + bin_width
+                overlap = min(h, bin_top) - max(l, bin_bottom)
+                if overlap > 0:
+                    bin_volumes[b] += v * (overlap / (h - l))
+
+        total_volume = sum(bin_volumes)
+        poc_idx = max(range(NUM_BINS), key=lambda k: bin_volumes[k])
+        poc_price = window_low + (poc_idx + 0.5) * bin_width
+
+        lo, hi = poc_idx, poc_idx
+        accumulated = bin_volumes[poc_idx]
+        target = total_volume * VALUE_AREA_PCT
+        while accumulated < target and (lo > 0 or hi < NUM_BINS - 1):
+            expand_lo = bin_volumes[lo - 1] if lo > 0 else -1.0
+            expand_hi = bin_volumes[hi + 1] if hi < NUM_BINS - 1 else -1.0
+            if expand_hi >= expand_lo:
+                hi += 1
+                accumulated += expand_hi
+            else:
+                lo -= 1
+                accumulated += expand_lo
+
+        poc_out[i] = poc_price
+        vah_out[i] = window_low + (hi + 1) * bin_width
+        val_out[i] = window_low + lo * bin_width
+
+    idx = df.index
+    return pd.Series(poc_out, index=idx), pd.Series(vah_out, index=idx), pd.Series(val_out, index=idx)
+
+
+def create_vpvr_poc(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 50))
+    return _volume_profile(df, period)[0]
+
+
+def create_vpvr_vah(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 50))
+    return _volume_profile(df, period)[1]
+
+
+def create_vpvr_val(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 50))
+    return _volume_profile(df, period)[2]
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -288,6 +377,9 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "PIVOT_P": create_pivot_p,
     "PIVOT_R1": create_pivot_r1,
     "PIVOT_S1": create_pivot_s1,
+    "VPVR_POC": create_vpvr_poc,
+    "VPVR_VAH": create_vpvr_vah,
+    "VPVR_VAL": create_vpvr_val,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]

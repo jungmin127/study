@@ -1,4 +1,7 @@
-"""테스트: FIB류, PIVOT류 라이브 지표 — pandas와 backtrader 값 일치 검증."""
+"""테스트: FIB류, PIVOT류, VPVR류 라이브 지표 — pandas와 backtrader 값 일치 검증."""
+import pandas as pd
+import pytest
+
 from tests.live_indicator_fixtures import assert_matches_backtrader
 from tests.signal_fixtures import make_oscillating_df
 from trading.live_indicators import (
@@ -65,3 +68,76 @@ def test_pivot_p_warmup_nan():
     result = create_pivot_p(df)
     assert result.isna().sum() == 1, f"Expected 1 NaN, got {result.isna().sum()}"
     assert not result.iloc[1:].isna().any(), "Expected no NaNs after index 1"
+
+
+from trading.live_indicators import create_vpvr_poc, create_vpvr_vah, create_vpvr_val
+
+
+def test_vpvr_poc_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("VPVR_POC", {"period": 50}, create_vpvr_poc(df, period=50))
+
+
+def test_vpvr_vah_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("VPVR_VAH", {"period": 50}, create_vpvr_vah(df, period=50))
+
+
+def test_vpvr_val_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("VPVR_VAL", {"period": 50}, create_vpvr_val(df, period=50))
+
+
+def test_vpvr_matches_hand_traced_bin_distribution():
+    # engine/indicators/price_levels.py의 VolumeProfile을 검증한 것과 동일한 손 계산
+    # 시퀀스(tests/test_indicators.py::test_vpvr_matches_hand_traced_bin_distribution
+    # 참고). NUM_BINS를 4로 좁혀서 손 계산 가능하게 만든다.
+    import pandas as pd
+
+    import trading.live_indicators as live_indicators
+
+    highs = [2.5, 10.0, 5.0]
+    lows = [0.0, 7.5, 2.5]
+    volumes = [100, 10, 5]
+    closes = [(h + l) / 2 for h, l in zip(highs, lows)]
+    idx = pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": closes, "high": highs, "low": lows,
+        "close": closes, "volume": volumes,
+    })
+
+    original_num_bins = live_indicators.NUM_BINS
+    live_indicators.NUM_BINS = 4
+    try:
+        poc = live_indicators.create_vpvr_poc(df, period=3)
+        vah = live_indicators.create_vpvr_vah(df, period=3)
+        val = live_indicators.create_vpvr_val(df, period=3)
+    finally:
+        live_indicators.NUM_BINS = original_num_bins
+
+    assert poc.iloc[-1] == pytest.approx(1.25)
+    assert vah.iloc[-1] == pytest.approx(2.5)
+    assert val.iloc[-1] == pytest.approx(0.0)
+
+
+def test_vpvr_handles_completely_flat_window_without_dividing_by_zero():
+    highs = [100.0, 100.0, 100.0]
+    lows = [100.0, 100.0, 100.0]
+    volumes = [10, 10, 10]
+    idx = pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": highs, "high": highs, "low": lows,
+        "close": highs, "volume": volumes,
+    })
+    poc = create_vpvr_poc(df, period=3)
+    vah = create_vpvr_vah(df, period=3)
+    val = create_vpvr_val(df, period=3)
+    assert poc.iloc[-1] == pytest.approx(100.0)
+    assert vah.iloc[-1] == pytest.approx(100.0)
+    assert val.iloc[-1] == pytest.approx(100.0)
+
+
+def test_live_indicator_factory_registers_vpvr():
+    assert LIVE_INDICATOR_FACTORY["VPVR_POC"] is create_vpvr_poc
+    assert LIVE_INDICATOR_FACTORY["VPVR_VAH"] is create_vpvr_vah
+    assert LIVE_INDICATOR_FACTORY["VPVR_VAL"] is create_vpvr_val
