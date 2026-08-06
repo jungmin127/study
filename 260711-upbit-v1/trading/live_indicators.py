@@ -376,6 +376,27 @@ def create_usdt_correlation(df: pd.DataFrame, **params) -> pd.Series:
     return _rolling_pearson_corr(df["close"], df["usdt_close"], period)
 
 
+def create_fear_greed_cmc(df: pd.DataFrame, **params) -> pd.Series:
+    return df["fear_greed_value"]
+
+
+def create_korea_premium(df: pd.DataFrame, **params) -> pd.Series:
+    return df["korea_premium_value"]
+
+
+def create_funding_rate(df: pd.DataFrame, **params) -> pd.Series:
+    return df["funding_rate_value"]
+
+
+def compute_korea_premium_value(df: pd.DataFrame) -> pd.Series:
+    """한국프리미엄 = (대상마켓 종가 / (바이낸스 현물종가 x USDT/KRW 환율) - 1) x 100.
+    backend/main.py의 백테스트 캔들 병합 로직(korea_premium_value 컬럼 생성, 결정 8과
+    무관하게 이미 존재하던 공식)과 동일하다. df["binance_close"]/df["usdt_close"] 중
+    하나라도 NaN이면 결과도 자연히 NaN이 되어 eval_group_values()가 unknown으로
+    처리한다(스펙 결정 8) — 별도 방어코드가 필요 없다."""
+    return (df["close"] / (df["binance_close"] * df["usdt_close"]) - 1) * 100
+
+
 LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
@@ -413,6 +434,9 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "MARKET_TREND": create_market_trend,
     "BTC_CORRELATION": create_btc_correlation,
     "USDT_CORRELATION": create_usdt_correlation,
+    "FEAR_GREED_CMC": create_fear_greed_cmc,
+    "KOREA_PREMIUM": create_korea_premium,
+    "FUNDING_RATE": create_funding_rate,
 }
 
 __all__ = ["LIVE_INDICATOR_FACTORY"]
