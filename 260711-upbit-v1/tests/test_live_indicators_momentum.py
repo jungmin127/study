@@ -46,6 +46,27 @@ def test_macd_ppo_param_mapping_actually_changes_output():
     assert default.iloc[-1] != different.iloc[-1]
 
 
+def test_rsi_warmup_is_nan_before_period_bars():
+    df = make_oscillating_df()
+    result = create_rsi(df, period=14)
+    assert result.iloc[:14].isna().all()
+    assert result.iloc[14:].notna().all()
+
+
+def test_macd_line_warmup_is_nan_before_slow_ema_ready():
+    df = make_oscillating_df()
+    result = create_macd_line(df, fast=12, slow=26)
+    assert result.iloc[:25].isna().all()
+    assert result.iloc[25:].notna().all()
+
+
+def test_macd_signal_warmup_is_nan_before_signal_ema_ready():
+    df = make_oscillating_df()
+    result = create_macd_signal(df, fast=12, slow=26, signal=9)
+    assert result.iloc[:33].isna().all()
+    assert result.iloc[33:].notna().all()
+
+
 def test_live_indicator_factory_registers_momentum_part1():
     assert LIVE_INDICATOR_FACTORY["RSI"] is create_rsi
     assert LIVE_INDICATOR_FACTORY["MACD_line"] is create_macd_line
