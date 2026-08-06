@@ -38,6 +38,17 @@ def test_connect_is_idempotent(monkeypatch, tmp_path):
     db._connect().close()  # 여러 번 호출해도 에러 없어야 함
 
 
+def test_connect_enables_wal_mode(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    conn = db._connect()
+    try:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert mode.lower() == "wal"
+
+
 def test_foreign_keys_are_enforced(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     conn = db._connect()

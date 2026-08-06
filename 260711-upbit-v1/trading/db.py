@@ -1,8 +1,8 @@
 """
 trading/db.py
 
-라이브 트레이딩 전용 SQLite DB(trading.db). 백테스트 캐시(results.db)와 완전히
-분리된 별도 파일이며(스펙 결정 4), 실거래 데이터의 참조무결성이 중요해 외래키
+라이브 트레이딩 전용 SQLite DB(trading.db). 백테스트 캐시(data/backtest_results.db)와
+완전히 분리된 별도 파일이며(스펙 결정 4), 실거래 데이터의 참조무결성이 중요해 외래키
 제약을 켠다(캐시 전용인 engine/cache.py는 켜지 않았음).
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS live_strategies (
     source_run_id       TEXT,
     market              TEXT NOT NULL,
     timeframe           TEXT NOT NULL,
-    buy_conditions_json  TEXT NOT NULL,
+    buy_conditions_json TEXT NOT NULL,
     sell_conditions_json TEXT NOT NULL,
     risk_config_json    TEXT NOT NULL,
     current_capital     REAL,
@@ -127,7 +127,8 @@ CREATE TABLE IF NOT EXISTS manual_intervention_events (
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
     return conn

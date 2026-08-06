@@ -96,6 +96,10 @@ def apply_operator(value: float, operator: str, threshold: float) -> bool:
     return False
 
 
+# 의도적으로 중복된 쌍둥이 함수: eval_group()(백테스트, bt.Indicator 객체)과
+# eval_group_values()(라이브, 평가된 값 dict)는 로직이 같다. 새 operator나 새
+# position-relative 특수 케이스를 추가할 때는 반드시 두 함수 모두 수정할 것 —
+# 하나만 고치면 조용히 어긋난다.
 def eval_group(
     group: dict,
     indicators: dict[str, bt.Indicator],
@@ -141,6 +145,9 @@ def eval_group(
     return all(results) if group_type == "AND" else any(results)
 
 
+# 의도적으로 중복된 쌍둥이 함수: eval_group()(백테스트, bt.Indicator 객체)의 짝.
+# 새 operator나 새 position-relative 특수 케이스를 추가할 때는 반드시 두 함수
+# 모두 수정할 것 — 하나만 고치면 조용히 어긋난다.
 def eval_group_values(
     group: dict,
     values: dict[str, float | None],
@@ -181,7 +188,7 @@ def eval_group_values(
                 continue
             key = indicator_key(item["indicator"], item.get("params", {}))
             value = values.get(key)
-            if value is None:
+            if value is None or value != value:  # None 또는 NaN(자기 자신과도 다름) -> unknown
                 continue  # unknown 리프는 이 그룹 평가에서 제외
             results.append(apply_operator(value, item["operator"], float(item["threshold"])))
         elif "type" in item:

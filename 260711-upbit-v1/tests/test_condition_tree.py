@@ -3,8 +3,10 @@ from engine.condition_tree import (
     apply_operator,
     collect_blocks,
     eval_group,
+    eval_group_values,
     find_unknown_indicators,
     get_indicator_value,
+    indicator_key,
     is_empty,
     max_required_period,
     required_aux_markets,
@@ -231,9 +233,6 @@ def test_required_aux_markets_returns_usdt_when_korea_premium_present():
     assert required_aux_markets(tree) == {"KRW-USDT"}
 
 
-from engine.condition_tree import eval_group_values, indicator_key
-
-
 def test_eval_group_values_matches_apply_operator_when_all_known():
     tree = {
         "type": "AND",
@@ -333,5 +332,61 @@ def test_eval_group_values_position_relative_indicators_unaffected_by_unknown_ha
     assert eval_group_values(tree, {}, position_return_pct=-6.0) is True
 
 
+def test_eval_group_values_holding_period_bars_false_without_position():
+    # HOLDING_PERIOD_BARS도 STOP_LOSS_PCT와 동일하게 position_holding_bars=None이면
+    # unknown이 아니라 False로 처리된다(eval_group()과 동일한 동작).
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">", "threshold": 10}],
+    }
+    assert eval_group_values(tree, {}, position_holding_bars=None) is False
+
+
 def test_eval_group_values_empty_conditions_returns_false_not_none():
     assert eval_group_values({"type": "AND", "conditions": []}, {}) is False
+
+
+def test_eval_group_values_empty_nested_subgroup_is_structural_false_not_unknown():
+    # 빈 OR 하위그룹은 eval_group_values(하위그룹) 자체가 False를 반환한다(unknown인 None이 아님).
+    # 따라서 상위 AND 그룹에 "알 수 없어서 제외"가 아니라 "확실히 거짓"으로 포함되어 AND를 False로 만든다.
+    # 이는 자식이 전부 unknown이라 None을 반환하고 상위에서 제외되는 경우와는 다르다.
+    tree = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 31},
+            {"type": "OR", "conditions": []},
+        ],
+    }
+    values = {indicator_key("RSI", {"period": 14}): 25.0}
+    assert eval_group_values(tree, values) is False
+
+
+def test_eval_group_values_nan_value_is_treated_as_unknown():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 31}],
+    }
+    # 키는 있지만 값이 NaN(pandas/numpy의 결측치 표현) -> unknown -> 결과도 None
+    values = {indicator_key("RSI", {"period": 14}): float("nan")}
+    assert eval_group_values(tree, values) is None
+
+
+def test_eval_group_values_drops_nan_leaf_in_or():
+    tree = {
+        "type": "OR",
+        "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 54},
+            {"indicator": "FUNDING_RATE", "params": {}, "operator": ">", "threshold": 0.01},
+        ],
+    }
+    values = {
+        indicator_key("RSI", {"period": 14}): 60.0,
+        indicator_key("FUNDING_RATE", {}): float("nan"),
+    }
+    assert eval_group_values(tree, values) is True
+
+    values = {
+        indicator_key("RSI", {"period": 14}): 10.0,
+        indicator_key("FUNDING_RATE", {}): float("nan"),
+    }
+    assert eval_group_values(tree, values) is False
