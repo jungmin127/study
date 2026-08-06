@@ -2,14 +2,17 @@
 trading/live_indicators.py
 
 라이브 트레이딩용 지표 계산 — pandas 기반. engine/indicators/*.py(backtrader 기반,
-백테스트 전용)와 값이 일치하도록 골든테스트로 검증한다(스펙 결정 1). A그룹(대상 마켓
-OHLCV만으로 계산되는 지표 33개)만 다룬다 — B그룹(외부데이터·보조마켓 의존 6개)은 별도
-서브플랜에서 추가한다(스펙 결정 2).
+백테스트 전용)와 값이 일치하도록 골든테스트로 검증한다(스펙 결정 1). INDICATOR_FACTORY
+39개(A그룹 33개 + B그룹 6개) 전부를 다룬다(스펙 결정 2).
 
-각 함수는 engine/indicators/*.py의 동명 함수와 1:1 대응하며, bt.feeds.PandasData 대신
-OHLCV 컬럼(open/high/low/close/volume, 일부는 trade_value)을 가진 pandas.DataFrame을
-받아 같은 이름의 pandas.Series(워밍업 구간 NaN)를 반환한다. LIVE_INDICATOR_FACTORY
-레지스트리는 engine.indicators.INDICATOR_FACTORY와 같은 패턴이다.
+대부분의 create_* 함수는 순수 계산이다 — bt.feeds.PandasData 대신 필요한 컬럼(OHLCV,
+일부는 trade_value/btc_close/usdt_close/fear_greed_value/korea_premium_value/
+funding_rate_value)을 가진 pandas.DataFrame을 받아 같은 이름의 pandas.Series(워밍업
+구간 NaN)를 반환하며 I/O를 하지 않는다. 예외는 fetch_live_*() 3개(FEAR_GREED_CMC/
+FUNDING_RATE/KOREA_PREMIUM의 원시값을 실제로 조회) — 이 셋만 외부 API를 호출하고,
+지연·실패 시 오래된 값을 forward-fill하지 않고 None을 반환한다(스펙 결정 8).
+LIVE_INDICATOR_FACTORY 레지스트리는 engine.indicators.INDICATOR_FACTORY와 같은 패턴이며
+항목 수도 동일하다(39개).
 """
 from __future__ import annotations
 
