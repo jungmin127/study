@@ -21,7 +21,7 @@
 ## 범위
 
 **이 스펙에서 확정하는 것:**
-- 핵심 아키텍처 결정 5개(아래 참고)
+- 핵심 아키텍처 결정 8개(아래 참고)
 - 전체 모듈/폴더 구조
 - DB 스키마(7개 테이블)
 - 트레이딩 엔진 핵심 흐름(신호평가/주문실행/리스크관리/장애복구)
@@ -33,13 +33,11 @@
 - 텔레그램 봇 상세 설계(대화형 명령어 목록, 알림 레벨 등) — 2단계 스펙에서
 - 분석 대시보드 UI/API 상세 설계 — 3단계 스펙에서
 - PM2/Docker 배포 스크립트, 업비트 API Open IP 등록 절차 상세 — 4단계 스펙에서
-- 승인 대상 전략이 구체적으로 어떤 지표를 쓰는지에 따른 `live_indicators.py`의 정확한
-  구현 범위(1단계 플랜에서 사용자가 승격할 전략을 보고 확정)
 
 ## 핵심 아키텍처 결정
 
-브레인스토밍 과정에서 사용자와 함께 확정한 5개 결정. 각각 "왜"를 남겨서 나중에 재논의할
-필요가 없게 한다.
+브레인스토밍 과정에서 사용자와 함께 확정한 8개 결정(결정 6·7·8은 2026-08-06 개정). 각각
+"왜"를 남겨서 나중에 재논의할 필요가 없게 한다.
 
 ### 결정 1 — backtrader를 라이브 엔진에서 완전히 배제한다
 
@@ -56,9 +54,11 @@
   버퍼에서 float를 뽑아내는 부분)뿐이다.
 - 기존 `eval_group()`은 **수정하지 않고 그대로 백테스트에 남긴다**(회귀 위험 0).
 - `engine/condition_tree.py`에 **새 함수** `eval_group_values(group, values: dict[str,
-  float], position_return_pct=None, position_holding_bars=None)`를 추가한다 — 로직은
-  `eval_group()`과 동일하되, 이미 계산된 float 딕셔너리(`values[key]`)를 직접 읽는다.
-  순수 추가이므로 기존 코드에 영향 없음.
+  float | None], position_return_pct=None, position_holding_bars=None)`를 추가한다 —
+  로직은 `eval_group()`과 동일하되, 이미 계산된 float 딕셔너리(`values[key]`)를 직접
+  읽는다. `values[key]`가 `None`(지표 계산 불가)이면 그 리프는 "unknown"으로 취급되어
+  AND/OR 평가에서 제외된다(unknown 처리 상세는 결정 8). 순수 추가이므로 기존 코드에
+  영향 없음.
 - `trading/live_indicators.py`(신규)가 pandas rolling 계산으로 `{indicator_key: float}`
   딕셔너리를 만들어 `eval_group_values()`에 넘긴다.
 - **전략 설정 포맷(ConditionGroup/ConditionBlock JSON)은 백테스트와 라이브가 100% 동일** —
@@ -69,17 +69,23 @@
 한다(예: 같은 과거 캔들 구간에 대해 backtrader RSI(14)와 pandas RSI(14)가 부동소수점
 오차 범위 내에서 일치하는지).
 
-### 결정 2 — 지표는 승격 대상 전략이 실제로 쓰는 것만 먼저 포팅한다
+### 결정 2 — `INDICATOR_FACTORY` 38개 지표를 전부 포팅하되, 두 그룹으로 나눠 인프라를 다르게 둔다 (2026-08-06 개정)
 
-`INDICATOR_FACTORY`에는 25개 이상의 지표가 있고, 그중 일부(`FEAR_GREED_CMC`,
-`FUNDING_RATE`, `KOREA_PREMIUM`, `MARKET_TREND`, `BTC_CORRELATION`, `USDT_CORRELATION`)는
-외부 데이터나 보조 마켓 캔들이 필요하다. 전부를 한 번에 pandas로 포팅하는 건 1단계
-스코프를 불필요하게 키운다.
+승격 대상 전략을 코인·봉타입마다 계속 새로 추가할 것이므로(결정 6), 매번 "이번엔 어떤
+지표가 필요한지" 확인하며 하나씩 포팅하는 대신 **매수/매도 조건에 쓸 수 있는 지표 전체를
+1단계에 포팅한다**(사용자 확정 — 원래는 승격 전략이 실제 쓰는 것만 골라 포팅하려 했으나,
+전략이 여러 개·계속 늘어난다는 게 확정되면서 범위를 넓힘). `INDICATOR_FACTORY` 38개는
+필요한 실시간 데이터 소스에 따라 두 그룹으로 나뉜다:
 
-**결정:** 대상 마켓 자체의 OHLCV만으로 계산되는 지표(SMA/EMA/WMA/RSI/MACD류/STOCH류/CCI/
-WILLIAMS_R/BB류/ATR류/OBV/VOLUME_SMA/MOMENTUM_PCT/PIVOT류/FIB류/VPVR류/VPIN/TRADE_VALUE류)
-부터 포팅하고, 외부데이터·보조마켓 의존 지표는 나중 단계로 미룬다. 1단계 플랜을 쓸 때
-사용자가 승격하려는 실제 전략을 보고, 그 전략이 쓰는 지표만 정확히 골라 구현한다.
+- **A그룹(30개, 대상 마켓 OHLCV만으로 계산)** — `SMA/EMA/WMA/RSI/MACD류/STOCH류/CCI/
+  WILLIAMS_R/BB류/ATR류/OBV/VOLUME_SMA/MOMENTUM_PCT/PIVOT류/FIB류/VPVR류/VPIN/
+  TRADE_VALUE류`. 데몬이 어차피 구독하는 그 마켓의 실시간 캔들만 있으면 계산 가능 —
+  추가 인프라 없이 1단계에 전부 포팅한다.
+- **B그룹(6개, 외부데이터·보조마켓 의존)** — `FUNDING_RATE`(바이낸스 펀딩비),
+  `FEAR_GREED_CMC`(CMC API), `KOREA_PREMIUM`(USD/KRW 환율+바이낸스 가격),
+  `MARKET_TREND`/`BTC_CORRELATION`/`USDT_CORRELATION`(보조 마켓 캔들). 각각 별도의
+  실시간 수집 파이프라인이 필요하고, 그만큼 장애 가능성도 늘어난다 — 지연/실패 시
+  처리 정책은 결정 8 참고.
 
 ### 결정 3 — 프로세스 토폴로지: FastAPI와 완전히 분리된 상주 데몬
 
@@ -113,7 +119,77 @@ State Hydration/Reconciler(수동개입 감지)/서킷브레이커는 "나중에
 **보완 조치:** 사용자 대상 "모의투자 모드"는 없지만, `order_executor` 내부에는 테스트
 편의를 위한 `dry_run` 플래그를 옵션으로 둔다(유닛/통합테스트 전용, 실제 사용자 플로우에는
 노출하지 않음). 또한 실전 투입 전 **최소주문금액 규모의 소액 실전 테스트**를 1단계 플랜의
-필수 검증 단계로 포함한다.
+필수 검증 단계로 포함한다(사용자는 우선 10만원 규모로 검증할 계획).
+
+### 결정 6 — 여러 라이브 전략을 동시에 실행하되, 코인(market)당 최대 1개로 제한한다 (2026-08-06 개정, 봉타입 무관하게 재정정)
+
+그리드서치는 코인·봉타입 조합당 "최적 전략 1개"를 찾는 탐색 과정일 뿐이고, 실매매에서는
+그렇게 검증된 좋은 전략을 여러 개 **병행 운용**해야 한다(예: BTC 전략과 ETH 전략을 동시에
+돌림). 원래 결정("1단계 MVP는 단일 전략만 동시 실행")을 폐기하고 N개 동시실행을 1단계
+핵심 요구사항으로 승격한다.
+
+단, **같은 코인에는 봉타입과 무관하게 항상 최대 1개 전략만 running이다**(사용자 확정 —
+처음엔 "같은 (market, timeframe) 조합당 1개"까지만 생각했으나, BTC-1시간봉 전략과
+BTC-1일봉 전략을 동시에 돌리면 포지션/자금이 꼬일 위험이 커서 봉타입 관계없이 **코인
+단위로** 1개만 허용하는 것으로 정정). 서로 다른 코인끼리는 여러 개가 동시에 running 가능.
+
+하나의 전략 안에서 매수/매도 조건이 지표 여러 개(RSI/WILLIAMS_R/CCI 등)를 AND/OR로 조합하는
+것은 원래도 ConditionGroup/ConditionBlock JSON이 지원하던 것(결정 1)이라 별도 설계가
+필요 없다.
+
+**영향:**
+- `live_strategies.status='running'` 제약을 "테이블 전체 최대 1행"에서 **"market(코인)당
+  최대 1행"**으로 변경한다(승인 시 애플리케이션 레벨에서 검사, timeframe은 무관).
+- 데몬은 서로 다른 코인의 전략들을 asyncio 태스크로 동시에 관리한다. 코인 하나 = 전략 하나
+  = 포지션/자금이 1:1로 대응하므로, 여러 전략이 같은 코인 잔고를 나눠 쓰는 경우 자체가
+  없다 — Reconciler도 전략별로 독립적으로 "그 전략의 기대 포지션"과 실제 거래소의 해당
+  코인 잔고를 1:1로 대조하면 된다(여러 전략의 포지션을 합산할 필요 없음).
+- 시세 WebSocket 구독도 코인당 하나(해당 전략의 timeframe에 맞는 캔들 스트림)로 단순하다.
+- **서킷브레이커/일일성과는 전략 단위로 독립 적용한다**(사용자 확정) — 전략 하나가 손실
+  한도를 넘어 트립돼도 그 전략만 정지되고 나머지 running 전략은 영향받지 않는다. 이를 위해
+  `circuit_breaker_state`/`daily_performance`에 `live_strategy_id`를 추가한다(DB 스키마 절
+  참고). 코인당 전략이 1개뿐이므로 이 스코프는 "코인별 서킷브레이커"와도 동일하다.
+
+### 결정 7 — 전략별 자금은 최초 투입 후 자체적으로 복리(compounding)된다 (2026-08-06 개정)
+
+**결정(사용자, 세부 조정 가능):** 전략의 최초 진입 자금만 `risk_config_json.position_sizing_mode`
+(고정금액 또는 계좌잔고의 n%)로 **승인 시점에 1회** 확정한다. 이후 1차 매수→매도가 끝나면,
+그 매도 실현금액(수수료 차감 후)이 그대로 다음(2차) 진입 자금이 된다 — 매번 "계좌 전체
+잔고의 n%"를 다시 계산하지 않는다.
+
+**영향:**
+- `live_strategies`에 `current_capital` 컬럼을 추가한다 — 승인 시 최초 세팅, 포지션 종료
+  (매도 체결)마다 실현금액으로 갱신(DB 스키마 절 참고).
+- `max_position_per_market`/`max_total_position`은 sizing 방식이 아니라, 복리로 자금이
+  과도하게 불어나는 걸 막는 **안전 상한**으로 역할이 바뀐다.
+- 전략별로 자금이 격리되므로, 여러 전략이 동시에 잔고를 재조회하며 경쟁하는 문제가 애초에
+  생기지 않는다. 유일하게 확인이 필요한 시점은 **전략을 새로 승인할 때** — "이미 running
+  중인 다른 전략들의 최초/현재 `current_capital` 합 + 신규 전략의 최초 자금 ≤ 실제 가용
+  KRW 잔고"를 승인 단계에서 검증한다.
+
+### 결정 8 — B그룹 지표가 지연/실패하면 해당 조건만 스킵하고, 조건 전체가 B그룹뿐이면 그 전략을 일시정지한다 (2026-08-06 개정)
+
+결정 2에서 B그룹(외부데이터·보조마켓 의존 6개) 지표도 전부 포팅하기로 했으므로, 그 실시간
+수집 파이프라인이 지연되거나 실패했을 때의 동작을 명확히 정의해야 한다.
+
+**결정(사용자):**
+- B그룹 지표 하나의 실시간 데이터가 지연/실패하면, `live_indicators.py`는 그 값을 오래된
+  값으로 forward-fill하지 않고 **`None`(unknown)을 반환**한다(백테스트 FUNDING_RATE에서
+  이미 겪은 stale-forward-fill 버그를 라이브에서 반복하지 않기 위함,
+  [[upbit-v1-funding-rate-indicator]]).
+- `eval_group_values()`(결정 1)는 리프의 지표값이 `None`이면 그 리프를 AND/OR 평가에서
+  **제외**한다 — 예: `(RSI<31 and FUNDING_RATE<-0.01)`에서 FUNDING_RATE가 unknown이면
+  `RSI<31`만으로 판단(나머지 조건으로 매매를 이어간다). 한 그룹의 자식이 전부 unknown이면
+  그 그룹도 unknown으로 전파된다.
+- **최상위 매수/매도 조건 그룹 전체가 unknown으로 평가되면**(= 그 전략이 전부 지연된
+  B그룹 지표에만 의존) 그 후보를 `signals`에 "판단 불가"로 기록하고, **그 전략만**
+  `live_strategies.status='paused'`로 전환한다(결정 6에 따라 전략은 서로 독립이므로 다른
+  전략에는 영향 없음).
+- 이렇게 일시정지된 경우는 손실 트립(서킷브레이커)과 성격이 달라 — 외부 API가 복구되어
+  다음 성공적 fetch가 이뤄지면 **자동으로 `status='running'`으로 재개**한다(서킷브레이커는
+  수동 재승인이 필요하지만, 이건 손실이 아니라 순수 데이터 가용성 문제이기 때문).
+- A그룹만으로 구성된 전략은 이 정책의 영향을 받지 않는다(대상 마켓 캔들만 있으면 항상
+  계산 가능).
 
 ## 모듈 구조
 
@@ -126,10 +202,10 @@ State Hydration/Reconciler(수동개입 감지)/서킷브레이커는 "나중에
 │   ├── daemon.py                # 상주 프로세스 진입점(메인 루프, 백그라운드 태스크 기동)
 │   ├── upbit_client.py          # REST 인증(JWT) 클라이언트 + Throttle/Queue
 │   ├── upbit_ws.py              # WebSocket 구독(공개: 캔들/체결)
-│   ├── live_indicators.py       # pandas 기반 지표 계산(승격 전략이 쓰는 것만, 확장 가능한 레지스트리)
+│   ├── live_indicators.py       # pandas 기반 지표 계산(A그룹 30개 + B그룹 6개 전부, B그룹은 지연/실패 시 None 반환)
 │   ├── signal_engine.py         # live_indicators + condition_tree.eval_group_values 결합
 │   ├── order_executor.py        # 시장가/지정가/지정가+타임아웃 하이브리드 주문 실행
-│   ├── position_manager.py      # 포지션 추적, 자금관리(고정금액/퍼센트), 최대진입금액 한도
+│   ├── position_manager.py      # 포지션 추적, 전략별 자금관리(최초 고정금액/퍼센트 → 이후 복리), 최대진입금액 안전상한
 │   ├── risk_manager.py          # 서킷브레이커(일일손실/연속손실 판정 및 트립)
 │   ├── reconciler.py            # 외부 수동주문 감지(거래소 상태 vs 내부 DB 대조), 재시작 시 State Hydration에도 사용
 │   ├── telegram_bot.py          # 알림 + 대화형 제어 (2단계에서 구현, 1단계에서는 빈 스텁 또는 미포함)
@@ -160,6 +236,7 @@ CREATE TABLE live_strategies (
     buy_conditions_json  TEXT NOT NULL,            -- ConditionGroup JSON, 백테스트와 100% 동일 포맷
     sell_conditions_json TEXT NOT NULL,
     risk_config_json    TEXT NOT NULL,             -- 아래 "risk_config_json 필드" 참고
+    current_capital     REAL,                      -- 전략 자체 자금(복리): 승인 시 최초 세팅, 포지션 종료마다 실현금액으로 갱신 (결정 7)
     status              TEXT NOT NULL DEFAULT 'draft',  -- draft|approved|running|paused|stopped
     last_processed_candle_time TEXT,               -- state hydration: 재시작 시 여기부터 다시 봄
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
@@ -184,8 +261,9 @@ CREATE TABLE live_strategies (
 }
 ```
 
-`status='running'`은 **전체 테이블에서 항상 최대 1행**만 가능(애플리케이션 레벨에서
-강제, 그리드서치의 단일 실행 락과 같은 원칙 — 1단계 MVP는 단일 전략만 동시 실행).
+`status='running'`은 **market(코인)당 항상 최대 1행**만 가능(애플리케이션 레벨에서 승인
+시 강제, timeframe 무관 — 같은 코인에 중복 투자 금지, 결정 6). 서로 다른 코인끼리는 여러
+개가 동시에 running일 수 있다(1단계부터 지원).
 
 ### 2) `positions` — 포지션(전량 진입/전량 청산, 백테스트와 동일한 all-in/all-out 모델)
 
@@ -244,26 +322,32 @@ CREATE TABLE signals (
 );
 ```
 
-### 5) `daily_performance` — 대시보드용 일별 집계(계좌 전체 기준, 서킷브레이커 판단에도 사용)
+### 5) `daily_performance` — 전략별 일별 집계(서킷브레이커 판단에 사용, 결정 6 개정)
 
 ```sql
 CREATE TABLE daily_performance (
-    trading_date     TEXT PRIMARY KEY,   -- KST 기준 'YYYY-MM-DD'
+    trading_date     TEXT NOT NULL,      -- KST 기준 'YYYY-MM-DD'
+    live_strategy_id TEXT NOT NULL REFERENCES live_strategies(id),
     realized_pnl     REAL NOT NULL DEFAULT 0,
     realized_pnl_pct REAL NOT NULL DEFAULT 0,
     trade_count      INTEGER NOT NULL DEFAULT 0,
     win_count        INTEGER NOT NULL DEFAULT 0,
     loss_count       INTEGER NOT NULL DEFAULT 0,
     starting_balance REAL,  ending_balance REAL,
-    max_drawdown_pct REAL
+    max_drawdown_pct REAL,
+    PRIMARY KEY (trading_date, live_strategy_id)
 );
 ```
 
-### 6) `circuit_breaker_state` — 싱글턴 상태 행
+전략별 서킷브레이커 판단은 이 테이블을 `live_strategy_id`로 필터링해서 쓴다. 대시보드의
+"계좌 전체" 일별 합산 뷰는 별도 테이블 없이 조회 시점에 `GROUP BY trading_date`로 계산한다
+(결정 4의 "중복 저장 안 함" 원칙과 동일).
+
+### 6) `circuit_breaker_state` — 전략별 상태 행 (싱글턴 아님, 결정 6 개정)
 
 ```sql
 CREATE TABLE circuit_breaker_state (
-    id                 INTEGER PRIMARY KEY CHECK (id = 1),
+    live_strategy_id   TEXT PRIMARY KEY REFERENCES live_strategies(id),
     trading_date       TEXT NOT NULL,     -- KST 'YYYY-MM-DD', 날짜 바뀌면 리셋
     consecutive_losses INTEGER NOT NULL DEFAULT 0,
     tripped            INTEGER NOT NULL DEFAULT 0,
@@ -272,6 +356,9 @@ CREATE TABLE circuit_breaker_state (
     resumed_at         TEXT
 );
 ```
+
+전략 하나가 손실 한도를 넘어 트립돼도 그 전략만 `live_strategies.status='paused'`로
+멈추고, 다른 running 전략은 영향받지 않는다(사용자 확정: 서킷브레이커는 전략 단위 독립).
 
 ### 7) `manual_intervention_events` — 외부 수동개입 감지 로그
 
@@ -304,14 +391,16 @@ CREATE TABLE manual_intervention_events (
 
 ```
 [daemon.py 시작]
-  1. live_strategies에서 status='running'인 행 로드(0~1개, 1단계 MVP는 단일 전략)
-  2. 있으면: State Hydration
-     - positions(status='open') 로드 → 현재 보유 포지션 파악
-     - orders(status='wait') 로드 → 미체결 주문 파악
-     - 즉시 Upbit REST로 실제 계좌/미체결주문 조회 → 내부 상태와 대조
-       (재시작 복구 + 수동개입 감지를 같은 로직으로 처리)
-  3. 시세 WebSocket 구독 시작(해당 market의 캔들/체결 스트림)
-  4. 백그라운드 루프 4개 동시 구동: [캔들 처리] [주문상태 감시] [Reconciler] [서킷브레이커 체크]
+  1. live_strategies에서 status='running'인 행 전부 로드(N개, market(코인)당 최대 1개)
+  2. 전략마다 독립적으로 State Hydration
+     - positions(status='open', live_strategy_id=해당전략) 로드 → 현재 보유 포지션 파악
+     - orders(status='wait', live_strategy_id=해당전략) 로드 → 미체결 주문 파악
+     - 즉시 Upbit REST로 그 코인의 실제 잔고/미체결주문 조회 → 그 전략 하나의 내부 상태와
+       1:1 대조(코인당 전략이 1개뿐이므로 여러 전략 합산 불필요, 재시작 복구 + 수동개입
+       감지를 같은 로직으로 처리)
+  3. 전략마다 시세 WebSocket 구독 시작(해당 market의 캔들/체결 스트림)
+  4. 전략별 [캔들 처리] 태스크를 asyncio로 동시 구동 + 공통 백그라운드 루프 3개
+     ([주문상태 감시] [Reconciler] [전략별 서킷브레이커 체크])
 ```
 
 **[캔들 처리]** (해당 timeframe의 캔들이 마감될 때마다)
@@ -332,7 +421,9 @@ CREATE TABLE manual_intervention_events (
 **[주문 실행 — `order_executor.py`]**
 ```
 enter(side, amount):
-  position_manager가 자금관리 규칙(고정금액/퍼센트, 최대한도)으로 최종 주문금액 산출
+  position_manager가 해당 전략의 live_strategies.current_capital(최초 진입은 승인 시
+    확정된 고정금액/퍼센트, 이후는 직전 매도 실현금액 — 결정 7)을 기준으로 최종 주문금액을
+    산출하고, max_position_per_market/max_total_position은 안전 상한으로만 적용
   주문가는 해당 마켓의 틱사이즈에 맞춰 라운딩(orders/chance API로 사전 확인)
   execution_mode에 따라:
     market  → 즉시 시장가 주문
@@ -344,6 +435,9 @@ enter(side, amount):
   주문 API 응답을 못 받은 경우, 바로 재시도하지 않고 먼저 미체결/체결 내역을 재조회해서
   실제로 주문이 안 들어갔는지 확인 후에만 재시도(이중 주문 방지, idempotency)
   모든 주문에 expected_price(신호 확정 시점 가격) 기록 → 체결 후 slippage_pct 계산
+
+exit(...) 체결 완료 시: 실현금액(수수료 차감 후)을 해당 live_strategies.current_capital에
+  반영한다 — 이 값이 그대로 다음(N+1차) 진입 자금이 된다(결정 7, 복리).
 ```
 
 **[주문상태 감시]** — `wait` 상태 주문을 Throttle 큐를 통해 폴링하며 체결/취소 여부 갱신.
@@ -391,7 +485,7 @@ enter(side, amount):
 | 단계 | 범위 | 결과물 |
 |---|---|---|
 | 0(이 스펙) | 아키텍처/모듈구조/DB스키마 확정 | 이 문서 |
-| **1. 트레이딩 엔진 + 핵심 안전장치** | Upbit REST/WS 클라이언트, 신호평가(pandas), 주문실행 3모드, 자금관리, State Hydration, Reconciler, 서킷브레이커, 실매매 승격 UX | 승인된 전략 1개가 실제 자금으로 안전하게 자동매매되는 최소 시스템 |
+| **1. 트레이딩 엔진 + 핵심 안전장치** | Upbit REST/WS 클라이언트, 신호평가(pandas), 주문실행 3모드, 전략별 복리 자금관리, State Hydration, Reconciler, 전략별 서킷브레이커, 실매매 승격 UX | 승인된 전략 여러 개(코인당 1개)가 실제 자금으로 안전하게 동시 자동매매되는 최소 시스템 |
 | 2. 텔레그램 제어/알림 | 신호/체결/청산 알림, 대화형 제어(정지/재개/청산/잔고조회) | 휴대폰으로 모니터링·개입 가능 |
 | 3. 분석 대시보드 | 백테스트 vs 실매매 대조, 슬리피지 추적, Daily/누적/MDD/승률 | 매매일지 화면 |
 | 4. 운영 하드닝 | PM2/Docker 배포, 업비트 API Open IP 등록 가이드, 지표 커버리지 확장, 부하/장기구동 테스트 | 24/7 운영 준비 완료 |
@@ -431,7 +525,7 @@ enter(side, amount):
 ## 자기 검토(스펙 완성도)
 
 - 플레이스홀더/TBD 없음 — 각 결정 항목에 "왜"와 "어떻게"를 남겼다.
-- 5개 핵심 아키텍처 결정이 서로 상충하지 않는지 확인: backtrader 배제(결정1) ↔ 모듈구조의
+- 8개 핵심 아키텍처 결정이 서로 상충하지 않는지 확인: backtrader 배제(결정1) ↔ 모듈구조의
   `trading/`이 `engine/condition_tree.py`만 재사용(모듈구조 절) ↔ DB 스키마의
   `buy_conditions_json`이 그 재사용을 전제로 함 — 세 곳이 일관됨.
 - 모의투자 없이 실주문(결정5)이라는 사용자 결정과, 로드맵에서 서킷브레이커/Reconciler/
