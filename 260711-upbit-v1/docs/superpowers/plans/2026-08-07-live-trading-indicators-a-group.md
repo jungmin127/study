@@ -353,29 +353,29 @@ def create_rsi(df: pd.DataFrame, **params) -> pd.Series:
 def create_macd_line(df: pd.DataFrame, **params) -> pd.Series:
     fast = int(params.get("fast", 12))
     slow = int(params.get("slow", 26))
-    ema_fast = df["close"].ewm(span=fast, adjust=False).mean()
-    ema_slow = df["close"].ewm(span=slow, adjust=False).mean()
+    ema_fast = df["close"].ewm(span=fast, adjust=False, min_periods=fast).mean()
+    ema_slow = df["close"].ewm(span=slow, adjust=False, min_periods=slow).mean()
     return ema_fast - ema_slow
 
 
 def create_macd_signal(df: pd.DataFrame, **params) -> pd.Series:
     signal = int(params.get("signal", 9))
     macd_line = create_macd_line(df, **params)
-    return macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
 
 
 def create_macd_ppo(df: pd.DataFrame, **params) -> pd.Series:
     fast = int(params.get("fast", 12))
     slow = int(params.get("slow", 26))
-    ema_fast = df["close"].ewm(span=fast, adjust=False).mean()
-    ema_slow = df["close"].ewm(span=slow, adjust=False).mean()
+    ema_fast = df["close"].ewm(span=fast, adjust=False, min_periods=fast).mean()
+    ema_slow = df["close"].ewm(span=slow, adjust=False, min_periods=slow).mean()
     return (ema_fast - ema_slow) / ema_slow * 100
 
 
 def create_macd_ppo_signal(df: pd.DataFrame, **params) -> pd.Series:
     signal = int(params.get("signal", 9))
     ppo = create_macd_ppo(df, **params)
-    return ppo.ewm(span=signal, adjust=False).mean()
+    return ppo.ewm(span=signal, adjust=False, min_periods=signal).mean()
 
 
 ```
