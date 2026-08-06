@@ -141,6 +141,61 @@ def eval_group(
     return all(results) if group_type == "AND" else any(results)
 
 
+def eval_group_values(
+    group: dict,
+    values: dict[str, float | None],
+    position_return_pct: float | None = None,
+    position_holding_bars: int | None = None,
+) -> bool | None:
+    """ConditionGroup을 재귀적으로 평가해 bool 또는 None(unknown)을 반환. eval_group()과
+    로직은 같지만 bt.Indicator 대신 이미 계산된 값 딕셔너리(indicator_key -> float | None)를
+    직접 읽는다(라이브 트레이딩용, 스펙 결정 1).
+
+    values[key]가 없거나 None이면 그 리프는 "unknown"으로 취급되어 AND/OR 평가에서
+    제외된다(스펙 결정 8 — 외부데이터 지표가 지연/실패해도 나머지 조건만으로 매매를
+    이어가기 위함). 한 그룹의 자식이 전부 unknown이면 그 그룹 자체도 None을 반환하고,
+    그 None은 상위 그룹에서도 다시 unknown 리프처럼 제외된다. 최상위 그룹까지 None이
+    전파되면 "이 조건 전체를 지금 판단할 수 없다"는 뜻이다."""
+    group_type = group.get("type", "AND")
+    conditions = group.get("conditions", [])
+
+    if not conditions:
+        return False
+
+    results: list[bool] = []
+    for item in conditions:
+        if "indicator" in item:
+            if item["indicator"] == "HOLDING_PERIOD_BARS":
+                if position_holding_bars is None:
+                    results.append(False)
+                else:
+                    results.append(
+                        apply_operator(position_holding_bars, item["operator"], float(item["threshold"]))
+                    )
+                continue
+            if item["indicator"] in POSITION_RELATIVE_INDICATORS:
+                if position_return_pct is None:
+                    results.append(False)
+                else:
+                    results.append(apply_operator(position_return_pct, item["operator"], float(item["threshold"])))
+                continue
+            key = indicator_key(item["indicator"], item.get("params", {}))
+            value = values.get(key)
+            if value is None:
+                continue  # unknown 리프는 이 그룹 평가에서 제외
+            results.append(apply_operator(value, item["operator"], float(item["threshold"])))
+        elif "type" in item:
+            child = eval_group_values(item, values, position_return_pct, position_holding_bars)
+            if child is None:
+                continue  # 하위 그룹 전체가 unknown -> 이 그룹 평가에서도 제외
+            results.append(child)
+
+    if not results:
+        return None  # 판단 가능한 자식이 하나도 없음 -> 이 그룹도 unknown
+
+    return all(results) if group_type == "AND" else any(results)
+
+
 def find_unknown_indicators(group: dict) -> list[str]:
     """INDICATOR_FACTORY와 POSITION_RELATIVE_INDICATORS 어디에도 없는 지표 키를 찾아 반환(중복 제거, 정렬)."""
     unknown = {
@@ -195,6 +250,7 @@ __all__ = [
     "get_indicator_value",
     "apply_operator",
     "eval_group",
+    "eval_group_values",
     "find_unknown_indicators",
     "is_empty",
     "max_required_period",

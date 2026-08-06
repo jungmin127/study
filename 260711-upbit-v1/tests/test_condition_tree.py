@@ -229,3 +229,109 @@ def test_required_aux_markets_returns_usdt_when_korea_premium_present():
         "conditions": [{"indicator": "KOREA_PREMIUM", "params": {}, "operator": ">", "threshold": 0}],
     }
     assert required_aux_markets(tree) == {"KRW-USDT"}
+
+
+from engine.condition_tree import eval_group_values, indicator_key
+
+
+def test_eval_group_values_matches_apply_operator_when_all_known():
+    tree = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 31},
+            {"indicator": "CCI", "params": {}, "operator": "<", "threshold": -120},
+        ],
+    }
+    values = {
+        indicator_key("RSI", {"period": 14}): 25.0,
+        indicator_key("CCI", {}): -150.0,
+    }
+    assert eval_group_values(tree, values) is True
+
+    values[indicator_key("CCI", {})] = -50.0
+    assert eval_group_values(tree, values) is False
+
+
+def test_eval_group_values_drops_unknown_leaf_in_and():
+    tree = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 31},
+            {"indicator": "FUNDING_RATE", "params": {}, "operator": "<", "threshold": -0.01},
+        ],
+    }
+    # FUNDING_RATE 키가 아예 없음 = unknown -> RSI 조건만으로 판단
+    values = {indicator_key("RSI", {"period": 14}): 25.0}
+    assert eval_group_values(tree, values) is True
+
+    values = {indicator_key("RSI", {"period": 14}): 40.0}
+    assert eval_group_values(tree, values) is False
+
+
+def test_eval_group_values_drops_unknown_leaf_in_or():
+    tree = {
+        "type": "OR",
+        "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 54},
+            {"indicator": "FUNDING_RATE", "params": {}, "operator": ">", "threshold": 0.01},
+        ],
+    }
+    values = {indicator_key("RSI", {"period": 14}): 60.0}
+    assert eval_group_values(tree, values) is True
+
+    values = {indicator_key("RSI", {"period": 14}): 10.0}
+    assert eval_group_values(tree, values) is False
+
+
+def test_eval_group_values_none_value_is_treated_as_unknown():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 31}],
+    }
+    # 키는 있지만 값이 None(지표 계산 실패) -> unknown -> 결과도 None
+    values = {indicator_key("RSI", {"period": 14}): None}
+    assert eval_group_values(tree, values) is None
+
+
+def test_eval_group_values_returns_none_when_all_leaves_unknown():
+    tree = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "FUNDING_RATE", "params": {}, "operator": "<", "threshold": -0.01},
+            {"indicator": "KOREA_PREMIUM", "params": {}, "operator": "<", "threshold": 2.0},
+        ],
+    }
+    assert eval_group_values(tree, {}) is None
+
+
+def test_eval_group_values_propagates_unknown_nested_group():
+    tree = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 31},
+            {
+                "type": "OR",
+                "conditions": [
+                    {"indicator": "FUNDING_RATE", "params": {}, "operator": "<", "threshold": -0.01},
+                    {"indicator": "KOREA_PREMIUM", "params": {}, "operator": "<", "threshold": 2.0},
+                ],
+            },
+        ],
+    }
+    values = {indicator_key("RSI", {"period": 14}): 25.0}
+    # 중첩 OR 그룹 전체가 unknown -> 상위 AND에서 제외 -> RSI만으로 판단
+    assert eval_group_values(tree, values) is True
+
+
+def test_eval_group_values_position_relative_indicators_unaffected_by_unknown_handling():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<", "threshold": -5.0}],
+    }
+    # 포지션 없음(position_return_pct=None) -> False (unknown이 아니라 기존 eval_group과 동일한 "false")
+    assert eval_group_values(tree, {}, position_return_pct=None) is False
+    assert eval_group_values(tree, {}, position_return_pct=-6.0) is True
+
+
+def test_eval_group_values_empty_conditions_returns_false_not_none():
+    assert eval_group_values({"type": "AND", "conditions": []}, {}) is False
