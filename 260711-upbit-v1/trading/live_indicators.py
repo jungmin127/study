@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import statistics
 from collections import deque
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
+
+from external_data_service import get_fear_greed_cmc
 
 
 def create_sma(df: pd.DataFrame, **params) -> pd.Series:
@@ -395,6 +398,27 @@ def compute_korea_premium_value(df: pd.DataFrame) -> pd.Series:
     하나라도 NaN이면 결과도 자연히 NaN이 되어 eval_group_values()가 unknown으로
     처리한다(스펙 결정 8) — 별도 방어코드가 필요 없다."""
     return (df["close"] / (df["binance_close"] * df["usdt_close"]) - 1) * 100
+
+
+FEAR_GREED_STALE_AFTER = timedelta(days=2)
+
+
+def fetch_live_fear_greed_value(now: datetime | None = None) -> float | None:
+    """alternative.me 공포탐욕지수의 가장 최근 값을 조회한다. API 호출이 실패하거나
+    가장 최근 값의 날짜가 FEAR_GREED_STALE_AFTER(2일)보다 오래됐으면(정상적인 하루
+    발행 지연을 넘어 파이프라인이 며칠째 멈춘 경우) 오래된 값을 forward-fill하지 않고
+    None을 반환한다(스펙 결정 8)."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        df = get_fear_greed_cmc(now - timedelta(days=7), now)
+    except RuntimeError:
+        return None
+    if df.empty:
+        return None
+    latest = df.iloc[-1]
+    if now - latest["date"] > FEAR_GREED_STALE_AFTER:
+        return None
+    return float(latest["fear_greed_value"])
 
 
 LIVE_INDICATOR_FACTORY: dict[str, object] = {

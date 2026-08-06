@@ -68,3 +68,52 @@ def test_live_indicator_factory_registers_external_group():
     assert LIVE_INDICATOR_FACTORY["FEAR_GREED_CMC"] is create_fear_greed_cmc
     assert LIVE_INDICATOR_FACTORY["KOREA_PREMIUM"] is create_korea_premium
     assert LIVE_INDICATOR_FACTORY["FUNDING_RATE"] is create_funding_rate
+
+
+from datetime import datetime, timedelta, timezone
+
+import trading.live_indicators as live_indicators
+from trading.live_indicators import fetch_live_fear_greed_value
+
+
+def test_fetch_live_fear_greed_value_returns_latest_when_fresh(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def fake_get_fear_greed_cmc(start, end):
+        return pd.DataFrame({
+            "date": [now.replace(hour=0, minute=0, second=0, microsecond=0)],
+            "fear_greed_value": [55.0],
+        })
+
+    monkeypatch.setattr(live_indicators, "get_fear_greed_cmc", fake_get_fear_greed_cmc)
+    assert fetch_live_fear_greed_value(now=now) == pytest.approx(55.0)
+
+
+def test_fetch_live_fear_greed_value_returns_none_when_stale(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    stale_date = now - timedelta(days=5)
+
+    def fake_get_fear_greed_cmc(start, end):
+        return pd.DataFrame({"date": [stale_date], "fear_greed_value": [55.0]})
+
+    monkeypatch.setattr(live_indicators, "get_fear_greed_cmc", fake_get_fear_greed_cmc)
+    assert fetch_live_fear_greed_value(now=now) is None
+
+
+def test_fetch_live_fear_greed_value_returns_none_when_empty(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        live_indicators, "get_fear_greed_cmc",
+        lambda start, end: pd.DataFrame(columns=["date", "fear_greed_value"]),
+    )
+    assert fetch_live_fear_greed_value(now=now) is None
+
+
+def test_fetch_live_fear_greed_value_returns_none_on_api_failure(monkeypatch):
+    now = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+
+    def raise_runtime_error(start, end):
+        raise RuntimeError("alternative.me 공포탐욕지수 API 호출 실패")
+
+    monkeypatch.setattr(live_indicators, "get_fear_greed_cmc", raise_runtime_error)
+    assert fetch_live_fear_greed_value(now=now) is None
