@@ -13,9 +13,12 @@
 ## 범위
 
 **이 스펙에서 확정하는 것:**
-- `trading/order_executor.py`의 `enter()`/`exit()`(시장가/지정가/지정가+타임아웃 3모드) +
-  `handle_signal_result()`(신호평가 결과를 받아 실제 주문 여부까지 결정하는 단일 진입점)
+- `trading/order_executor.py`의 `enter()`/`exit()`(시장가/지정가/지정가+타임아웃/
+  **슬리피지상한(market_capped) 4모드**) + `handle_signal_result()`(신호평가 결과를 받아
+  실제 주문 여부까지 결정하는 단일 진입점)
 - 틱사이즈(호가단위) 라운딩 방식
+- `risk_config_json`에 `order_execution_mode='market_capped'` 값과 `max_slippage_pct`
+  필드 추가(foundation 스펙의 `risk_config_json` 스키마 확장 — 결정9)
 - `trading/db.py`에 추가할 `orders` CRUD + `signals.resulting_order_id` 갱신 함수
 - `trading/signal_engine.py`의 `evaluate_signals()` 반환값에 추가할 필드(이미 완료된
   ⑤-2 코드에 대한 최소 수정)
@@ -94,7 +97,8 @@ order_executor.handle_signal_result(strategy_id, result)`.
 테이블 주석에 `skip_reason` 예시로 `max_position_reached`가 언급돼 있지만,
 `max_position_per_market`은 이 스펙에서 "진입 차단"이 아니라 "진입 금액 클램프"로
 구현한다(결정6) — 상한을 넘는 금액이 있어도 상한만큼만 진입하지, 아예 스킵하지 않는다.
-따라서 이 서브플랜이 실제로 쓰는 `skip_reason` 값은 `circuit_breaker_tripped` 하나뿐이다
+따라서 이 서브플랜이 실제로 쓰는 `skip_reason` 값은 `circuit_breaker_tripped`와
+`slippage_exceeded`(결정9, `market_capped` 모드가 FOK로 전량취소됐을 때) 둘뿐이다
 (`unknown`은 이미 ⑤-2가 씀).
 
 ### 결정 4 — `limit_timeout`의 N초 타이머는 `enter()`/`exit()` 내부에서 블로킹 처리한다
@@ -157,6 +161,48 @@ DB에 `orders` 행을 먼저 생성해 `id`(uuid4)를 얻은 뒤, 그 값을 `id
 `upbit_client`를 `monkeypatch`로 mock한 별도 테스트로 검증한다(테스트 전략 절 참고).
 사용자 화면에는 노출하지 않는다(기반 스펙 결정5, 유닛/통합테스트 전용).
 
+### 결정 9 — 4번째 주문모드 `market_capped`: 슬리피지 상한 + FOK로 "보호된 시장가"를 구현한다
+
+사용자 요구사항(브레인스토밍 중 추가): threshold가 걸려 매수/매도가 확정된 순간, 약간의
+슬리피지는 감수하더라도 전량 체결되길 원하되, 그 갭이 너무 크면 아예 체결되지 않고
+취소되길 원한다. 업비트 API를 재확인한 결과 두 후보가 있었다:
+
+- `ord_type="best"`(최유리지정가): 그 순간의 최우선호가에 체결하지만, **사용자가 직접
+  "얼마까지 벌어지면 취소"라는 상한을 지정할 방법이 없다** — 시장이 크게 갭이 나 있어도
+  그 벌어진 최우선호가에 그냥 체결된다. 요구사항의 "너무 심하면 취소"를 만족 못 함.
+- `ord_type="limit"` + `time_in_force="fok"`(지정가 + Fill-Or-Kill): 가격을
+  `expected_price × (1 ± max_slippage_pct/100)`으로 지정하면, 그 가격 범위 안에서 **전량
+  체결 가능하면 즉시 전량 체결, 아니면 전량 취소**(부분체결 없음) — 요구사항을 정확히
+  만족한다.
+
+**결정:** `order_execution_mode`에 4번째 값 `market_capped`를 추가한다(기존 market/limit/
+limit_timeout은 그대로 유지, 기본값은 여전히 `limit_timeout` — 이 스펙에서 기본값을
+바꾸지 않는다). 구현:
+
+```python
+# 매수: 상한 = expected_price * (1 + max_slippage_pct / 100)
+# 매도: 하한 = expected_price * (1 - max_slippage_pct / 100)
+capped_price = round_to_tick(expected_price * (1 + sign * max_slippage_pct / 100))
+order = await upbit_client.create_order(
+    market, side, "limit", price=str(capped_price), volume=str(volume),
+    time_in_force="fok", identifier=order_id,
+)
+```
+
+`max_slippage_pct`는 `risk_config_json`에 새로 추가하는 필드다(예: `0.5` = 0.5%) — 전략별로
+사용자가 직접 설정한다(코인마다 변동성이 달라 고정값으로는 부적합).
+
+**FOK가 전량취소됐을 때:** 이번 캔들에서는 그냥 미체결로 끝낸다(재시도나 순수시장가
+전환을 하지 않는다) — 사용자가 명시한 의도("gap이 너무 심하면 주문을 취소") 그대로.
+`orders` 행은 `status='cancel'`로 남기고(감사 추적용), `handle_signal_result()`가
+`db.update_signal_result(signal_id, order["id"], "slippage_exceeded")`로 **주문id와
+skip_reason을 함께** 기록한다 — "시도는 했지만 슬리피지 초과로 취소됐다"는 사실이
+`resulting_order_id`를 따라가면 감사할 수 있다(완전히 스킵된 신호와 구분됨). 포지션은
+생성되지 않으므로 다음 캔들에서 조건이 다시 충족되면 자연스럽게 재시도된다.
+
+`market_capped`는 매수/매도 둘 다 `ord_type="limit"`로 대칭이다 — 결정7의 `price`/`market`
+비대칭은 순수 시장가(`market`) 모드에만 해당하고, 이 모드에는 적용되지 않는다.
+
 ## `trading/order_executor.py`
 
 ```python
@@ -172,15 +218,20 @@ async def enter(
     strategy: dict, capital: float, expected_price: float,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
 ) -> dict:
-    """매수 주문 실행(시장가/지정가/지정가+타임아웃, risk_config['order_execution_mode']에
-    따라 분기). orders 행 생성 + positions 행 생성(position_manager.open_position)까지
-    포함해 반환. 이미 오픈 포지션이 있으면 ValueError(방어적 가드)."""
+    """매수 주문 실행(market/limit/limit_timeout/market_capped 4모드,
+    risk_config['order_execution_mode']에 따라 분기, 결정9). market_capped가 FOK 전량취소로
+    끝나면 status='cancel'인 orders 행만 반환하고 positions 행은 생성하지 않는다 — 그 외
+    모드는 orders 행 생성 + positions 행 생성(position_manager.open_position)까지 포함해
+    반환. 이미 오픈 포지션이 있으면 ValueError(방어적 가드)."""
 
 async def exit(
     strategy: dict, position: dict, expected_price: float,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
 ) -> dict:
-    """매도 주문 실행(position['entry_qty'] 전량, all-in/all-out). orders 행 생성 +
+    """매도 주문 실행(position['entry_qty'] 전량, all-in/all-out, 4모드는 enter()와 동일).
+    market_capped가 FOK 전량취소로 끝나면 status='cancel'인 orders 행만 반환하고
+    position_manager.close_position()은 호출하지 않는다(포지션 그대로 유지) — 그 외 모드는
+    orders 행 생성 +
     position_manager.close_position() 호출까지 포함해 반환({"realized_pnl":,
     "realized_pnl_pct":, "capital_after":} 병합). position이 None이면 ValueError."""
 
@@ -188,9 +239,11 @@ async def handle_signal_result(
     strategy_id: str, signal_result: dict, *, dry_run: bool = False,
 ) -> dict:
     """evaluate_signals() 반환값을 받아 서킷브레이커 확인 → enter()/exit() 호출 →
-    signals.resulting_order_id/skip_reason 갱신까지 한 번에 처리(결정3). 반환:
-    {"buy_action": "entered"|"skipped_circuit_breaker"|None,
-     "sell_action": "exited"|None,
+    signals.resulting_order_id/skip_reason 갱신까지 한 번에 처리(결정3). market_capped
+    모드가 FOK로 전량취소되면 buy_action/sell_action이 "slippage_exceeded"가 되고
+    skip_reason도 같은 값으로 기록된다(결정9). 반환:
+    {"buy_action": "entered"|"skipped_circuit_breaker"|"slippage_exceeded"|None,
+     "sell_action": "exited"|"slippage_exceeded"|None,
      "buy_order_id": str|None, "sell_order_id": str|None}."""
 ```
 
@@ -269,25 +322,31 @@ return {
   `get_order`/`cancel_order`를 `monkeypatch`로 mock(async 함수이므로 `AsyncMock`류 사용).
 - `limit_timeout`: "타임아웃 → 취소 → 잔량 시장가 재주문 → 평균가 재계산" 흐름을 mock 호출
   순서/인자로 검증(`asyncio.sleep`도 monkeypatch해 테스트가 실제로 10초 기다리지 않게 함).
+- `market_capped`(결정9): 두 케이스 모두 검증 — (1) FOK 성공 시 `price`/`time_in_force`
+  파라미터가 슬리피지 상한대로 정확히 계산됐는지, (2) FOK가 `cancel` 상태를 반환했을 때
+  `positions`/`current_capital`이 전혀 바뀌지 않고 `orders.status='cancel'`만 남는지.
 - `dry_run=True` 경로: mock 없이 happy path(즉시 전량체결)만 검증.
 - `handle_signal_result()`: `enter`/`exit`을 monkeypatch해 "서킷브레이커 트립 시 skip",
   "매수신호 시 enter 호출 + signals 갱신", "매도신호 시 exit + record_trade_result 호출",
-  "paused=True면 아무것도 안 함" 등을 검증(⑤-2의 `insert_live_strategy`/
-  `make_oscillating_df` fixture 재사용).
+  "paused=True면 아무것도 안 함", "market_capped 취소 시 skip_reason='slippage_exceeded'로
+  기록(포지션 미생성)" 등을 검증(⑤-2의 `insert_live_strategy`/`make_oscillating_df` fixture
+  재사용).
 - 최종 통합 확인 단계에서 `evaluate_signals()` 반환값 확장이 기존 11개 테스트를 깨지
   않는지 전체 회귀(`python -m pytest -q`)로 재확인.
 
 ## 자기 검토(스펙 완성도)
 
-- 플레이스홀더 없음 — 모든 함수의 정확한 시그니처와 동작, 그리고 8개 핵심 결정 각각의
+- 플레이스홀더 없음 — 모든 함수의 정확한 시그니처와 동작, 그리고 9개 핵심 결정 각각의
   "왜"를 남겼다.
 - 기반 스펙과의 불일치를 발견 즉시 정정하고 근거를 남겼다(결정1의 `price_unit` deprecated
-  이슈, 결정3의 `max_position_reached` skip_reason 미사용 사유) — 나중에 "왜 스펙이랑
-  다르지"라는 혼란을 예방.
-- 8개 결정이 서로 상충하지 않는지 확인: 결정2(async 경계) ↔ 결정4(`limit_timeout` 블로킹)
-  ↔ 결정5(identifier 재조회) — 셋 다 "`enter()`/`exit()` 안에서 async로 끝까지 처리"라는
-  하나의 실행 모델로 일관됨. 결정3(연결 로직 포함) ↔ 결정6(진입마다 클램프)도
-  `handle_signal_result()`가 자금 계산의 유일한 소유자라는 점에서 일관됨.
+  이슈, 결정3의 `max_position_reached` skip_reason 미사용 사유, 결정9의 4번째 주문모드로
+  `risk_config_json` 스키마 확장) — 나중에 "왜 스펙이랑 다르지"라는 혼란을 예방.
+- 9개 결정이 서로 상충하지 않는지 확인: 결정2(async 경계) ↔ 결정4(`limit_timeout` 블로킹)
+  ↔ 결정5(identifier 재조회) ↔ 결정9(`market_capped`도 같은 async 함수 안에서 FOK 결과까지
+  끝까지 처리) — 넷 다 "`enter()`/`exit()` 안에서 async로 끝까지 처리"라는 하나의 실행
+  모델로 일관됨. 결정3(연결 로직 포함) ↔ 결정6(진입마다 클램프) ↔ 결정9(FOK 취소도
+  `handle_signal_result()`가 skip_reason으로 기록)도 `handle_signal_result()`가 "신호 →
+  주문 여부"의 유일한 소유자라는 점에서 일관됨.
 - 스코프 경계 명시: `limit` 모드 장기 감시/State Hydration/Reconciler/손절익절 ticker
   평가는 전부 ⑤-4로 명확히 넘겼다(결정4의 "이 서브플랜이 낸 주문은 ⑤-4가 다시 다룰 필요
   없다"는 문장으로 경계가 왜 이렇게 그어졌는지도 남겼다).
