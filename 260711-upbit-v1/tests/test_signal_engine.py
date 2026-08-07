@@ -6,7 +6,7 @@ import pytest
 import trading.signal_engine as signal_engine
 
 
-def test_fetch_candles_with_warmup_computes_start_from_required_bars_plus_buffer(monkeypatch):
+def test_fetch_candles_with_warmup_computes_start_from_required_bars_times_multiplier_plus_buffer(monkeypatch):
     captured = {}
 
     def fake_get_candles(market, timeframe, start, end):
@@ -24,7 +24,7 @@ def test_fetch_candles_with_warmup_computes_start_from_required_bars_plus_buffer
     assert captured["market"] == "KRW-BTC"
     assert captured["timeframe"] == "minutes60"
     assert captured["end"] == now
-    assert captured["start"] == now - timedelta(hours=25)  # (20+5)*60min
+    assert captured["start"] == now - timedelta(hours=90)  # (20*3+30)*60min
 
 
 def test_merge_aux_markets_merges_btc_close_with_gap_fill(monkeypatch):

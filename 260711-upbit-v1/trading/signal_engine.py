@@ -40,16 +40,26 @@ def _to_utc_timestamp(value) -> pd.Timestamp:
     return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
 
 _AUX_MARKET_LINE_NAME: dict[str, str] = {"KRW-BTC": "btc_close", "KRW-USDT": "usdt_close"}
-_WARMUP_BUFFER_BARS = 5
+
+# _WARMUP_MULTIPLIER/_WARMUP_BUFFER_BARS: required_bars에 붙이는 워밍업 여유분. 단순
+# +5 정도로는 부족한 지표가 있다 — CCI/VPIN은 이중 rolling/버킷 구조라 마지막 값이
+# non-NaN이 되려면 period의 약 2~2.4배가 필요하고, MACD_signal/MACD_PPO_signal은
+# create_macd_line을 거쳐 slow EMA + signal EMA 두 단계 워밍업이 누적된다(예:
+# fast=12/slow=26/signal=9면 최소 34봉 필요, required_bars는 26). 부족하면 예외도 로그도
+# 없이 해당 지표값이 NaN -> eval_group_values가 "판단불가"로 조용히 건너뛰어 실거래
+# 조건이 무시된다. required_bars*3+30은 LIVE_INDICATOR_FACTORY 39개 지표를 대표
+# 파라미터로 전수 검증해 나온 값이다(tests/test_signal_engine_warmup.py).
+_WARMUP_MULTIPLIER = 3
+_WARMUP_BUFFER_BARS = 30
 
 
 def _fetch_candles_with_warmup(
     market: str, timeframe: str, required_bars: int, now: datetime,
 ) -> pd.DataFrame:
-    """대상(또는 보조) 마켓의 캔들을 required_bars + 여유분(_WARMUP_BUFFER_BARS)만큼
-    워밍업 포함해 조회한다."""
+    """대상(또는 보조) 마켓의 캔들을 required_bars*_WARMUP_MULTIPLIER + _WARMUP_BUFFER_BARS
+    만큼 워밍업 포함해 조회한다(왜 이 공식인지는 위 상수 주석 참고)."""
     duration = timeframe_duration(timeframe)
-    start = now - (required_bars + _WARMUP_BUFFER_BARS) * duration
+    start = now - (required_bars * _WARMUP_MULTIPLIER + _WARMUP_BUFFER_BARS) * duration
     return get_candles(market, timeframe, start, now)
 
 
