@@ -181,6 +181,14 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
     if strategy is None:
         raise ValueError(f"전략을 찾을 수 없습니다: {live_strategy_id}")
 
+    # daemon은 지금 status='running'인 전략만 폴링하지만(암묵적 전제), 그 전제가 미래에
+    # 깨지면(예: 수동 일시정지 UI 추가) 'stopped'/'pending' 같은 사용자가 명시적으로 멈췄거나
+    # 아직 시작 안 한 상태의 전략도 여기로 들어올 수 있다. 그런 상태에서 판단불가가 나오면
+    # 아래 로직이 이를 'paused'로 덮어써버려 사용자 의도(정지)를 조용히 뒤집는다(최종 리뷰
+    # Minor #4) — 그래서 running/paused가 아니면 새 봉 계산·기록 없이 조기 반환한다.
+    if strategy["status"] not in ("running", "paused"):
+        return _no_new_candle_result()
+
     market = strategy["market"]
     timeframe = strategy["timeframe"]
     buy_conditions = json.loads(strategy["buy_conditions_json"])

@@ -354,6 +354,55 @@ def test_evaluate_signals_filters_position_relative_indicators_from_computation(
     assert result["sell_signal"] is False  # 포지션 없음 -> position_return_pct/holding_bars 둘 다 None -> 두 조건 다 False
 
 
+def test_evaluate_signals_skips_computation_for_stopped_strategy(monkeypatch, tmp_path):
+    """status가 'stopped'(사용자가 명시적으로 멈춘 상태)면 판단불가가 나와도 'paused'로
+    덮어써서는 안 된다(최종 리뷰 Minor #4) — 새 봉 계산·기록 없이 조기 반환해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="stopped", buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["new_candle"] is False
+    assert dbm.get_live_strategy(strategy_id)["status"] == "stopped"
+    conn = dbm._connect()
+    try:
+        rows = conn.execute(
+            "SELECT signal_type FROM signals WHERE live_strategy_id=?", (strategy_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == []
+
+
+def test_evaluate_signals_skips_computation_for_pending_strategy(monkeypatch, tmp_path):
+    """status가 'pending'(아직 시작 안 함)이어도 stopped와 동일하게 조기 반환해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="pending", buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["new_candle"] is False
+    assert dbm.get_live_strategy(strategy_id)["status"] == "pending"
+    conn = dbm._connect()
+    try:
+        rows = conn.execute(
+            "SELECT signal_type FROM signals WHERE live_strategy_id=?", (strategy_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == []
+
+
 def test_evaluate_signals_stays_paused_when_already_paused_and_still_unknown(monkeypatch, tmp_path):
     """이미 status == 'paused'인 전략이 새 봉에서도 여전히 unknown이면
     'if strategy["status"] != "paused": db.update_live_strategy_status(...)' 가드 덕분에
