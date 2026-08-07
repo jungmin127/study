@@ -118,6 +118,7 @@ def test_check_circuit_breaker_returns_true_immediately_when_already_tripped(mon
     dbm.upsert_circuit_breaker_state(strategy_id, today_kst(), 0, 1, "daily_loss_limit", "2026-08-07T00:00:00+00:00")
 
     assert check_circuit_breaker(strategy_id, risk_config) is True
+    assert dbm.get_circuit_breaker_state(strategy_id)["tripped_at"] == "2026-08-07T00:00:00+00:00"
 
 
 def test_check_circuit_breaker_ignores_missing_limits(monkeypatch, tmp_path):
