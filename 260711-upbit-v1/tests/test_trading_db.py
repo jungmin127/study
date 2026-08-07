@@ -276,3 +276,44 @@ def test_get_daily_performance_returns_none_when_not_found(monkeypatch, tmp_path
     db = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db)
     assert db.get_daily_performance(strategy_id, "2026-08-07") is None
+
+
+def test_insert_signal_creates_row_with_null_resulting_order_id(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    signal_id = db.insert_signal(
+        strategy_id, "buy", "2026-08-07T10:00:00+00:00", '{"RSI__[(\'period\', 14)]": 25.0}',
+    )
+
+    conn = db._connect()
+    try:
+        conn.row_factory = __import__("sqlite3").Row
+        row = conn.execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
+    finally:
+        conn.close()
+
+    assert row["live_strategy_id"] == strategy_id
+    assert row["signal_type"] == "buy"
+    assert row["candle_time"] == "2026-08-07T10:00:00+00:00"
+    assert row["resulting_order_id"] is None
+    assert row["skip_reason"] is None
+    assert row["triggered_at"] is not None
+
+
+def test_insert_signal_stores_skip_reason(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    signal_id = db.insert_signal(
+        strategy_id, "sell", "2026-08-07T10:00:00+00:00", "{}", skip_reason="unknown",
+    )
+
+    conn = db._connect()
+    try:
+        conn.row_factory = __import__("sqlite3").Row
+        row = conn.execute("SELECT skip_reason FROM signals WHERE id = ?", (signal_id,)).fetchone()
+    finally:
+        conn.close()
+
+    assert row["skip_reason"] == "unknown"

@@ -313,3 +313,22 @@ def upsert_daily_performance(
         conn.commit()
     finally:
         conn.close()
+
+
+def insert_signal(
+    live_strategy_id: str, signal_type: str, candle_time: str,
+    indicator_snapshot_json: str, skip_reason: str | None = None,
+) -> str:
+    signal_id = str(uuid.uuid4())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO signals "
+            "(id, live_strategy_id, signal_type, candle_time, indicator_snapshot_json, skip_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (signal_id, live_strategy_id, signal_type, candle_time, indicator_snapshot_json, skip_reason),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return signal_id
