@@ -180,3 +180,63 @@ def update_live_strategy_last_candle(live_strategy_id: str, candle_time: str) ->
         conn.commit()
     finally:
         conn.close()
+
+
+def insert_position(live_strategy_id: str, market: str, entry_price: float, entry_qty: float) -> str:
+    position_id = str(uuid.uuid4())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO positions "
+            "(id, live_strategy_id, market, status, entry_price, entry_qty, entry_time) "
+            "VALUES (?, ?, ?, 'open', ?, ?, datetime('now'))",
+            (position_id, live_strategy_id, market, entry_price, entry_qty),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return position_id
+
+
+def get_position(position_id: str) -> dict | None:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM positions WHERE id = ?", (position_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def close_position_row(
+    position_id: str, exit_price: float, exit_qty: float,
+    realized_pnl: float, realized_pnl_pct: float, close_reason: str,
+) -> None:
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE positions SET status='closed', exit_price=?, exit_qty=?, "
+            "exit_time=datetime('now'), realized_pnl=?, realized_pnl_pct=?, close_reason=? "
+            "WHERE id=?",
+            (exit_price, exit_qty, realized_pnl, realized_pnl_pct, close_reason, position_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"포지션을 찾을 수 없습니다: {position_id}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_open_position(live_strategy_id: str) -> dict | None:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM positions WHERE live_strategy_id = ? AND status = 'open'",
+            (live_strategy_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()

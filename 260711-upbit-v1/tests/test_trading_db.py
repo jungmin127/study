@@ -135,3 +135,58 @@ def test_update_live_strategy_last_candle(monkeypatch, tmp_path):
     db.update_live_strategy_last_candle(strategy_id, "2026-08-07T10:00:00+00:00")
 
     assert db.get_live_strategy(strategy_id)["last_processed_candle_time"] == "2026-08-07T10:00:00+00:00"
+
+
+def test_insert_position_and_get_open_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    open_position = db.get_open_position(strategy_id)
+    assert open_position["id"] == position_id
+    assert open_position["status"] == "open"
+    assert open_position["entry_price"] == 100_000_000.0
+    assert open_position["entry_qty"] == 0.01
+    assert open_position["entry_time"] is not None
+
+
+def test_get_open_position_returns_none_when_no_open_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    assert db.get_open_position(strategy_id) is None
+
+
+def test_get_position_by_id(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    result = db.get_position(position_id)
+
+    assert result["id"] == position_id
+    assert result["live_strategy_id"] == strategy_id
+
+
+def test_close_position_row_updates_fields_and_leaves_open_position_none(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    db.close_position_row(position_id, 101_000_000.0, 0.01, 9500.0, 0.95, "signal")
+
+    closed = db.get_position(position_id)
+    assert closed["status"] == "closed"
+    assert closed["exit_price"] == 101_000_000.0
+    assert closed["exit_qty"] == 0.01
+    assert closed["realized_pnl"] == 9500.0
+    assert closed["realized_pnl_pct"] == 0.95
+    assert closed["close_reason"] == "signal"
+    assert closed["exit_time"] is not None
+    assert db.get_open_position(strategy_id) is None
+
+
+def test_close_position_row_raises_when_position_not_found(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    with pytest.raises(ValueError):
+        db.close_position_row("nonexistent-id", 1.0, 1.0, 0.0, 0.0, "signal")
