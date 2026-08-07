@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import trading.db as db
 from tests.trading_db_fixtures import insert_live_strategy
-from trading.risk_manager import record_trade_result, today_kst
+from trading.risk_manager import record_trade_result, today_kst, check_circuit_breaker
 
 
 def _fresh_db(monkeypatch, tmp_path):
@@ -69,3 +69,62 @@ def test_record_trade_result_resets_consecutive_losses_on_win(monkeypatch, tmp_p
 
     cb = dbm.get_circuit_breaker_state(strategy_id)
     assert cb["consecutive_losses"] == 0
+
+
+def test_check_circuit_breaker_returns_false_when_within_limits(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    risk_config = {"daily_loss_limit_pct": -5.0, "consecutive_loss_limit": 3}
+
+    record_trade_result(strategy_id, realized_pnl=1000.0, capital_after=101_000.0)
+
+    assert check_circuit_breaker(strategy_id, risk_config) is False
+    assert dbm.get_live_strategy(strategy_id)["status"] != "paused"
+
+
+def test_check_circuit_breaker_trips_on_daily_loss_limit(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running")
+    risk_config = {"daily_loss_limit_pct": -5.0, "consecutive_loss_limit": 10}
+
+    record_trade_result(strategy_id, realized_pnl=-6000.0, capital_after=94_000.0)
+
+    assert check_circuit_breaker(strategy_id, risk_config) is True
+    cb = dbm.get_circuit_breaker_state(strategy_id)
+    assert cb["tripped"] == 1
+    assert cb["tripped_reason"] == "daily_loss_limit"
+    assert cb["tripped_at"] is not None
+    assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
+
+
+def test_check_circuit_breaker_trips_on_consecutive_loss_limit(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running")
+    risk_config = {"daily_loss_limit_pct": -50.0, "consecutive_loss_limit": 2}
+
+    record_trade_result(strategy_id, realized_pnl=-100.0, capital_after=99_900.0)
+    record_trade_result(strategy_id, realized_pnl=-100.0, capital_after=99_800.0)
+
+    assert check_circuit_breaker(strategy_id, risk_config) is True
+    cb = dbm.get_circuit_breaker_state(strategy_id)
+    assert cb["tripped_reason"] == "consecutive_loss_limit"
+    assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
+
+
+def test_check_circuit_breaker_returns_true_immediately_when_already_tripped(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="paused")
+    risk_config = {"daily_loss_limit_pct": -5.0, "consecutive_loss_limit": 3}
+    dbm.upsert_circuit_breaker_state(strategy_id, today_kst(), 0, 1, "daily_loss_limit", "2026-08-07T00:00:00+00:00")
+
+    assert check_circuit_breaker(strategy_id, risk_config) is True
+
+
+def test_check_circuit_breaker_ignores_missing_limits(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    risk_config: dict = {}  # 한도 미설정
+
+    record_trade_result(strategy_id, realized_pnl=-999_999.0, capital_after=1.0)
+
+    assert check_circuit_breaker(strategy_id, risk_config) is False

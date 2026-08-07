@@ -65,3 +65,44 @@ def record_trade_result(live_strategy_id: str, realized_pnl: float, capital_afte
     db.upsert_circuit_breaker_state(
         live_strategy_id, trading_date, consecutive_losses, tripped, tripped_reason, tripped_at,
     )
+
+
+def check_circuit_breaker(live_strategy_id: str, risk_config: dict) -> bool:
+    """오늘(KST)의 daily_performance.realized_pnl_pct와
+    circuit_breaker_state.consecutive_losses를 risk_config의 한도와 비교한다. 이미
+    tripped=1이면 즉시 True. 새로 한도를 넘었으면 circuit_breaker_state.tripped=1 +
+    tripped_reason + tripped_at을 기록하고 live_strategies.status를 'paused'로 바꾼 뒤
+    True를 반환한다(설계 스펙 결정 3 — 판정과 반응을 하나의 함수 안에서 원자적으로 처리).
+    한도 안이면 False."""
+    trading_date = today_kst()
+    cb_state = db.get_circuit_breaker_state(live_strategy_id)
+    is_today = cb_state is not None and cb_state["trading_date"] == trading_date
+
+    if is_today and cb_state["tripped"]:
+        return True
+
+    daily = db.get_daily_performance(live_strategy_id, trading_date)
+    consecutive_losses = cb_state["consecutive_losses"] if is_today else 0
+
+    daily_loss_limit_pct = risk_config.get("daily_loss_limit_pct")
+    consecutive_loss_limit = risk_config.get("consecutive_loss_limit")
+
+    tripped_reason = None
+    if (
+        daily is not None
+        and daily_loss_limit_pct is not None
+        and daily["realized_pnl_pct"] <= daily_loss_limit_pct
+    ):
+        tripped_reason = "daily_loss_limit"
+    elif consecutive_loss_limit is not None and consecutive_losses >= consecutive_loss_limit:
+        tripped_reason = "consecutive_loss_limit"
+
+    if tripped_reason is None:
+        return False
+
+    db.upsert_circuit_breaker_state(
+        live_strategy_id, trading_date, consecutive_losses, 1, tripped_reason,
+        datetime.now(_KST).isoformat(),
+    )
+    db.update_live_strategy_status(live_strategy_id, "paused")
+    return True
