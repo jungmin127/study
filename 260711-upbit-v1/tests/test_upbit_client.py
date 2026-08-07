@@ -89,3 +89,92 @@ async def test_token_bucket_refills_over_time():
 async def test_token_bucket_default_capacity_equals_rate():
     bucket = TokenBucket(rate_per_sec=5)
     assert bucket._capacity == 5
+
+
+import httpx
+
+from trading.upbit_client import get_accounts
+
+
+def _mock_async_client(handler) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_get_accounts_returns_parsed_json(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/accounts"
+        assert request.headers["Authorization"].startswith("Bearer ")
+        return httpx.Response(200, json=[{"currency": "KRW", "balance": "100000.0"}])
+
+    async with _mock_async_client(handler) as client:
+        result = await get_accounts(client=client)
+
+    assert result == [{"currency": "KRW", "balance": "100000.0"}]
+
+
+async def test_get_accounts_retries_on_429_then_succeeds(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+    monkeypatch.setattr(upbit_client, "RATE_LIMIT_BACKOFF_SECONDS", 0.0)
+    calls = {"count": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(429)
+        return httpx.Response(200, json=[])
+
+    async with _mock_async_client(handler) as client:
+        result = await get_accounts(client=client)
+
+    assert calls["count"] == 2
+    assert result == []
+
+
+async def test_get_accounts_raises_after_exhausting_retries(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+    monkeypatch.setattr(upbit_client, "RATE_LIMIT_BACKOFF_SECONDS", 0.0)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429)
+
+    async with _mock_async_client(handler) as client:
+        with pytest.raises(RuntimeError):
+            await get_accounts(client=client)
+
+
+async def test_get_accounts_raises_on_http_error(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": "internal"}})
+
+    async with _mock_async_client(handler) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await get_accounts(client=client)
+
+
+async def test_get_accounts_goes_through_default_bucket(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+    calls = {"count": 0}
+
+    class _SpyBucket:
+        async def acquire(self) -> None:
+            calls["count"] += 1
+
+    monkeypatch.setattr(upbit_client, "_DEFAULT_BUCKET", _SpyBucket())
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    async with _mock_async_client(handler) as client:
+        await get_accounts(client=client)
+
+    assert calls["count"] == 1

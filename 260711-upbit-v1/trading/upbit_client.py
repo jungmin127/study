@@ -89,3 +89,46 @@ def _build_jwt_headers(query: dict | None = None) -> dict[str, str]:
 
     token = jwt.encode(payload, secret_key)
     return {"Authorization": f"Bearer {token}"}
+
+
+_DEFAULT_BUCKET = TokenBucket(rate_per_sec=30)
+_ORDER_BUCKET = TokenBucket(rate_per_sec=8)
+
+
+async def _request(
+    method: str,
+    path: str,
+    *,
+    params: dict | None = None,
+    bucket: TokenBucket,
+    client: httpx.AsyncClient | None = None,
+) -> dict | list:
+    """업비트 Private REST 호출 공통 코어. query_hash는 GET/POST/DELETE 관계없이 params로
+    계산하고, 실제 전송은 GET/DELETE면 쿼리스트링으로 POST면 JSON 바디로 한다(업비트 인증
+    방식의 표준 패턴). bucket.acquire()로 선제적으로 스로틀링한 뒤에도 429가 오면(클럭 오차,
+    다른 프로세스의 동시 사용 등) 방어적으로 재시도한다."""
+    headers = _build_jwt_headers(params)
+    close_client = client is None
+    client = client or httpx.AsyncClient(timeout=10)
+    url = f"{UPBIT_BASE_URL}{path}"
+
+    try:
+        await bucket.acquire()
+        for attempt in range(RETRY_ATTEMPTS):
+            if method == "POST":
+                resp = await client.request(method, url, json=params, headers=headers)
+            else:
+                resp = await client.request(method, url, params=params, headers=headers)
+            if resp.status_code == 429:
+                await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        raise RuntimeError(f"업비트 API 호출 실패 (429 재시도 소진): {method} {path}")
+    finally:
+        if close_client:
+            await client.aclose()
+
+
+async def get_accounts(*, client: httpx.AsyncClient | None = None) -> list[dict]:
+    return await _request("GET", "/accounts", bucket=_DEFAULT_BUCKET, client=client)
