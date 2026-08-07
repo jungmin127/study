@@ -192,6 +192,21 @@ def test_close_position_row_raises_when_position_not_found(monkeypatch, tmp_path
         db.close_position_row("nonexistent-id", 1.0, 1.0, 0.0, 0.0, "signal")
 
 
+def test_close_position_row_raises_on_double_close(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+    db.close_position_row(position_id, 101_000_000.0, 0.01, 9500.0, 0.95, "signal")
+
+    with pytest.raises(ValueError):
+        db.close_position_row(position_id, 102_000_000.0, 0.01, 19500.0, 1.95, "signal")
+
+    # 두 번째 호출이 실패했으므로 첫 번째 호출의 값이 그대로 유지돼야 함
+    closed = db.get_position(position_id)
+    assert closed["exit_price"] == 101_000_000.0
+    assert closed["realized_pnl"] == 9500.0
+
+
 def test_circuit_breaker_state_upsert_then_get(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db)

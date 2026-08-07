@@ -219,11 +219,11 @@ def close_position_row(
         cursor = conn.execute(
             "UPDATE positions SET status='closed', exit_price=?, exit_qty=?, "
             "exit_time=datetime('now'), realized_pnl=?, realized_pnl_pct=?, close_reason=? "
-            "WHERE id=?",
+            "WHERE id=? AND status='open'",
             (exit_price, exit_qty, realized_pnl, realized_pnl_pct, close_reason, position_id),
         )
         if cursor.rowcount == 0:
-            raise ValueError(f"포지션을 찾을 수 없습니다: {position_id}")
+            raise ValueError(f"포지션을 찾을 수 없거나 이미 종료된 상태입니다: {position_id}")
         conn.commit()
     finally:
         conn.close()

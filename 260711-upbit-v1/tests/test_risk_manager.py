@@ -129,3 +129,32 @@ def test_check_circuit_breaker_ignores_missing_limits(monkeypatch, tmp_path):
     record_trade_result(strategy_id, realized_pnl=-999_999.0, capital_after=1.0)
 
     assert check_circuit_breaker(strategy_id, risk_config) is False
+
+
+def test_record_trade_result_resets_stale_circuit_breaker_state_from_previous_day(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    dbm.upsert_circuit_breaker_state(
+        strategy_id, "2020-01-01", 5, 1, "daily_loss_limit", "2020-01-01T00:00:00+09:00",
+    )
+
+    record_trade_result(strategy_id, realized_pnl=-100.0, capital_after=99_900.0)
+
+    cb = dbm.get_circuit_breaker_state(strategy_id)
+    assert cb["trading_date"] == today_kst()
+    assert cb["consecutive_losses"] == 1  # 어제의 5에서 이어지지 않고 리셋 후 이번 거래만 반영
+    assert cb["tripped"] == 0  # 어제 트립 상태가 오늘로 안 넘어옴
+    assert cb["tripped_reason"] is None
+    assert cb["tripped_at"] is None
+
+
+def test_check_circuit_breaker_does_not_treat_stale_prior_day_trip_as_tripped_today(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    dbm.upsert_circuit_breaker_state(
+        strategy_id, "2020-01-01", 5, 1, "daily_loss_limit", "2020-01-01T00:00:00+09:00",
+    )
+    risk_config = {"daily_loss_limit_pct": -5.0, "consecutive_loss_limit": 10}
+
+    # 오늘자 daily_performance가 아직 없으므로(오늘 첫 거래 전) 한도 내로 판정되어야 함
+    assert check_circuit_breaker(strategy_id, risk_config) is False
