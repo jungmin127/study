@@ -28,7 +28,7 @@ def _endpoint_for_timeframe(timeframe: str) -> str:
     raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
 
 
-def _timeframe_duration(timeframe: str) -> timedelta:
+def timeframe_duration(timeframe: str) -> timedelta:
     if timeframe == "days":
         return timedelta(days=1)
     if timeframe.startswith("minutes"):
@@ -187,7 +187,7 @@ def get_candles(market: str, timeframe: str, start: datetime, end: datetime) -> 
             .reset_index(drop=True)
         )
 
-    duration = _timeframe_duration(timeframe)
+    duration = timeframe_duration(timeframe)
     now = datetime.now(timezone.utc)
     closed = cached[cached["candle_time"] + duration <= now].reset_index(drop=True)
 

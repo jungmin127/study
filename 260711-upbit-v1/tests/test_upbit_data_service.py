@@ -328,10 +328,10 @@ def test_get_candles_excludes_unclosed_candle_from_result_and_cache(monkeypatch,
 
 
 def test_timeframe_duration():
-    assert uds._timeframe_duration("days") == timedelta(days=1)
-    assert uds._timeframe_duration("minutes60") == timedelta(minutes=60)
+    assert uds.timeframe_duration("days") == timedelta(days=1)
+    assert uds.timeframe_duration("minutes60") == timedelta(minutes=60)
     with pytest.raises(ValueError):
-        uds._timeframe_duration("weeks")
+        uds.timeframe_duration("weeks")
 
 
 def test_get_krw_markets_filters_to_krw_prefix(monkeypatch):
