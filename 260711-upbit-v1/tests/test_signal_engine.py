@@ -57,3 +57,51 @@ def test_merge_aux_markets_uses_own_close_when_aux_market_is_target_market():
         df, {"KRW-BTC"}, "KRW-BTC", "minutes60", 10, datetime.now(timezone.utc),
     )
     assert list(result["btc_close"]) == [100.0, 101.0]
+
+
+def test_populate_b_group_columns_fills_fear_greed_only_on_last_row(monkeypatch):
+    df = pd.DataFrame({
+        "candle_time": pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC"),
+        "close": [1.0, 2.0, 3.0],
+    })
+    monkeypatch.setattr(signal_engine, "fetch_live_fear_greed_value", lambda now=None: 42.0)
+
+    result = signal_engine._populate_b_group_columns(
+        df, "KRW-BTC", "minutes60", {"FEAR_GREED_CMC"}, datetime.now(timezone.utc),
+    )
+
+    assert result["fear_greed_value"].iloc[-1] == 42.0
+    assert result["fear_greed_value"].iloc[:-1].isna().all()
+
+
+def test_populate_b_group_columns_leaves_nan_when_fetch_fails(monkeypatch):
+    df = pd.DataFrame({
+        "candle_time": pd.date_range("2026-01-01", periods=2, freq="h", tz="UTC"),
+        "close": [1.0, 2.0],
+    })
+    monkeypatch.setattr(signal_engine, "fetch_live_funding_rate_value", lambda market, now=None: None)
+
+    result = signal_engine._populate_b_group_columns(
+        df, "KRW-ETH", "minutes60", {"FUNDING_RATE"}, datetime.now(timezone.utc),
+    )
+
+    assert result["funding_rate_value"].isna().all()
+
+
+def test_populate_b_group_columns_computes_korea_premium_from_binance_and_usdt_close(monkeypatch):
+    df = pd.DataFrame({
+        "candle_time": pd.date_range("2026-01-01", periods=2, freq="h", tz="UTC"),
+        "close": [100_000_000.0, 101_000_000.0],
+        "usdt_close": [1400.0, 1405.0],
+    })
+    monkeypatch.setattr(
+        signal_engine, "fetch_live_binance_close", lambda market, timeframe, now=None: 70000.0,
+    )
+
+    result = signal_engine._populate_b_group_columns(
+        df, "KRW-BTC", "minutes60", {"KOREA_PREMIUM"}, datetime.now(timezone.utc),
+    )
+
+    expected = (101_000_000.0 / (70000.0 * 1405.0) - 1) * 100
+    assert result["korea_premium_value"].iloc[-1] == pytest.approx(expected)
+    assert pd.isna(result["korea_premium_value"].iloc[0])

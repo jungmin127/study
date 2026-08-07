@@ -15,6 +15,13 @@ import pandas as pd
 
 from upbit_data_service import get_candles, timeframe_duration
 
+from trading.live_indicators import (
+    compute_korea_premium_value,
+    fetch_live_binance_close,
+    fetch_live_fear_greed_value,
+    fetch_live_funding_rate_value,
+)
+
 _AUX_MARKET_LINE_NAME: dict[str, str] = {"KRW-BTC": "btc_close", "KRW-USDT": "usdt_close"}
 _WARMUP_BUFFER_BARS = 5
 
@@ -48,4 +55,37 @@ def _merge_aux_markets(
             on="candle_time", how="left",
         )
         df[line_name] = df[line_name].ffill().bfill()
+    return df
+
+
+def _populate_b_group_columns(
+    df: pd.DataFrame, market: str, timeframe: str, indicator_names: set[str], now: datetime,
+) -> pd.DataFrame:
+    """FEAR_GREED_CMC/FUNDING_RATE/KOREA_PREMIUM이 조건 트리에 있으면 fetch_live_*()로
+    현재값을 조회해 df의 마지막 행에만 채운다(설계 스펙 결정1). 조회 실패/스테일이면 None이
+    그대로 남아 컬럼이 NaN인 채로 유지되고, eval_group_values가 이를 unknown으로 처리한다
+    (스펙 결정8) — 이 함수는 별도 방어코드를 두지 않는다."""
+    last_idx = df.index[-1]
+
+    if "FEAR_GREED_CMC" in indicator_names:
+        df = df.assign(fear_greed_value=float("nan"))
+        value = fetch_live_fear_greed_value(now=now)
+        if value is not None:
+            df.loc[last_idx, "fear_greed_value"] = value
+
+    if "FUNDING_RATE" in indicator_names:
+        df = df.assign(funding_rate_value=float("nan"))
+        value = fetch_live_funding_rate_value(market, now=now)
+        if value is not None:
+            df.loc[last_idx, "funding_rate_value"] = value
+
+    if "KOREA_PREMIUM" in indicator_names:
+        df = df.assign(korea_premium_value=float("nan"))
+        binance_close = fetch_live_binance_close(market, timeframe, now=now)
+        if binance_close is not None and "usdt_close" in df.columns:
+            df.loc[last_idx, "binance_close"] = binance_close
+            df.loc[last_idx, "korea_premium_value"] = compute_korea_premium_value(
+                df.loc[[last_idx]]
+            ).iloc[0]
+
     return df
