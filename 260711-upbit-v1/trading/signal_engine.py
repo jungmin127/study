@@ -32,7 +32,7 @@ from trading.live_indicators import (
 )
 from trading.position_manager import get_open_position
 import trading.db as db
-from trading.risk_manager import today_kst
+from trading.risk_manager import today_kst, is_circuit_tripped_today
 
 
 def _to_utc_timestamp(value) -> pd.Timestamp:
@@ -239,15 +239,26 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
             db.update_live_strategy_status(live_strategy_id, "paused")
         paused = True
     elif strategy["status"] == "paused":
-        cb_state = db.get_circuit_breaker_state(live_strategy_id)
-        tripped_today = (
-            cb_state is not None
-            and cb_state["trading_date"] == today_kst()
-            and cb_state["tripped"]
-        )
-        if not tripped_today:
+        if not is_circuit_tripped_today(live_strategy_id):
             db.update_live_strategy_status(live_strategy_id, "running")
             resumed = True
+            # circuit_breaker_state.resumed_at을 채운다 — 재개가 실제로 일어나는 유일한
+            # 지점이 여기다(risk_manager.py 어디에도 resumed_at을 쓰는 곳이 없었다, 최종
+            # 리뷰 Important #3). upsert_circuit_breaker_state는 UPSERT라 다른 필드를
+            # 실수로 지우지 않도록 기존 cb_state 값을 그대로 넘긴다(cb_state가 아예 없으면
+            # 아직 서킷브레이커 이력이 없는 전략이므로 오늘 날짜의 안전한 기본값을 쓴다).
+            cb_state = db.get_circuit_breaker_state(live_strategy_id)
+            resumed_at = datetime.now(timezone.utc).isoformat()
+            if cb_state is not None:
+                db.upsert_circuit_breaker_state(
+                    live_strategy_id, cb_state["trading_date"], cb_state["consecutive_losses"],
+                    cb_state["tripped"], cb_state["tripped_reason"], cb_state["tripped_at"],
+                    resumed_at,
+                )
+            else:
+                db.upsert_circuit_breaker_state(
+                    live_strategy_id, today_kst(), 0, 0, None, None, resumed_at,
+                )
 
     db.update_live_strategy_last_candle(live_strategy_id, candle_time_str)
 

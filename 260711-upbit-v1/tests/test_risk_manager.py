@@ -2,7 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 import trading.db as db
 from tests.trading_db_fixtures import insert_live_strategy
-from trading.risk_manager import record_trade_result, today_kst, check_circuit_breaker
+from trading.risk_manager import (
+    record_trade_result, today_kst, check_circuit_breaker, is_circuit_tripped_today,
+)
 
 
 def _fresh_db(monkeypatch, tmp_path):
@@ -146,6 +148,41 @@ def test_record_trade_result_resets_stale_circuit_breaker_state_from_previous_da
     assert cb["tripped"] == 0  # 어제 트립 상태가 오늘로 안 넘어옴
     assert cb["tripped_reason"] is None
     assert cb["tripped_at"] is None
+
+
+def test_is_circuit_tripped_today_returns_true_when_tripped_today(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    dbm.upsert_circuit_breaker_state(
+        strategy_id, today_kst(), 3, 1, "daily_loss_limit", "2026-08-07T00:00:00+09:00",
+    )
+
+    assert is_circuit_tripped_today(strategy_id) is True
+
+
+def test_is_circuit_tripped_today_returns_false_when_not_tripped(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    dbm.upsert_circuit_breaker_state(strategy_id, today_kst(), 0, 0, None, None)
+
+    assert is_circuit_tripped_today(strategy_id) is False
+
+
+def test_is_circuit_tripped_today_returns_false_when_tripped_but_different_date(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    dbm.upsert_circuit_breaker_state(
+        strategy_id, "2020-01-01", 5, 1, "daily_loss_limit", "2020-01-01T00:00:00+09:00",
+    )
+
+    assert is_circuit_tripped_today(strategy_id) is False
+
+
+def test_is_circuit_tripped_today_returns_false_when_no_circuit_breaker_row_exists(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+
+    assert is_circuit_tripped_today(strategy_id) is False
 
 
 def test_check_circuit_breaker_does_not_treat_stale_prior_day_trip_as_tripped_today(monkeypatch, tmp_path):

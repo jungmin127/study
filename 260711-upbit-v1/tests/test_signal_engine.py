@@ -280,6 +280,34 @@ def test_evaluate_signals_resumes_paused_strategy_when_computable_and_not_circui
 
     assert result["resumed"] is True
     assert dbm.get_live_strategy(strategy_id)["status"] == "running"
+    cb_state = dbm.get_circuit_breaker_state(strategy_id)
+    assert cb_state is not None
+    assert cb_state["resumed_at"] is not None
+
+
+def test_evaluate_signals_resume_fills_resumed_at_without_clobbering_other_circuit_breaker_fields(monkeypatch, tmp_path):
+    """재개 시 upsert_circuit_breaker_state가 resumed_at만 새로 채우고 consecutive_losses/
+    tripped 등 기존 필드는 그대로 유지해야 한다(최종 리뷰 Important #3) — UPSERT라서
+    다른 필드를 실수로 지우면(예: consecutive_losses를 0으로) 서킷브레이커 판정이
+    조용히 어긋난다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="paused", buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    # 트립되진 않았지만(오늘, tripped=0) 연속손실 카운트가 남아있는 상태.
+    dbm.upsert_circuit_breaker_state(strategy_id, today_kst(), 2, 0, None, None)
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["resumed"] is True
+    cb_state = dbm.get_circuit_breaker_state(strategy_id)
+    assert cb_state["consecutive_losses"] == 2  # 재개 upsert가 실수로 리셋하지 않았는지 확인
+    assert cb_state["tripped"] == 0
+    assert cb_state["trading_date"] == today_kst()
+    assert cb_state["resumed_at"] is not None
 
 
 def test_evaluate_signals_does_not_resume_when_circuit_breaker_tripped_today(monkeypatch, tmp_path):

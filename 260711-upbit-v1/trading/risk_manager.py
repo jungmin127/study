@@ -67,19 +67,30 @@ def record_trade_result(live_strategy_id: str, realized_pnl: float, capital_afte
     )
 
 
+def is_circuit_tripped_today(live_strategy_id: str) -> bool:
+    """오늘(KST) circuit_breaker_state.tripped 여부만 판정한다 — check_circuit_breaker()의
+    77-82행(리팩터 전 기준)과 같은 판정 로직이지만 부수효과가 전혀 없다(DB에 아무것도
+    쓰지 않는다). check_circuit_breaker()는 트립 기록+status 변경이라는 부수효과가 있어
+    "그냥 오늘 트립됐는지만 조회하고 싶다"는 용도(예: signal_engine.py의 재개 판정)에
+    그대로 재사용할 수 없어서 별도로 뺐다."""
+    trading_date = today_kst()
+    cb_state = db.get_circuit_breaker_state(live_strategy_id)
+    return cb_state is not None and cb_state["trading_date"] == trading_date and bool(cb_state["tripped"])
+
+
 def check_circuit_breaker(live_strategy_id: str, risk_config: dict) -> bool:
     """오늘(KST)의 daily_performance.realized_pnl_pct와
     circuit_breaker_state.consecutive_losses를 risk_config의 한도와 비교한다. 이미
-    tripped=1이면 즉시 True. 새로 한도를 넘었으면 circuit_breaker_state.tripped=1 +
-    tripped_reason + tripped_at을 기록하고 live_strategies.status를 'paused'로 바꾼 뒤
-    True를 반환한다(설계 스펙 결정 3 — 판정과 반응을 하나의 함수 안에서 원자적으로 처리).
-    한도 안이면 False."""
+    tripped=1이면 즉시 True(판정은 is_circuit_tripped_today()에 위임 — 로직 중복 방지).
+    새로 한도를 넘었으면 circuit_breaker_state.tripped=1 + tripped_reason + tripped_at을
+    기록하고 live_strategies.status를 'paused'로 바꾼 뒤 True를 반환한다(설계 스펙 결정
+    3 — 판정과 반응을 하나의 함수 안에서 원자적으로 처리). 한도 안이면 False."""
+    if is_circuit_tripped_today(live_strategy_id):
+        return True
+
     trading_date = today_kst()
     cb_state = db.get_circuit_breaker_state(live_strategy_id)
     is_today = cb_state is not None and cb_state["trading_date"] == trading_date
-
-    if is_today and cb_state["tripped"]:
-        return True
 
     daily = db.get_daily_performance(live_strategy_id, trading_date)
     consecutive_losses = cb_state["consecutive_losses"] if is_today else 0
