@@ -287,3 +287,67 @@ def test_evaluate_signals_does_not_resume_when_circuit_breaker_tripped_today(mon
 
     assert result["resumed"] is False
     assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
+
+
+def test_evaluate_signals_filters_position_relative_indicators_from_computation(monkeypatch, tmp_path):
+    """collect_blocks(buy)+collect_blocks(sell)에서 POSITION_RELATIVE_INDICATORS를 걸러내지
+    않으면 _compute_indicator_values가 LIVE_INDICATOR_FACTORY에 없는 STOP_LOSS_PCT/
+    HOLDING_PERIOD_BARS를 만나 ValueError('알 수 없는 지표')를 던진다(리뷰 Important #1).
+    포지션이 없어 position_return_pct/position_holding_bars가 둘 다 None이면
+    eval_group_values는 이 리프들을 unknown이 아니라 False로 취급한다(engine/condition_tree.py의
+    eval_group_values: position_*_pct/bars가 None이면 결과에 False를 append, continue로 건너뛰지
+    않음) — 따라서 OR([False, False]) = False가 되어 sell_signal은 False이지 None이 아니다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, _ = _strategy_conditions()
+    sell_json = json.dumps({"type": "OR", "conditions": [
+        {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<", "threshold": -5},
+        {"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">", "threshold": 100},
+    ]})
+    strategy_id = insert_live_strategy(
+        dbm, buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["new_candle"] is True
+    assert result["sell_signal"] is False  # 포지션 없음 -> position_return_pct/holding_bars 둘 다 None -> 두 조건 다 False
+
+
+def test_evaluate_signals_stays_paused_when_already_paused_and_still_unknown(monkeypatch, tmp_path):
+    """이미 status == 'paused'인 전략이 새 봉에서도 여전히 unknown이면
+    'if strategy["status"] != "paused": db.update_live_strategy_status(...)' 가드 덕분에
+    불필요한 UPDATE 없이 paused를 유지해야 한다(리뷰 Important #2). 이 가드가 반대로
+    뒤집혀도(== 로) 이 테스트는 여전히 status == 'paused'를 관찰하므로(값 자체는 이미
+    paused라 결과가 같아 보일 수 있어) 핵심은 update_live_strategy_status가 불필요하게
+    호출되지 않는다는 것이지만, 결과 상태값으로 회귀를 검증하는 것만으로도 가드가 완전히
+    깨져 다른 상태로 바뀌는 것은 잡아낼 수 있다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json = json.dumps({"type": "AND", "conditions": [
+        {"indicator": "FUNDING_RATE", "params": {}, "operator": "<", "threshold": -0.01},
+    ]})
+    _, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="paused", buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+    monkeypatch.setattr(signal_engine, "fetch_live_funding_rate_value", lambda market, now=None: None)
+    status_update_calls = []
+    monkeypatch.setattr(
+        db, "update_live_strategy_status",
+        lambda live_strategy_id, status: status_update_calls.append(status),
+    )
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["buy_signal"] is None
+    assert result["paused"] is True
+    assert result["resumed"] is False
+    assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
+    # 가드(`if strategy["status"] != "paused": ...`)가 지켜졌다면 이미 paused인 전략에는
+    # update_live_strategy_status가 아예 호출되지 않아야 한다(불필요한 UPDATE 회피).
+    # 가드가 `==`로 뒤집히면 이 값 자체는 여전히 "paused"라 status 필드만 보는 assert로는
+    # 못 잡으므로, 호출 여부 자체를 스파이로 검증한다.
+    assert status_update_calls == []
