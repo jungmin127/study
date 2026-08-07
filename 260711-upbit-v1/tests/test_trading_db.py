@@ -190,3 +190,74 @@ def test_close_position_row_raises_when_position_not_found(monkeypatch, tmp_path
     db = _fresh_db(monkeypatch, tmp_path)
     with pytest.raises(ValueError):
         db.close_position_row("nonexistent-id", 1.0, 1.0, 0.0, 0.0, "signal")
+
+
+def test_circuit_breaker_state_upsert_then_get(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    db.upsert_circuit_breaker_state(strategy_id, "2026-08-07", 2, 0)
+    result = db.get_circuit_breaker_state(strategy_id)
+
+    assert result["trading_date"] == "2026-08-07"
+    assert result["consecutive_losses"] == 2
+    assert result["tripped"] == 0
+    assert result["tripped_reason"] is None
+
+
+def test_circuit_breaker_state_upsert_overwrites_existing_row(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    db.upsert_circuit_breaker_state(strategy_id, "2026-08-07", 1, 0)
+    db.upsert_circuit_breaker_state(
+        strategy_id, "2026-08-07", 3, 1, "consecutive_loss_limit", "2026-08-07T12:00:00+00:00",
+    )
+
+    result = db.get_circuit_breaker_state(strategy_id)
+    assert result["consecutive_losses"] == 3
+    assert result["tripped"] == 1
+    assert result["tripped_reason"] == "consecutive_loss_limit"
+
+
+def test_get_circuit_breaker_state_returns_none_when_not_found(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    assert db.get_circuit_breaker_state(strategy_id) is None
+
+
+def test_daily_performance_upsert_then_get(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    db.upsert_daily_performance(
+        strategy_id, "2026-08-07", 5000.0, 5.0, 1, 1, 0, 100_000.0, 105_000.0,
+    )
+    result = db.get_daily_performance(strategy_id, "2026-08-07")
+
+    assert result["realized_pnl"] == 5000.0
+    assert result["realized_pnl_pct"] == 5.0
+    assert result["trade_count"] == 1
+    assert result["win_count"] == 1
+    assert result["loss_count"] == 0
+    assert result["starting_balance"] == 100_000.0
+    assert result["ending_balance"] == 105_000.0
+
+
+def test_daily_performance_upsert_preserves_starting_balance_on_second_call(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    db.upsert_daily_performance(strategy_id, "2026-08-07", 5000.0, 5.0, 1, 1, 0, 100_000.0, 105_000.0)
+    db.upsert_daily_performance(strategy_id, "2026-08-07", 3000.0, 3.0, 2, 1, 1, 999_999.0, 103_000.0)
+
+    result = db.get_daily_performance(strategy_id, "2026-08-07")
+    assert result["starting_balance"] == 100_000.0  # 두 번째 호출의 999_999.0으로 덮어써지지 않음
+    assert result["ending_balance"] == 103_000.0
+    assert result["trade_count"] == 2
+
+
+def test_get_daily_performance_returns_none_when_not_found(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    assert db.get_daily_performance(strategy_id, "2026-08-07") is None

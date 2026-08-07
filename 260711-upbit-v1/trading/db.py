@@ -240,3 +240,76 @@ def get_open_position(live_strategy_id: str) -> dict | None:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def get_circuit_breaker_state(live_strategy_id: str) -> dict | None:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM circuit_breaker_state WHERE live_strategy_id = ?",
+            (live_strategy_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def upsert_circuit_breaker_state(
+    live_strategy_id: str, trading_date: str, consecutive_losses: int, tripped: int,
+    tripped_reason: str | None = None, tripped_at: str | None = None, resumed_at: str | None = None,
+) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO circuit_breaker_state "
+            "(live_strategy_id, trading_date, consecutive_losses, tripped, tripped_reason, "
+            "tripped_at, resumed_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(live_strategy_id) DO UPDATE SET "
+            "trading_date=excluded.trading_date, "
+            "consecutive_losses=excluded.consecutive_losses, "
+            "tripped=excluded.tripped, tripped_reason=excluded.tripped_reason, "
+            "tripped_at=excluded.tripped_at, resumed_at=excluded.resumed_at",
+            (live_strategy_id, trading_date, consecutive_losses, tripped, tripped_reason,
+             tripped_at, resumed_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_daily_performance(live_strategy_id: str, trading_date: str) -> dict | None:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM daily_performance WHERE live_strategy_id = ? AND trading_date = ?",
+            (live_strategy_id, trading_date),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def upsert_daily_performance(
+    live_strategy_id: str, trading_date: str, realized_pnl: float, realized_pnl_pct: float,
+    trade_count: int, win_count: int, loss_count: int,
+    starting_balance: float, ending_balance: float,
+) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO daily_performance "
+            "(trading_date, live_strategy_id, realized_pnl, realized_pnl_pct, trade_count, "
+            "win_count, loss_count, starting_balance, ending_balance) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(trading_date, live_strategy_id) DO UPDATE SET "
+            "realized_pnl=excluded.realized_pnl, realized_pnl_pct=excluded.realized_pnl_pct, "
+            "trade_count=excluded.trade_count, win_count=excluded.win_count, "
+            "loss_count=excluded.loss_count, ending_balance=excluded.ending_balance",
+            (trading_date, live_strategy_id, realized_pnl, realized_pnl_pct, trade_count,
+             win_count, loss_count, starting_balance, ending_balance),
+        )
+        conn.commit()
+    finally:
+        conn.close()
