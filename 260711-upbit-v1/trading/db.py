@@ -8,6 +8,7 @@ trading/db.py
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent / "data" / "trading.db"
@@ -132,3 +133,50 @@ def _connect() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
     return conn
+
+
+def get_live_strategy(live_strategy_id: str) -> dict | None:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM live_strategies WHERE id = ?", (live_strategy_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_live_strategy_status(live_strategy_id: str, status: str) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE live_strategies SET status = ? WHERE id = ?", (status, live_strategy_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_live_strategy_capital(live_strategy_id: str, current_capital: float) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE live_strategies SET current_capital = ? WHERE id = ?",
+            (current_capital, live_strategy_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_live_strategy_last_candle(live_strategy_id: str, candle_time: str) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE live_strategies SET last_processed_candle_time = ? WHERE id = ?",
+            (candle_time, live_strategy_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()

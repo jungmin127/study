@@ -89,3 +89,49 @@ def test_circuit_breaker_state_and_daily_performance_are_per_strategy(monkeypatc
 
     assert "live_strategy_id" in cb_columns
     assert "live_strategy_id" in dp_columns
+
+
+from tests.trading_db_fixtures import insert_live_strategy
+
+
+def test_get_live_strategy_returns_row_as_dict(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, market="KRW-ETH")
+
+    result = db.get_live_strategy(strategy_id)
+
+    assert result["id"] == strategy_id
+    assert result["market"] == "KRW-ETH"
+    assert result["status"] == "running"
+
+
+def test_get_live_strategy_returns_none_when_not_found(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    assert db.get_live_strategy("nonexistent-id") is None
+
+
+def test_update_live_strategy_status(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    db.update_live_strategy_status(strategy_id, "paused")
+
+    assert db.get_live_strategy(strategy_id)["status"] == "paused"
+
+
+def test_update_live_strategy_capital(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, current_capital=100000.0)
+
+    db.update_live_strategy_capital(strategy_id, 105320.5)
+
+    assert db.get_live_strategy(strategy_id)["current_capital"] == 105320.5
+
+
+def test_update_live_strategy_last_candle(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    db.update_live_strategy_last_candle(strategy_id, "2026-08-07T10:00:00+00:00")
+
+    assert db.get_live_strategy(strategy_id)["last_processed_candle_time"] == "2026-08-07T10:00:00+00:00"
