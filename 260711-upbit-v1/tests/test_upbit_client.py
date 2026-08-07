@@ -315,3 +315,51 @@ async def test_get_order_sends_get_with_uuid_param(monkeypatch):
 async def test_get_order_raises_when_neither_uuid_nor_identifier():
     with pytest.raises(ValueError):
         await get_order()
+
+
+from trading.upbit_client import list_closed_orders, list_open_orders
+
+
+async def test_list_open_orders_sends_market_and_states_array_params(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/orders/open"
+        assert request.url.params.get("market") == "KRW-BTC"
+        assert request.url.params.get_list("states[]") == ["wait", "watch"]
+        return httpx.Response(200, json=[{"uuid": "a"}, {"uuid": "b"}])
+
+    async with _mock_async_client(handler) as client:
+        result = await list_open_orders(market="KRW-BTC", states=["wait", "watch"], client=client)
+
+    assert result == [{"uuid": "a"}, {"uuid": "b"}]
+
+
+async def test_list_open_orders_without_filters_sends_no_params(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert dict(request.url.params) == {}
+        return httpx.Response(200, json=[])
+
+    async with _mock_async_client(handler) as client:
+        await list_open_orders(client=client)
+
+
+async def test_list_closed_orders_sends_market_and_states_array_params(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/orders/closed"
+        assert request.url.params.get("market") == "KRW-BTC"
+        assert request.url.params.get_list("states[]") == ["done", "cancel"]
+        return httpx.Response(200, json=[{"uuid": "c"}])
+
+    async with _mock_async_client(handler) as client:
+        result = await list_closed_orders(market="KRW-BTC", states=["done", "cancel"], client=client)
+
+    assert result == [{"uuid": "c"}]

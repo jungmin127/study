@@ -186,3 +186,47 @@ async def get_order(
 ) -> dict:
     params = _uuid_or_identifier_params(uuid, identifier)
     return await _request("GET", "/order", params=params, bucket=_DEFAULT_BUCKET, client=client)
+
+
+def _market_and_states_params(market: str | None, states: list[str] | None) -> dict:
+    params: dict = {}
+    if market:
+        params["market"] = market
+    if states:
+        params["states[]"] = states
+    return params
+
+
+async def list_open_orders(
+    *,
+    market: str | None = None,
+    states: list[str] | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
+    params = _market_and_states_params(market, states)
+    return await _request("GET", "/orders/open", params=params, bucket=_DEFAULT_BUCKET, client=client)
+
+
+async def list_closed_orders(
+    *,
+    market: str | None = None,
+    states: list[str] | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
+    params = _market_and_states_params(market, states)
+    return await _request(
+        "GET", "/orders/closed", params=params, bucket=_DEFAULT_BUCKET, client=client
+    )
+
+
+__all__ = [
+    "UpbitCredentialsError",
+    "TokenBucket",
+    "get_accounts",
+    "get_order_chance",
+    "create_order",
+    "cancel_order",
+    "get_order",
+    "list_open_orders",
+    "list_closed_orders",
+]
