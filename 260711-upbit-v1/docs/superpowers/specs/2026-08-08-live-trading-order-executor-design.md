@@ -219,21 +219,22 @@ async def enter(
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
 ) -> dict:
     """매수 주문 실행(market/limit/limit_timeout/market_capped 4모드,
-    risk_config['order_execution_mode']에 따라 분기, 결정9). market_capped가 FOK 전량취소로
-    끝나면 status='cancel'인 orders 행만 반환하고 positions 행은 생성하지 않는다 — 그 외
-    모드는 orders 행 생성 + positions 행 생성(position_manager.open_position)까지 포함해
-    반환. 이미 오픈 포지션이 있으면 ValueError(방어적 가드)."""
+    risk_config['order_execution_mode']에 따라 분기, 결정9). orders.status가 'done'일
+    때만 positions 행을 생성한다(position_manager.open_position) — market_capped가 FOK로
+    전량취소되면 'cancel', plain `limit`은 주문 직후 'wait'로 즉시 반환되므로(위 결정4
+    각주) 둘 다 positions를 건드리지 않는다. 이미 오픈 포지션이 있으면 ValueError(방어적
+    가드)."""
 
 async def exit(
     strategy: dict, position: dict, expected_price: float,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
 ) -> dict:
     """매도 주문 실행(position['entry_qty'] 전량, all-in/all-out, 4모드는 enter()와 동일).
-    market_capped가 FOK 전량취소로 끝나면 status='cancel'인 orders 행만 반환하고
-    position_manager.close_position()은 호출하지 않는다(포지션 그대로 유지) — 그 외 모드는
-    orders 행 생성 +
-    position_manager.close_position() 호출까지 포함해 반환({"realized_pnl":,
-    "realized_pnl_pct":, "capital_after":} 병합). position이 None이면 ValueError."""
+    orders.status가 'done'일 때만 position_manager.close_position()을 호출한다 —
+    market_capped의 'cancel'과 plain `limit`의 'wait'는 둘 다 포지션을 그대로 유지한다
+    (enter()와 동일한 규칙). 'done'이면 반환 dict에 close_position()의
+    {"realized_pnl":, "realized_pnl_pct":, "capital_after":}를 병합. position이 None이면
+    ValueError."""
 
 async def handle_signal_result(
     strategy_id: str, signal_result: dict, *, dry_run: bool = False,
@@ -241,9 +242,14 @@ async def handle_signal_result(
     """evaluate_signals() 반환값을 받아 서킷브레이커 확인 → enter()/exit() 호출 →
     signals.resulting_order_id/skip_reason 갱신까지 한 번에 처리(결정3). market_capped
     모드가 FOK로 전량취소되면 buy_action/sell_action이 "slippage_exceeded"가 되고
-    skip_reason도 같은 값으로 기록된다(결정9). 반환:
-    {"buy_action": "entered"|"skipped_circuit_breaker"|"slippage_exceeded"|None,
-     "sell_action": "exited"|"slippage_exceeded"|None,
+    skip_reason도 같은 값으로 기록된다(결정9). **plain `limit` 모드(타임아웃 없음)는
+    주문 직후 `status='wait'`로 즉시 반환되므로(결정4 각주 — 이 모드만 "다루지 않는 것"
+    절에 명시된 대로 장기 미체결 방치가 사용자의 명시적 선택)**, 이 경우
+    `positions`/`risk_manager`는 건드리지 않고 buy_action/sell_action이 `"pending"`이
+    된다(주문은 냈지만 체결 확인은 ⑤-4 몫 — 스킵은 아니므로 skip_reason은 남기지 않고
+    `resulting_order_id`만 채운다). 반환:
+    {"buy_action": "entered"|"skipped_circuit_breaker"|"slippage_exceeded"|"pending"|None,
+     "sell_action": "exited"|"slippage_exceeded"|"pending"|None,
      "buy_order_id": str|None, "sell_order_id": str|None}."""
 ```
 
