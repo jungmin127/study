@@ -132,3 +132,32 @@ async def _request(
 
 async def get_accounts(*, client: httpx.AsyncClient | None = None) -> list[dict]:
     return await _request("GET", "/accounts", bucket=_DEFAULT_BUCKET, client=client)
+
+
+async def get_order_chance(market: str, *, client: httpx.AsyncClient | None = None) -> dict:
+    return await _request(
+        "GET", "/orders/chance", params={"market": market}, bucket=_DEFAULT_BUCKET, client=client
+    )
+
+
+async def create_order(
+    market: str,
+    side: str,
+    ord_type: str,
+    *,
+    volume: str | None = None,
+    price: str | None = None,
+    time_in_force: str | None = None,
+    identifier: str | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> dict:
+    params: dict[str, str] = {"market": market, "side": side, "ord_type": ord_type}
+    if volume is not None:
+        params["volume"] = volume
+    if price is not None:
+        params["price"] = price
+    if time_in_force is not None:
+        params["time_in_force"] = time_in_force
+    if identifier is not None:
+        params["identifier"] = identifier
+    return await _request("POST", "/orders", params=params, bucket=_ORDER_BUCKET, client=client)

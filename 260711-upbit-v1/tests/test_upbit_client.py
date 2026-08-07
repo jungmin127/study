@@ -178,3 +178,83 @@ async def test_get_accounts_goes_through_default_bucket(monkeypatch):
         await get_accounts(client=client)
 
     assert calls["count"] == 1
+
+
+from trading.upbit_client import create_order, get_order_chance
+
+
+async def test_get_order_chance_sends_market_query_param(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/orders/chance"
+        assert dict(request.url.params) == {"market": "KRW-BTC"}
+        return httpx.Response(200, json={"market": {"id": "KRW-BTC"}})
+
+    async with _mock_async_client(handler) as client:
+        result = await get_order_chance("KRW-BTC", client=client)
+
+    assert result == {"market": {"id": "KRW-BTC"}}
+
+
+async def test_create_order_limit_sends_volume_and_price_as_json_body(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v1/orders"
+        import json as json_module
+        body = json_module.loads(request.content)
+        assert body == {
+            "market": "KRW-BTC", "side": "bid", "ord_type": "limit",
+            "volume": "0.01", "price": "50000000",
+        }
+        return httpx.Response(200, json={"uuid": "abc-123", "state": "wait"})
+
+    async with _mock_async_client(handler) as client:
+        result = await create_order(
+            "KRW-BTC", "bid", "limit", volume="0.01", price="50000000", client=client,
+        )
+
+    assert result == {"uuid": "abc-123", "state": "wait"}
+
+
+async def test_create_order_market_sell_omits_price(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        import json as json_module
+        body = json_module.loads(request.content)
+        assert body == {"market": "KRW-BTC", "side": "ask", "ord_type": "market", "volume": "0.01"}
+        return httpx.Response(200, json={"uuid": "def-456", "state": "wait"})
+
+    async with _mock_async_client(handler) as client:
+        await create_order("KRW-BTC", "ask", "market", volume="0.01", client=client)
+
+
+async def test_create_order_goes_through_order_bucket_not_default(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+    calls = {"order": 0, "default": 0}
+
+    class _SpyBucket:
+        def __init__(self, key: str) -> None:
+            self._key = key
+
+        async def acquire(self) -> None:
+            calls[self._key] += 1
+
+    monkeypatch.setattr(upbit_client, "_ORDER_BUCKET", _SpyBucket("order"))
+    monkeypatch.setattr(upbit_client, "_DEFAULT_BUCKET", _SpyBucket("default"))
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"uuid": "x"})
+
+    async with _mock_async_client(handler) as client:
+        await create_order("KRW-BTC", "bid", "price", price="10000", client=client)
+
+    assert calls == {"order": 1, "default": 0}
