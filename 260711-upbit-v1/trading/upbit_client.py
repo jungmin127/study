@@ -161,3 +161,28 @@ async def create_order(
     if identifier is not None:
         params["identifier"] = identifier
     return await _request("POST", "/orders", params=params, bucket=_ORDER_BUCKET, client=client)
+
+
+def _uuid_or_identifier_params(uuid: str | None, identifier: str | None) -> dict[str, str]:
+    if not uuid and not identifier:
+        raise ValueError("uuid 또는 identifier 중 하나는 필요합니다")
+    params: dict[str, str] = {}
+    if uuid:
+        params["uuid"] = uuid
+    if identifier:
+        params["identifier"] = identifier
+    return params
+
+
+async def cancel_order(
+    *, uuid: str | None = None, identifier: str | None = None, client: httpx.AsyncClient | None = None
+) -> dict:
+    params = _uuid_or_identifier_params(uuid, identifier)
+    return await _request("DELETE", "/order", params=params, bucket=_DEFAULT_BUCKET, client=client)
+
+
+async def get_order(
+    *, uuid: str | None = None, identifier: str | None = None, client: httpx.AsyncClient | None = None
+) -> dict:
+    params = _uuid_or_identifier_params(uuid, identifier)
+    return await _request("GET", "/order", params=params, bucket=_DEFAULT_BUCKET, client=client)

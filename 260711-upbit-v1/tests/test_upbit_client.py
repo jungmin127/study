@@ -258,3 +258,60 @@ async def test_create_order_goes_through_order_bucket_not_default(monkeypatch):
         await create_order("KRW-BTC", "bid", "price", price="10000", client=client)
 
     assert calls == {"order": 1, "default": 0}
+
+
+from trading.upbit_client import cancel_order, get_order
+
+
+async def test_cancel_order_by_uuid_sends_delete_with_uuid_param(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/v1/order"
+        assert dict(request.url.params) == {"uuid": "abc-123"}
+        return httpx.Response(200, json={"uuid": "abc-123", "state": "wait"})
+
+    async with _mock_async_client(handler) as client:
+        result = await cancel_order(uuid="abc-123", client=client)
+
+    assert result == {"uuid": "abc-123", "state": "wait"}
+
+
+async def test_cancel_order_by_identifier(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert dict(request.url.params) == {"identifier": "my-order-1"}
+        return httpx.Response(200, json={"identifier": "my-order-1"})
+
+    async with _mock_async_client(handler) as client:
+        await cancel_order(identifier="my-order-1", client=client)
+
+
+async def test_cancel_order_raises_when_neither_uuid_nor_identifier():
+    with pytest.raises(ValueError):
+        await cancel_order()
+
+
+async def test_get_order_sends_get_with_uuid_param(monkeypatch):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/order"
+        assert dict(request.url.params) == {"uuid": "abc-123"}
+        return httpx.Response(200, json={"uuid": "abc-123", "state": "done"})
+
+    async with _mock_async_client(handler) as client:
+        result = await get_order(uuid="abc-123", client=client)
+
+    assert result == {"uuid": "abc-123", "state": "done"}
+
+
+async def test_get_order_raises_when_neither_uuid_nor_identifier():
+    with pytest.raises(ValueError):
+        await get_order()
