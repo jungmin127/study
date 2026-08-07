@@ -9,22 +9,30 @@ live_indicators.py(서브플랜②③)와 condition_tree.eval_group_values()(서
 """
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 
 import pandas as pd
 
+from engine.condition_tree import (
+    POSITION_RELATIVE_INDICATORS,
+    collect_blocks,
+    eval_group_values,
+    indicator_key,
+    max_required_period,
+    required_aux_markets,
+)
 from upbit_data_service import get_candles, timeframe_duration
-
 from trading.live_indicators import (
+    LIVE_INDICATOR_FACTORY,
     compute_korea_premium_value,
     fetch_live_binance_close,
     fetch_live_fear_greed_value,
     fetch_live_funding_rate_value,
 )
-
-from engine.condition_tree import indicator_key
-from trading.live_indicators import LIVE_INDICATOR_FACTORY
 from trading.position_manager import get_open_position
+import trading.db as db
+from trading.risk_manager import today_kst
 
 
 def _to_utc_timestamp(value) -> pd.Timestamp:
@@ -135,3 +143,101 @@ def _position_context(
     position_holding_bars = max(int(elapsed / timeframe_duration(timeframe)), 0)
 
     return position_return_pct, position_holding_bars
+
+
+def _no_new_candle_result() -> dict:
+    return {
+        "new_candle": False, "candle_time": None,
+        "buy_signal": None, "sell_signal": None,
+        "paused": False, "resumed": False,
+    }
+
+
+def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict:
+    """새 봉 마감을 감지하면 지표 계산 + 조건평가를 수행해 signals에 기록하고,
+    live_strategies.status를 필요시 갱신한다. 새 봉이 아니면 즉시 조기 반환한다(daemon이
+    폴링 주기마다 안전하게 반복 호출할 수 있는 멱등적 인터페이스, 설계 스펙)."""
+    now = now or datetime.now(timezone.utc)
+
+    strategy = db.get_live_strategy(live_strategy_id)
+    if strategy is None:
+        raise ValueError(f"전략을 찾을 수 없습니다: {live_strategy_id}")
+
+    market = strategy["market"]
+    timeframe = strategy["timeframe"]
+    buy_conditions = json.loads(strategy["buy_conditions_json"])
+    sell_conditions = json.loads(strategy["sell_conditions_json"])
+
+    required_bars = max(max_required_period(buy_conditions), max_required_period(sell_conditions))
+
+    df = _fetch_candles_with_warmup(market, timeframe, required_bars, now)
+    if df.empty:
+        return _no_new_candle_result()
+
+    latest_candle_time = df["candle_time"].iloc[-1]
+    last_processed = strategy["last_processed_candle_time"]
+    if last_processed is not None and latest_candle_time <= pd.Timestamp(last_processed):
+        return _no_new_candle_result()
+
+    aux_markets = required_aux_markets(buy_conditions) | required_aux_markets(sell_conditions)
+    if aux_markets:
+        df = _merge_aux_markets(df, aux_markets, market, timeframe, required_bars, now)
+
+    blocks = [
+        b for b in collect_blocks(buy_conditions) + collect_blocks(sell_conditions)
+        if b["indicator"] not in POSITION_RELATIVE_INDICATORS
+    ]
+    indicator_names = {b["indicator"] for b in blocks}
+    b_group_names = indicator_names & {"FEAR_GREED_CMC", "FUNDING_RATE", "KOREA_PREMIUM"}
+    if b_group_names:
+        df = _populate_b_group_columns(df, market, timeframe, b_group_names, now)
+
+    values = _compute_indicator_values(df, blocks)
+
+    latest_close = df["close"].iloc[-1]
+    position_return_pct, position_holding_bars = _position_context(
+        live_strategy_id, latest_close, latest_candle_time, timeframe,
+    )
+
+    buy_result = eval_group_values(buy_conditions, values, position_return_pct, position_holding_bars)
+    sell_result = eval_group_values(sell_conditions, values, position_return_pct, position_holding_bars)
+
+    snapshot_json = json.dumps({k: (None if v != v else v) for k, v in values.items()})
+    candle_time_str = latest_candle_time.isoformat()
+
+    db.insert_signal(
+        live_strategy_id, "buy", candle_time_str, snapshot_json,
+        skip_reason="unknown" if buy_result is None else None,
+    )
+    db.insert_signal(
+        live_strategy_id, "sell", candle_time_str, snapshot_json,
+        skip_reason="unknown" if sell_result is None else None,
+    )
+
+    paused = False
+    resumed = False
+    if buy_result is None or sell_result is None:
+        if strategy["status"] != "paused":
+            db.update_live_strategy_status(live_strategy_id, "paused")
+        paused = True
+    elif strategy["status"] == "paused":
+        cb_state = db.get_circuit_breaker_state(live_strategy_id)
+        tripped_today = (
+            cb_state is not None
+            and cb_state["trading_date"] == today_kst()
+            and cb_state["tripped"]
+        )
+        if not tripped_today:
+            db.update_live_strategy_status(live_strategy_id, "running")
+            resumed = True
+
+    db.update_live_strategy_last_candle(live_strategy_id, candle_time_str)
+
+    return {
+        "new_candle": True,
+        "candle_time": candle_time_str,
+        "buy_signal": buy_result,
+        "sell_signal": sell_result,
+        "paused": paused,
+        "resumed": resumed,
+    }

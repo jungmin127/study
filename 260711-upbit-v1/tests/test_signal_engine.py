@@ -172,3 +172,118 @@ def test_position_context_computes_return_pct_and_holding_bars(monkeypatch, tmp_
 
     assert return_pct == pytest.approx(10.0)
     assert holding_bars == 3  # 3시간 경과를 60분봉으로 나누면 3 (180분 / 60분 = 3)
+
+
+import json
+
+from trading.risk_manager import today_kst
+
+
+def _strategy_conditions(buy_operator=">", buy_threshold=-1, sell_operator=">", sell_threshold=-1):
+    """항상 True가 되도록 RSI(0~100 범위) 조건을 만드는 헬퍼 — 신호평가 로직 자체를
+    테스트하는 게 목적이라 지표값의 실제 크기는 중요하지 않다."""
+    return (
+        json.dumps({"type": "AND", "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": buy_operator, "threshold": buy_threshold},
+        ]}),
+        json.dumps({"type": "AND", "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": sell_operator, "threshold": sell_threshold},
+        ]}),
+    )
+
+
+def test_evaluate_signals_returns_no_new_candle_when_already_processed(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    latest_candle_time = df["candle_time"].iloc[-1]
+    dbm.update_live_strategy_last_candle(strategy_id, latest_candle_time.isoformat())
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["new_candle"] is False
+
+
+def test_evaluate_signals_records_buy_and_sell_signals_for_new_candle(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["new_candle"] is True
+    assert result["buy_signal"] is True  # RSI > -1 항상 참
+    assert result["sell_signal"] is True  # RSI > -1 항상 참
+
+    conn = dbm._connect()
+    try:
+        rows = conn.execute(
+            "SELECT signal_type FROM signals WHERE live_strategy_id=?", (strategy_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    assert {r[0] for r in rows} == {"buy", "sell"}
+
+    updated = dbm.get_live_strategy(strategy_id)
+    assert updated["last_processed_candle_time"] == df["candle_time"].iloc[-1].isoformat()
+
+
+def test_evaluate_signals_pauses_strategy_when_condition_unknown(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json = json.dumps({"type": "AND", "conditions": [
+        {"indicator": "FUNDING_RATE", "params": {}, "operator": "<", "threshold": -0.01},
+    ]})
+    _, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="running", buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+    monkeypatch.setattr(signal_engine, "fetch_live_funding_rate_value", lambda market, now=None: None)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["buy_signal"] is None
+    assert result["paused"] is True
+    assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
+
+
+def test_evaluate_signals_resumes_paused_strategy_when_computable_and_not_circuit_tripped(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="paused", buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["resumed"] is True
+    assert dbm.get_live_strategy(strategy_id)["status"] == "running"
+
+
+def test_evaluate_signals_does_not_resume_when_circuit_breaker_tripped_today(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="paused", buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    dbm.upsert_circuit_breaker_state(
+        strategy_id, today_kst(), 3, 1, "daily_loss_limit", datetime.now(timezone.utc).isoformat(),
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["resumed"] is False
+    assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
