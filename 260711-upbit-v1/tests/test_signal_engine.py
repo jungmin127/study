@@ -27,6 +27,17 @@ def test_fetch_candles_with_warmup_computes_start_from_required_bars_times_multi
     assert captured["start"] == now - timedelta(hours=90)  # (20*3+30)*60min
 
 
+def test_aux_market_line_name_covers_every_condition_tree_aux_market_indicator_value():
+    """trading.signal_engine._AUX_MARKET_LINE_NAME은 engine.condition_tree.AUX_MARKET_INDICATORS
+    (지표->마켓)의 값 집합을 전부 포함해야 한다(최종 리뷰 Important #2) — 세 군데(여기,
+    condition_tree.AUX_MARKET_INDICATORS, engine/runner.py의 AUX_MARKET_LINE_NAME)에
+    독립적으로 복제된 마켓 매핑이 drift하면 새 보조마켓 추가 시 라이브에서만 조용히
+    KeyError가 나서 데몬이 죽을 수 있다."""
+    from engine.condition_tree import AUX_MARKET_INDICATORS
+
+    assert set(AUX_MARKET_INDICATORS.values()) <= set(signal_engine._AUX_MARKET_LINE_NAME)
+
+
 def test_merge_aux_markets_merges_btc_close_with_gap_fill(monkeypatch):
     df = pd.DataFrame({
         "candle_time": pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC"),

@@ -39,6 +39,14 @@ def _to_utc_timestamp(value) -> pd.Timestamp:
     ts = pd.Timestamp(value)
     return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
 
+# 이 딕셔너리는 engine/condition_tree.py의 AUX_MARKET_INDICATORS(지표->마켓)와
+# engine/runner.py의 AUX_MARKET_LINE_NAME(마켓->컬럼, backend/main.py가 사용)과 값이
+# 같아야 하는 의도적 중복이다 — signal_engine.py는 engine.condition_tree 외의 engine/
+# 서브모듈을 import할 수 없다는 Global Constraint 때문에 별도 사본을 둔다. 새 보조마켓을
+# 추가할 때는 세 곳(여기, engine/condition_tree.py의 AUX_MARKET_INDICATORS,
+# engine/runner.py의 AUX_MARKET_LINE_NAME) 모두 갱신할 것 — 하나만 고치면 라이브에서만
+# 조용히 KeyError가 나서 데몬이 죽을 수 있다(tests/test_signal_engine.py의 drift 방지
+# 테스트가 값 집합이 어긋나면 잡아낸다).
 _AUX_MARKET_LINE_NAME: dict[str, str] = {"KRW-BTC": "btc_close", "KRW-USDT": "usdt_close"}
 
 # _WARMUP_MULTIPLIER/_WARMUP_BUFFER_BARS: required_bars에 붙이는 워밍업 여유분. 단순
