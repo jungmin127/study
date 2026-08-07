@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 import pytest
 import websockets
@@ -70,3 +71,32 @@ async def test_stream_ticker_reconnects_after_connection_drop(monkeypatch):
     assert first == {"seq": 1}
     assert second == {"seq": 2}
     assert connection_count["n"] == 2
+
+
+async def test_stream_ticker_applies_backoff_delay_on_clean_close(monkeypatch):
+    monkeypatch.setattr(upbit_ws, "RECONNECT_BASE_DELAY_SECONDS", 0.2)
+    received_at: list[float] = []
+
+    async def handler(ws):
+        await ws.recv()  # subscribe message
+        await ws.send(json.dumps({"seq": 1}))
+        received_at.append(time.monotonic())
+        await ws.close()  # clean close (code 1000) — the scenario that was broken
+
+    # NOTE: uses 127.0.0.1 rather than "localhost" — on this dev machine, "localhost"
+    # intermittently added ~2s of pure TCP/DNS dual-stack resolution overhead per fresh
+    # connection (verified via a standalone repro script; identical overhead occurred on
+    # the very first connection too, before any backoff logic ran), which is unrelated to
+    # the backoff behavior under test and made the timing assertion below flaky.
+    # 127.0.0.1 avoids the ambiguous localhost resolution and was stable across repeated runs.
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        gen = stream_ticker(["KRW-BTC"], url=f"ws://127.0.0.1:{port}")
+        await anext(gen)  # first message, connection 1
+        start = time.monotonic()
+        await anext(gen)  # should only arrive after the backoff delay elapses
+        elapsed = time.monotonic() - start
+        await gen.aclose()
+
+    assert elapsed >= 0.15  # genuinely waited close to the 0.2s delay (small tolerance for scheduling jitter)
+    assert elapsed < 2.0  # sanity bound — didn't hang or apply some much larger delay

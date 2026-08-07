@@ -22,11 +22,13 @@ RECONNECT_MAX_DELAY_SECONDS = 30.0
 
 
 async def stream_ticker(markets: list[str], *, url: str = UPBIT_WS_URL) -> AsyncIterator[dict]:
-    """markets의 실시간 ticker 이벤트를 무한히 yield한다. 연결이 끊기면 지수 백오프로 자동
-    재연결한다 — 재연결 사이에 발생한 tick은 유실될 수 있지만, ticker는 손절/익절 실시간
-    감지 전용이라 몇 초의 공백은 다음 tick에서 자연 회복된다(캔들 기반 신호는 이 스트림과
-    무관하게 REST 폴링으로 별도 처리되므로 영향 없음)."""
-
+    """markets의 실시간 ticker 이벤트를 무한히 yield한다. 연결이 끊기면(정상 종료·비정상
+    종료 둘 다) 지수 백오프로 재연결한다 — 서버가 정상적으로 연결을 끊는 경우(배포 시
+    연결 순환 등)도 재연결 폭주를 막기 위해 백오프를 똑같이 적용해야 한다. websockets의
+    async for는 정상 종료(ConnectionClosedOK)를 예외 없이 반복문 종료로 처리하므로,
+    백오프 로직을 except 절 안이 아니라 try/except 블록 뒤에 둬서 두 경우 모두 커버한다.
+    ticker는 손절/익절 실시간 감지 전용이라 재연결 사이에 발생한 tick은 유실될 수 있지만,
+    캔들 기반 신호는 이 스트림과 무관하게 REST 폴링으로 별도 처리되므로 영향 없다."""
     subscribe_msg = json.dumps(
         [{"ticket": str(uuid.uuid4())}, {"type": "ticker", "codes": markets}]
     )
@@ -41,8 +43,9 @@ async def stream_ticker(markets: list[str], *, url: str = UPBIT_WS_URL) -> Async
                     data = raw.decode("utf-8") if isinstance(raw, bytes) else raw
                     yield json.loads(data)
         except (websockets.exceptions.ConnectionClosed, OSError):
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
+            pass
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
 
 
 __all__ = ["stream_ticker", "UPBIT_WS_URL"]
