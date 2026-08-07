@@ -3,6 +3,7 @@ pandas>=2.2
 pyarrow>=15.0
 backtrader>=1.9.78
 pytest>=8.0
+pytest-asyncio>=0.23
 fastapi>=0.109
 uvicorn>=0.27
 PyJWT>=2.8

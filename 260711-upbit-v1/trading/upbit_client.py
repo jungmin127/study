@@ -38,6 +38,41 @@ class UpbitCredentialsError(Exception):
     """UPBIT_ACCESS_KEY/UPBIT_SECRET_KEY 환경변수가 설정되지 않았을 때."""
 
 
+class TokenBucket:
+    """rate_per_sec 속도로 토큰을 채우는 비동기 토큰버킷. acquire()는 토큰이 있으면 즉시
+    반환하고, 없으면 다음 토큰이 채워질 때까지 대기한다. clock/sleep을 주입할 수 있어
+    테스트에서 실제 시간 흐름 없이 결정론적으로 검증 가능하다."""
+
+    def __init__(
+        self,
+        rate_per_sec: float,
+        capacity: float | None = None,
+        *,
+        clock=time.monotonic,
+        sleep=asyncio.sleep,
+    ) -> None:
+        self._rate = rate_per_sec
+        self._capacity = capacity if capacity is not None else rate_per_sec
+        self._tokens = self._capacity
+        self._clock = clock
+        self._sleep = sleep
+        self._last = clock()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            while True:
+                now = self._clock()
+                elapsed = now - self._last
+                self._last = now
+                self._tokens = min(self._capacity, self._tokens + elapsed * self._rate)
+                if self._tokens >= 1:
+                    self._tokens -= 1
+                    return
+                wait_seconds = (1 - self._tokens) / self._rate
+                await self._sleep(wait_seconds)
+
+
 def _build_jwt_headers(query: dict | None = None) -> dict[str, str]:
     access_key = os.environ.get("UPBIT_ACCESS_KEY")
     secret_key = os.environ.get("UPBIT_SECRET_KEY")
