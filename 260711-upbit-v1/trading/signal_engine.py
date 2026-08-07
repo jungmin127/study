@@ -22,6 +22,15 @@ from trading.live_indicators import (
     fetch_live_funding_rate_value,
 )
 
+from engine.condition_tree import indicator_key
+from trading.live_indicators import LIVE_INDICATOR_FACTORY
+from trading.position_manager import get_open_position
+
+
+def _to_utc_timestamp(value) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
 _AUX_MARKET_LINE_NAME: dict[str, str] = {"KRW-BTC": "btc_close", "KRW-USDT": "usdt_close"}
 _WARMUP_BUFFER_BARS = 5
 
@@ -89,3 +98,40 @@ def _populate_b_group_columns(
             ).iloc[0]
 
     return df
+
+
+def _compute_indicator_values(df: pd.DataFrame, blocks: list[dict]) -> dict[str, float]:
+    """조건 트리의 모든 ConditionBlock에 대해 지표값을 계산한다(설계 스펙 결정1 —
+    A그룹/B그룹 구분 없이 동일하게 LIVE_INDICATOR_FACTORY를 호출, df 준비 방식만 다름)."""
+    values: dict[str, float] = {}
+    for block in blocks:
+        name = block["indicator"]
+        params = block.get("params", {})
+        if name not in LIVE_INDICATOR_FACTORY:
+            raise ValueError(f"알 수 없는 지표: {name}")
+        key = indicator_key(name, params)
+        if key in values:
+            continue
+        series = LIVE_INDICATOR_FACTORY[name](df, **params)
+        values[key] = series.iloc[-1]
+    return values
+
+
+def _position_context(
+    live_strategy_id: str, latest_close: float, latest_candle_time, timeframe: str,
+) -> tuple[float | None, int | None]:
+    """오픈 포지션이 있으면 (수익률%, 보유 봉 수)를, 없으면 (None, None)을 반환한다
+    (STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS 평가용, 설계 스펙 결정7)."""
+    position = get_open_position(live_strategy_id)
+    if position is None:
+        return None, None
+
+    entry_price = position["entry_price"]
+    position_return_pct = (latest_close - entry_price) / entry_price * 100
+
+    entry_time = _to_utc_timestamp(position["entry_time"])
+    candle_time = _to_utc_timestamp(latest_candle_time)
+    elapsed = candle_time - entry_time
+    position_holding_bars = max(int(elapsed / timeframe_duration(timeframe)), 0)
+
+    return position_return_pct, position_holding_bars
