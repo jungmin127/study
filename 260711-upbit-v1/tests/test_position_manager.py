@@ -1,6 +1,8 @@
+import pytest
+
 import trading.db as db
 from tests.trading_db_fixtures import insert_live_strategy
-from trading.position_manager import calculate_initial_capital, get_open_position, open_position
+from trading.position_manager import calculate_initial_capital, close_position, get_open_position, open_position
 
 
 def _fresh_db(monkeypatch, tmp_path):
@@ -50,3 +52,39 @@ def test_get_open_position_returns_none_when_no_position(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm)
     assert get_open_position(strategy_id) is None
+
+
+def test_close_position_computes_pnl_and_updates_capital(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, current_capital=100_000_000.0 * 0.01)
+    position_id = open_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    result = close_position(position_id, 101_000_000.0, 0.01, fee=500.0, close_reason="signal")
+
+    expected_pnl = (101_000_000.0 * 0.01) - (100_000_000.0 * 0.01) - 500.0
+    expected_pct = expected_pnl / (100_000_000.0 * 0.01) * 100
+    expected_capital_after = 101_000_000.0 * 0.01 - 500.0
+
+    assert result["realized_pnl"] == pytest.approx(expected_pnl)
+    assert result["realized_pnl_pct"] == pytest.approx(expected_pct)
+    assert result["capital_after"] == pytest.approx(expected_capital_after)
+
+    assert dbm.get_live_strategy(strategy_id)["current_capital"] == pytest.approx(expected_capital_after)
+    assert get_open_position(strategy_id) is None
+
+
+def test_close_position_raises_when_position_not_found(monkeypatch, tmp_path):
+    _fresh_db(monkeypatch, tmp_path)
+    with pytest.raises(ValueError):
+        close_position("nonexistent-id", 1.0, 1.0, fee=0.0, close_reason="signal")
+
+
+def test_close_position_handles_loss(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    position_id = open_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    result = close_position(position_id, 95_000_000.0, 0.01, fee=475.0, close_reason="signal")
+
+    assert result["realized_pnl"] < 0
+    assert result["realized_pnl_pct"] < 0
