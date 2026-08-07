@@ -38,10 +38,19 @@ class UpbitCredentialsError(Exception):
     """UPBIT_ACCESS_KEY/UPBIT_SECRET_KEY 환경변수가 설정되지 않았을 때."""
 
 
+class UpbitRateLimitError(RuntimeError):
+    """업비트 API가 재시도 한도(RETRY_ATTEMPTS) 내에서도 계속 429를 반환했을 때. RuntimeError를
+    상속해 기존 호출부의 광범위한 except RuntimeError를 깨지 않으면서도, 명시적으로 이 실패를
+    구분해 잡고 싶은 호출부(예: 향후 주문 실행기)가 UpbitRateLimitError로 특정할 수 있게 한다."""
+
+
 class TokenBucket:
     """rate_per_sec 속도로 토큰을 채우는 비동기 토큰버킷. acquire()는 토큰이 있으면 즉시
     반환하고, 없으면 다음 토큰이 채워질 때까지 대기한다. clock/sleep을 주입할 수 있어
-    테스트에서 실제 시간 흐름 없이 결정론적으로 검증 가능하다."""
+    테스트에서 실제 시간 흐름 없이 결정론적으로 검증 가능하다. 프로세스 전역 싱글턴으로
+    공유되는 것을 전제로 하며, 이 데몬의 단일 asyncio 이벤트루프 안에서만 사용해야 한다
+    (내부 락이 첫 acquire() 시점에 실행 중인 루프에 바인딩되므로, 서로 다른 이벤트루프가
+    동시에 같은 버킷을 두고 경쟁하는 상황은 지원 대상이 아니다)."""
 
     def __init__(
         self,
@@ -57,9 +66,11 @@ class TokenBucket:
         self._clock = clock
         self._sleep = sleep
         self._last = clock()
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
 
     async def acquire(self) -> None:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
         async with self._lock:
             while True:
                 now = self._clock()
@@ -106,15 +117,18 @@ async def _request(
     """업비트 Private REST 호출 공통 코어. query_hash는 GET/POST/DELETE 관계없이 params로
     계산하고, 실제 전송은 GET/DELETE면 쿼리스트링으로 POST면 JSON 바디로 한다(업비트 인증
     방식의 표준 패턴). bucket.acquire()로 선제적으로 스로틀링한 뒤에도 429가 오면(클럭 오차,
-    다른 프로세스의 동시 사용 등) 방어적으로 재시도한다."""
-    headers = _build_jwt_headers(params)
+    다른 프로세스의 동시 사용 등) 방어적으로 재시도한다. 재시도할 때마다 JWT(nonce 포함)를
+    새로 만들고 bucket.acquire()도 다시 거쳐야 한다 — 그렇지 않으면 429로 스로틀링이 필요한
+    바로 그 순간에 재시도 요청들이 토큰버킷을 우회하고, nonce가 재사용된 요청을 업비트가
+    거부할 위험도 생긴다."""
     close_client = client is None
     client = client or httpx.AsyncClient(timeout=10)
     url = f"{UPBIT_BASE_URL}{path}"
 
     try:
-        await bucket.acquire()
         for attempt in range(RETRY_ATTEMPTS):
+            headers = _build_jwt_headers(params)
+            await bucket.acquire()
             if method == "POST":
                 resp = await client.request(method, url, json=params, headers=headers)
             else:
@@ -124,7 +138,7 @@ async def _request(
                 continue
             resp.raise_for_status()
             return resp.json()
-        raise RuntimeError(f"업비트 API 호출 실패 (429 재시도 소진): {method} {path}")
+        raise UpbitRateLimitError(f"업비트 API 호출 실패 (429 재시도 소진): {method} {path}")
     finally:
         if close_client:
             await client.aclose()
@@ -221,6 +235,7 @@ async def list_closed_orders(
 
 __all__ = [
     "UpbitCredentialsError",
+    "UpbitRateLimitError",
     "TokenBucket",
     "get_accounts",
     "get_order_chance",

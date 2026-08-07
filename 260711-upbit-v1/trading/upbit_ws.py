@@ -42,7 +42,7 @@ async def stream_ticker(markets: list[str], *, url: str = UPBIT_WS_URL) -> Async
                 async for raw in ws:
                     data = raw.decode("utf-8") if isinstance(raw, bytes) else raw
                     yield json.loads(data)
-        except (websockets.exceptions.ConnectionClosed, OSError):
+        except (websockets.exceptions.WebSocketException, OSError, json.JSONDecodeError):
             pass
         await asyncio.sleep(delay)
         delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
