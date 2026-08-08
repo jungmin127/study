@@ -920,3 +920,76 @@ async def test_task_set_manager_shares_same_lock_between_strategy_and_risk_exit_
 
     assert captured["strategy_lock"] is captured["risk_exit_lock"]
     assert isinstance(captured["strategy_lock"], asyncio.Lock)
+
+
+async def test_strategy_loop_and_risk_exit_loop_serialize_order_execution_via_shared_lock(monkeypatch, tmp_path):
+    """⑤-4c 설계 스펙 결정4의 핵심 계약: 진짜 asyncio.Lock 하나를 공유하는
+    _run_strategy_loop와 _run_risk_exit_loop를 asyncio.gather로 동시에 돌려도,
+    신호처리(handle_signal_result)와 ticker 트리거 청산(exit_for_risk)이 서로 겹치지
+    않고 완전히 순차적으로만 실행돼야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", timeframe="minutes1", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    lock = asyncio.Lock()
+    events = []
+    real_sleep = asyncio.sleep  # daemon.asyncio.sleep을 아래서 monkeypatch하기 전에 붙잡아둔다
+
+    async def fake_hydrate_state(strategy, *, client=None):
+        return {"synced_wait_orders": 0, "baseline_captured": True}
+
+    def fake_evaluate_signals(sid, now=None):
+        return {"new_candle": True, "candle_time": "2026-08-08T00:00:00+00:00",
+                "buy_signal": False, "sell_signal": False,
+                "buy_signal_id": "b1", "sell_signal_id": "s1",
+                "latest_close": 50000000.0, "paused": False, "resumed": False}
+
+    async def fake_handle_signal_result(sid, result, *, dry_run=False):
+        events.append("handle_signal_result:start")
+        await real_sleep(0)  # 이 구간이 lock 없이는 다른 태스크에 끼어들 여지를 실제로 준다
+        events.append("handle_signal_result:end")
+        return {"buy_action": None, "sell_action": None, "buy_order_id": None, "sell_order_id": None}
+
+    async def fake_check_manual_intervention(strategy, *, own_fills=(), client=None):
+        return {"balance_mismatch": False, "action": "none", "paused": False}
+
+    async def fake_sync_pending_limit_orders(strategy, *, client=None):
+        return []
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        events.append("exit_for_risk:start")
+        await real_sleep(0)
+        events.append("exit_for_risk:end")
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(reconciler, "hydrate_state", fake_hydrate_state)
+    monkeypatch.setattr(signal_engine, "evaluate_signals", fake_evaluate_signals)
+    monkeypatch.setattr(order_executor, "handle_signal_result", fake_handle_signal_result)
+    monkeypatch.setattr(reconciler, "check_manual_intervention", fake_check_manual_intervention)
+    monkeypatch.setattr(reconciler, "sync_pending_limit_orders", fake_sync_pending_limit_orders)
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+    calls, fake_sleep = _stop_after_one_tick(dbm, strategy_id)
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    await asyncio.gather(
+        daemon._run_strategy_loop(strategy_id, lock),
+        daemon._run_risk_exit_loop(strategy_id, lock),
+    )
+
+    assert len(events) == 4
+    # 두 구간이 절대 인터리빙되지 않아야 한다: 하나의 start~end 쌍이 완전히 끝난 뒤에야
+    # 다른 쪽의 start가 나와야 한다(직렬화 계약 — lock이 없으면 이 assert가 깨진다).
+    for i in range(0, len(events), 2):
+        name_start, phase_start = events[i].split(":")
+        name_end, phase_end = events[i + 1].split(":")
+        assert phase_start == "start" and phase_end == "end"
+        assert name_start == name_end
