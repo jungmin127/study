@@ -1143,3 +1143,27 @@ async def test_handle_signal_result_records_slippage_exceeded_on_fok_cancel(monk
 
     assert result["buy_action"] == "slippage_exceeded"
     assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_exit_records_signal_as_default_close_reason(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    await order_executor.exit(strategy, position, 50_000_000.0, dry_run=True)
+
+    assert dbm.get_position(position["id"])["close_reason"] == "signal"
+
+
+async def test_exit_records_custom_close_reason(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    await order_executor.exit(
+        strategy, position, 50_000_000.0, dry_run=True, close_reason="stop_loss_pct",
+    )
+
+    assert dbm.get_position(position["id"])["close_reason"] == "stop_loss_pct"

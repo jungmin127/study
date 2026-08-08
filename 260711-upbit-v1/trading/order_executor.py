@@ -383,6 +383,7 @@ async def enter(
 async def exit(
     strategy: dict, position: dict, expected_price: float,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
+    close_reason: str = "signal",
 ) -> dict:
     if position is None:
         raise ValueError("오픈 포지션이 없습니다")
@@ -426,7 +427,7 @@ async def exit(
         return db.get_order_by_id(result["order_id"])
 
     close_result = position_manager.close_position(
-        position["id"], result["filled_price"], result["filled_volume"], result["fee"], "signal",
+        position["id"], result["filled_price"], result["filled_volume"], result["fee"], close_reason,
     )
     order = db.get_order_by_id(result["order_id"])
     order.update(close_result)
