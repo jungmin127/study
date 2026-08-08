@@ -320,3 +320,75 @@ async def test_enter_limit_timeout_converts_remainder_to_market_after_timeout(mo
     assert order["filled_volume"] == pytest.approx(0.01)
     assert order["filled_price"] == pytest.approx(500_000.0 / 0.01)  # (200000+300000)/0.01
     assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+async def test_enter_market_capped_fills_within_slippage_cap(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="market_capped", max_slippage_pct=0.5)
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(ord_type=ord_type, price=price, time_in_force=time_in_force)
+        return {"uuid": "uuid-5", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "502000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert captured["ord_type"] == "limit"
+    assert captured["time_in_force"] == "fok"
+    assert captured["price"] == str(order_executor.round_to_tick(50_000_000.0 * 1.005))
+    assert order["status"] == "done"
+    assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+async def test_enter_market_capped_cancels_when_fok_fails_and_position_untouched(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="market_capped", max_slippage_pct=0.1)
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-6", "state": "cancel"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "cancel", "executed_volume": "0", "remaining_volume": "0.01",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert order["status"] == "cancel"
+    assert order["filled_price"] is None
+    assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_exit_market_capped_uses_lower_bound_price(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="market_capped", max_slippage_pct=0.5)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(price=price)
+        return {"uuid": "uuid-7", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "497500.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await order_executor.exit(strategy, position, 50_000_000.0)
+
+    assert captured["price"] == str(order_executor.round_to_tick(50_000_000.0 * 0.995))

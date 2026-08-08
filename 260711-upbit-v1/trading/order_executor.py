@@ -181,6 +181,30 @@ async def _run_limit_timeout(
             "filled_volume": total_volume, "fee": total_fee}
 
 
+async def _run_market_capped(
+    order_id: str, market: str, side: str, expected_price: float, volume: float,
+    max_slippage_pct: float, *, client: httpx.AsyncClient | None = None,
+) -> dict:
+    sign = 1 if side == "bid" else -1
+    capped_price = round_to_tick(expected_price * (1 + sign * max_slippage_pct / 100))
+    resp = await _create_order_with_retry(
+        market, side, "limit", order_id=order_id,
+        price=str(capped_price), volume=str(volume), time_in_force="fok", client=client,
+    )
+    fill = await _fetch_fill(resp["uuid"], client=client)
+    if fill["state"] != "done" or fill["executed_volume"] == 0:
+        db.update_order_filled(order_id, resp["uuid"], None, None, None, None, "cancel")
+        return {"order_id": order_id, "status": "cancel", "filled_price": None,
+                "filled_volume": None, "fee": None}
+
+    db.update_order_filled(
+        order_id, resp["uuid"], fill["filled_price"], fill["executed_volume"], fill["fee"],
+        _slippage_pct(fill["filled_price"], expected_price), "done",
+    )
+    return {"order_id": order_id, "status": "done", "filled_price": fill["filled_price"],
+            "filled_volume": fill["executed_volume"], "fee": fill["fee"]}
+
+
 async def enter(
     strategy: dict, capital: float, expected_price: float,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
@@ -209,6 +233,10 @@ async def enter(
         result = await _run_limit_timeout(
             order_id, strategy["id"], None, market, "bid", price, volume, expected_price,
             timeout_sec, client=client,
+        )
+    elif mode == "market_capped":
+        result = await _run_market_capped(
+            order_id, market, "bid", expected_price, volume, risk_config["max_slippage_pct"], client=client,
         )
     else:
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
@@ -248,6 +276,10 @@ async def exit(
         result = await _run_limit_timeout(
             order_id, strategy["id"], position["id"], market, "ask", price, volume, expected_price,
             timeout_sec, client=client,
+        )
+    elif mode == "market_capped":
+        result = await _run_market_capped(
+            order_id, market, "ask", expected_price, volume, risk_config["max_slippage_pct"], client=client,
         )
     else:
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
