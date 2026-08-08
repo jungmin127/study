@@ -470,11 +470,15 @@ async def test_task_set_manager_creates_task_for_new_strategy(monkeypatch, tmp_p
     # 패치 전에 미리 붙잡아둔다.
     real_sleep = asyncio.sleep
 
-    async def fake_run_strategy_loop(sid):
+    async def fake_run_strategy_loop(sid, lock=None):
         started["ids"].append(sid)
         await asyncio.sleep(3600)  # 태스크가 살아있는 채로 유지(취소되기 전까지)
 
+    async def fake_run_risk_exit_loop(sid, lock=None):
+        await asyncio.sleep(3600)
+
     monkeypatch.setattr(daemon, "_run_strategy_loop", fake_run_strategy_loop)
+    monkeypatch.setattr(daemon, "_run_risk_exit_loop", fake_run_risk_exit_loop)
 
     async def stop_after_one_scan(seconds):
         raise asyncio.CancelledError()
@@ -495,7 +499,7 @@ async def test_task_set_manager_cancels_task_for_removed_strategy(monkeypatch, t
     # 위 테스트와 동일한 이유로 패치 전 원본 sleep을 붙잡아둔다.
     real_sleep = asyncio.sleep
 
-    async def fake_run_strategy_loop(sid):
+    async def fake_run_strategy_loop(sid, lock=None):
         # asyncio.sleep(3600)이 아니라 절대 set되지 않는 Event를 기다리게 한다.
         # daemon.asyncio.sleep은 아래에서 scan 카운팅용으로 전역 monkeypatch되므로,
         # 이 서브 태스크가 asyncio.sleep을 쓰면 매니저 루프의 sleep 호출과 같은
@@ -510,7 +514,12 @@ async def test_task_set_manager_cancels_task_for_removed_strategy(monkeypatch, t
             cancelled["count"] += 1
             raise
 
+    async def fake_run_risk_exit_loop(sid, lock=None):
+        never_set = asyncio.Event()
+        await never_set.wait()
+
     monkeypatch.setattr(daemon, "_run_strategy_loop", fake_run_strategy_loop)
+    monkeypatch.setattr(daemon, "_run_risk_exit_loop", fake_run_risk_exit_loop)
 
     scan_count = {"n": 0}
 
@@ -813,3 +822,101 @@ async def test_run_risk_exit_loop_waits_for_lock_before_exiting(monkeypatch, tmp
     await loop_task
 
     assert events == ["lock_held_by_other", "lock_released_by_other", "exit_for_risk"]
+
+
+async def test_task_set_manager_creates_risk_exit_task_for_new_strategy(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running")
+    started = {"ids": []}
+    real_sleep = asyncio.sleep
+
+    async def fake_run_strategy_loop(sid, lock=None):
+        await asyncio.sleep(3600)
+
+    async def fake_run_risk_exit_loop(sid, lock=None):
+        started["ids"].append(sid)
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(daemon, "_run_strategy_loop", fake_run_strategy_loop)
+    monkeypatch.setattr(daemon, "_run_risk_exit_loop", fake_run_risk_exit_loop)
+
+    async def stop_after_one_scan(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_scan)
+
+    with pytest.raises(asyncio.CancelledError):
+        await daemon._task_set_manager_loop()
+    await real_sleep(0)
+
+    assert started["ids"] == [strategy_id]
+
+
+async def test_task_set_manager_cancels_risk_exit_task_for_removed_strategy(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running")
+    cancelled = {"count": 0}
+    real_sleep = asyncio.sleep
+
+    async def fake_run_strategy_loop(sid, lock=None):
+        never_set = asyncio.Event()
+        await never_set.wait()
+
+    async def fake_run_risk_exit_loop(sid, lock=None):
+        never_set = asyncio.Event()
+        try:
+            await never_set.wait()
+        except asyncio.CancelledError:
+            cancelled["count"] += 1
+            raise
+
+    monkeypatch.setattr(daemon, "_run_strategy_loop", fake_run_strategy_loop)
+    monkeypatch.setattr(daemon, "_run_risk_exit_loop", fake_run_risk_exit_loop)
+
+    scan_count = {"n": 0}
+
+    async def fake_sleep(seconds):
+        scan_count["n"] += 1
+        if scan_count["n"] == 1:
+            dbm.update_live_strategy_status(strategy_id, "stopped")
+            await real_sleep(0)
+        else:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await daemon._task_set_manager_loop()
+    await real_sleep(0)
+
+    assert cancelled["count"] == 1
+
+
+async def test_task_set_manager_shares_same_lock_between_strategy_and_risk_exit_loop(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running")
+    captured = {}
+    real_sleep = asyncio.sleep
+
+    async def fake_run_strategy_loop(sid, lock=None):
+        captured["strategy_lock"] = lock
+        await asyncio.sleep(3600)
+
+    async def fake_run_risk_exit_loop(sid, lock=None):
+        captured["risk_exit_lock"] = lock
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(daemon, "_run_strategy_loop", fake_run_strategy_loop)
+    monkeypatch.setattr(daemon, "_run_risk_exit_loop", fake_run_risk_exit_loop)
+
+    async def stop_after_one_scan(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_scan)
+
+    with pytest.raises(asyncio.CancelledError):
+        await daemon._task_set_manager_loop()
+    await real_sleep(0)
+
+    assert captured["strategy_lock"] is captured["risk_exit_lock"]
+    assert isinstance(captured["strategy_lock"], asyncio.Lock)

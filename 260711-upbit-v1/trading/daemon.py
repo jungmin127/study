@@ -159,21 +159,41 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
 
 async def _task_set_manager_loop() -> None:
     """20초마다 db.list_active_strategies()를 다시 조회해 태스크 집합을 갱신한다
-    (설계 스펙 결정2). 새 전략 -> create_task(_run_strategy_loop), 더 이상 대상
-    아님 -> task.cancel(). 재시작 없이 새로 승인된 전략을 자동으로 픽업한다."""
+    (설계 스펙 결정2). 새 전략 -> create_task(_run_strategy_loop) +
+    create_task(_run_risk_exit_loop)(⑤-4c), 더 이상 대상 아님 -> 두 태스크 다
+    task.cancel(). 전략당 asyncio.Lock을 하나 만들어 두 태스크에 동일 객체로 넘겨
+    주문실행을 직렬화한다(⑤-4c 설계 스펙 결정4). 재시작 없이 새로 승인된 전략을
+    자동으로 픽업한다."""
     tasks: dict[str, asyncio.Task] = {}
+    risk_tasks: dict[str, asyncio.Task] = {}
+    locks: dict[str, asyncio.Lock] = {}
     while True:
         try:
             active_ids = {s["id"] for s in db.list_active_strategies()}
 
             for strategy_id in active_ids:
+                if strategy_id not in locks:
+                    locks[strategy_id] = asyncio.Lock()
                 if strategy_id not in tasks or tasks[strategy_id].done():
-                    tasks[strategy_id] = asyncio.create_task(_run_strategy_loop(strategy_id))
+                    tasks[strategy_id] = asyncio.create_task(
+                        _run_strategy_loop(strategy_id, locks[strategy_id])
+                    )
+                if strategy_id not in risk_tasks or risk_tasks[strategy_id].done():
+                    risk_tasks[strategy_id] = asyncio.create_task(
+                        _run_risk_exit_loop(strategy_id, locks[strategy_id])
+                    )
 
             for strategy_id in list(tasks):
                 if strategy_id not in active_ids:
                     tasks[strategy_id].cancel()
                     del tasks[strategy_id]
+            for strategy_id in list(risk_tasks):
+                if strategy_id not in active_ids:
+                    risk_tasks[strategy_id].cancel()
+                    del risk_tasks[strategy_id]
+            for strategy_id in list(locks):
+                if strategy_id not in active_ids:
+                    del locks[strategy_id]
         except Exception:
             # 이 루프가 죽으면 새 전략을 영영 못 집는다(설계 스펙 '에러 처리' 절) —
             # 로그만 남기고 다음 스캔 주기에 재시도한다(코드 리뷰 지적).
