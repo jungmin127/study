@@ -514,6 +514,57 @@ async def test_enter_market_returns_wait_when_order_never_settles(monkeypatch, t
     assert position_manager.get_open_position(strategy["id"]) is None
 
 
+def _order_count(dbm):
+    conn = dbm._connect()
+    try:
+        return conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+    finally:
+        conn.close()
+
+
+async def test_enter_rejects_unsupported_mode_before_inserting_order(monkeypatch, tmp_path):
+    """모드 검증이 insert_order 뒤에 있으면 잘못 설정된 전략이 status='wait' 고아 행을
+    영구히 남긴다. dry_run이어도 검증돼야 한다(최종리뷰 Important #4)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="twap")
+    before = _order_count(dbm)
+
+    with pytest.raises(ValueError, match="지원하지 않는 order_execution_mode"):
+        await order_executor.enter(strategy, 500_000.0, 50_000_000.0, dry_run=True)
+
+    assert _order_count(dbm) == before
+
+
+async def test_exit_rejects_unsupported_mode_before_inserting_order(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="twap")
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    before = _order_count(dbm)
+
+    with pytest.raises(ValueError, match="지원하지 않는 order_execution_mode"):
+        await order_executor.exit(strategy, position, 50_000_000.0, dry_run=True)
+
+    assert _order_count(dbm) == before
+
+
+async def test_enter_rejects_market_capped_without_max_slippage_pct(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, market="KRW-BTC", current_capital=1_000_000.0,
+        risk_config_json=json.dumps({
+            "order_execution_mode": "market_capped", "max_position_per_market": 1_000_000.0,
+        }),
+    )
+    strategy = dbm.get_live_strategy(strategy_id)
+    before = _order_count(dbm)
+
+    with pytest.raises(ValueError, match="max_slippage_pct"):
+        await order_executor.enter(strategy, 500_000.0, 50_000_000.0, dry_run=True)
+
+    assert _order_count(dbm) == before
+
+
 import trading.risk_manager as risk_manager
 
 

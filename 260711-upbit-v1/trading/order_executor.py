@@ -42,6 +42,19 @@ _TICK_TABLE: list[tuple[float, float]] = [
 ]
 
 
+_SUPPORTED_MODES = frozenset({"market", "limit", "limit_timeout", "market_capped"})
+
+
+def _validate_mode(mode: str, risk_config: dict) -> None:
+    """orders 행을 만들기 전에 실행모드 설정을 검증한다. insert_order 뒤에서 검증하면
+    잘못 설정된 전략이 status='wait' 고아 행을 영구히 남긴다(최종리뷰 Important #4).
+    dry_run 경로도 이 검증을 건너뛰면 안 된다."""
+    if mode not in _SUPPORTED_MODES:
+        raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
+    if mode == "market_capped" and "max_slippage_pct" not in risk_config:
+        raise ValueError("market_capped 모드는 risk_config에 max_slippage_pct가 필요합니다")
+
+
 def round_to_tick(price: float) -> float:
     for threshold, tick in _TICK_TABLE:
         if price >= threshold:
@@ -250,6 +263,8 @@ async def enter(
 
     risk_config = json.loads(strategy["risk_config_json"])
     mode = risk_config["order_execution_mode"]
+    _validate_mode(mode, risk_config)
+
     market = strategy["market"]
     # market_capped는 expected_price가 아니라 슬리피지 상한가로 주문하므로, orders 행의
     # requested_price/requested_volume도 그 실제 주문가 기준이어야 한다.
@@ -280,7 +295,7 @@ async def enter(
             order_id, market, "bid", expected_price, volume, risk_config["max_slippage_pct"],
             capital=capital, client=client,
         )
-    else:
+    else:  # _validate_mode()가 이미 걸러 도달 불가 — 모드 추가 시 분기 누락 방지용 방어코드
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
 
     if result["status"] != "done":
@@ -299,6 +314,8 @@ async def exit(
 
     risk_config = json.loads(strategy["risk_config_json"])
     mode = risk_config["order_execution_mode"]
+    _validate_mode(mode, risk_config)
+
     market = strategy["market"]
     price = (
         _capped_price(expected_price, "ask", risk_config["max_slippage_pct"])
@@ -327,7 +344,7 @@ async def exit(
             order_id, market, "ask", expected_price, volume, risk_config["max_slippage_pct"],
             capital=None, client=client,  # 매도는 보유수량 전량이라 capital 기반 재계산 불필요
         )
-    else:
+    else:  # _validate_mode()가 이미 걸러 도달 불가 — 모드 추가 시 분기 누락 방지용 방어코드
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
 
     if result["status"] != "done":
