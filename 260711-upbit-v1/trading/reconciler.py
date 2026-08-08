@@ -59,3 +59,20 @@ async def _sync_pending_limit_orders(
         )
         synced += 1
     return synced
+
+
+async def hydrate_state(strategy: dict, *, client: httpx.AsyncClient | None = None) -> dict:
+    """데몬 시작 시 전략 1개당 1회 호출. 내부 wait limit 주문을 먼저 동기화(결정6)한 뒤,
+    strategy['baseline_qty']가 None이면(결정9, 이 전략의 첫 호출) 그 시점 실제 코인 잔고를
+    baseline으로 저장하고 불일치 검사 없이 반환한다. 이미 baseline이 있으면
+    _run_reconcile_pipeline()을 수행한다(Task8에서 연결)."""
+    synced = await _sync_pending_limit_orders(strategy, client=client)
+
+    if strategy["baseline_qty"] is None:
+        account = await _get_coin_account(strategy["market"], client=client)
+        baseline = (float(account["balance"]) + float(account["locked"])) if account else 0.0
+        db.update_live_strategy_baseline_qty(strategy["id"], baseline)
+        return {"synced_wait_orders": synced, "baseline_captured": True}
+
+    result = await _run_reconcile_pipeline(strategy, client=client)
+    return {"synced_wait_orders": synced, "baseline_captured": False, **result}

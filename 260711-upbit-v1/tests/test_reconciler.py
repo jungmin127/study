@@ -111,3 +111,23 @@ async def test_sync_pending_limit_orders_ignores_non_limit_wait_orders(monkeypat
 
     assert synced == 0
     assert calls["count"] == 0
+
+
+async def test_hydrate_state_captures_baseline_on_first_call(monkeypatch, tmp_path):
+    """설계 스펙 결정9 — 전략 시작 전부터 보유하던 코인(사용자 사례: 기존 BTC 보유)을
+    첫 hydrate_state 호출에서 baseline으로 격리하고, 그 호출은 불일치 검사를 건너뛴다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    assert strategy["baseline_qty"] is None
+
+    async def fake_get_accounts(*, client=None):
+        return [{"currency": "BTC", "balance": "0.05", "locked": "0", "avg_buy_price": "50000000"}]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler.hydrate_state(strategy)
+
+    assert result["baseline_captured"] is True
+    assert result["synced_wait_orders"] == 0
+    assert dbm.get_live_strategy(strategy["id"])["baseline_qty"] == 0.05
+    assert dbm.get_live_strategy(strategy["id"])["status"] != "paused"
