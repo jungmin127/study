@@ -484,6 +484,41 @@ async def test_detect_external_orders_skips_cycle_when_own_order_in_flight(monke
     assert calls["count"] == 0
 
 
+async def test_detect_external_orders_ignores_stale_in_flight_order(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 재검토 Important 1 — 미확정(upbit_uuid IS NULL) 주문이라도 그
+    전략의 order_timeout_sec + 여유분보다 오래됐으면 더는 "방금 낸 주문"으로 보지 않는다.
+    나이 제한이 없으면 주문 실패 후 정리되지 않은 행이나 limit_timeout의 의도적으로
+    'wait'인 채 남는 잔량 전환 행 때문에 그 전략의 외부주문 감지가 영구히 멈춘다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+    order_id = dbm.insert_order(strategy["id"], None, "KRW-BTC", "bid", "market", 100.0, 1.0, 100.0)
+    conn = dbm._connect()
+    try:
+        conn.execute(
+            "UPDATE orders SET created_at = datetime('now', '-1 hour') WHERE id = ?",
+            (order_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    calls = {"count": 0}
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        calls["count"] += 1
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert found == []
+    assert calls["count"] == 1  # 나이 제한을 넘겼으니 감지 로직이 정상적으로 실행됐다
+
+
 async def test_reconcile_position_own_fills_alone_do_not_trigger_manual_intervention(
     monkeypatch, tmp_path,
 ):
@@ -625,3 +660,34 @@ async def test_reconcile_position_mixed_side_treated_as_unexplained(monkeypatch,
 
     assert result["action"] == "unexplained"
     assert result["paused"] is True
+
+
+async def test_hydrate_state_rereads_strategy_row_not_stale_dict(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 재검토 Important 2 — _run_reconcile_pipeline은 최신 행을 다시
+    읽지만, hydrate_state 자신의 baseline_qty is None 판단은 그 재읽기보다 먼저 일어난다.
+    호출자가 baseline이 이미 잡힌 뒤의 오래된 dict(baseline_qty=None)를 재사용해도,
+    hydrate_state가 스스로 최신 행을 다시 읽지 않으면 이미 잡아둔 baseline을 다시
+    캡처해버려 그 사이 생긴 실제 잔고변화를 baseline으로 흡수해버린다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.05)
+    stale_strategy = dict(strategy)
+    stale_strategy["baseline_qty"] = None  # baseline 캡처 이전 시점의 오래된 스냅샷
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.08)]  # 그 사이 사용자가 0.03을 추가로 수동매수했다고 가정
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+
+    result = await reconciler.hydrate_state(stale_strategy)
+
+    assert result["baseline_captured"] is False
+    assert dbm.get_live_strategy(strategy["id"])["baseline_qty"] == 0.05  # 재캡처되지 않음
+    assert result["balance_mismatch"] is True  # 0.03 증가가 정상적으로 불일치로 감지됨

@@ -10,6 +10,7 @@ trading/reconciler.py
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import httpx
 
@@ -66,12 +67,16 @@ async def _sync_pending_limit_orders(
 
 
 async def hydrate_state(strategy: dict, *, client: httpx.AsyncClient | None = None) -> dict:
-    """데몬 시작 시 전략 1개당 1회 호출. 내부 wait limit 주문을 먼저 동기화(결정6)한 뒤,
+    """데몬 시작 시 전략 1개당 1회 호출. 최신 strategy 행을 다시 읽은 뒤(호출자가 오래된
+    dict를 재사용해도 baseline_qty 판단이 stale해지지 않도록 — 최종 브랜치 리뷰 재검토에서
+    발견된 Critical 2의 잔여 구멍, _run_reconcile_pipeline만 재읽기하고 이 함수 자체의
+    baseline_qty 첫 판단은 놓쳤었다) 내부 wait limit 주문을 먼저 동기화(결정6)한다.
     strategy['baseline_qty']가 None이면(결정9, 이 전략의 첫 호출) 그 시점 실제 코인 잔고에서
     이미 봇이 추적 중인 오픈 포지션 수량을 뺀 값을 baseline으로 저장하고(최종 브랜치 리뷰
     Important 7 — 포지션이 있는 채로 baseline을 다시 잡으면 그 포지션이 baseline에
     흡수돼 사라진다) 불일치 검사 없이 반환한다. 이미 baseline이 있으면
     _run_reconcile_pipeline()에 이번에 동기화한 own_fills를 넘겨 수행한다."""
+    strategy = db.get_live_strategy(strategy["id"]) or strategy
     synced_orders = await _sync_pending_limit_orders(strategy, client=client)
 
     if strategy["baseline_qty"] is None:
@@ -87,6 +92,11 @@ async def hydrate_state(strategy: dict, *, client: httpx.AsyncClient | None = No
     return {"synced_wait_orders": len(synced_orders), "baseline_captured": False, **result}
 
 
+def _is_recent(created_at: str, max_age_sec: float) -> bool:
+    created = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - created).total_seconds() <= max_age_sec
+
+
 async def _detect_external_orders(
     strategy: dict, *, client: httpx.AsyncClient | None = None,
 ) -> list[dict]:
@@ -96,10 +106,18 @@ async def _detect_external_orders(
     우리가 방금 낸 주문이 아직 upbit_uuid를 기록하기 전(order_executor가 체결/타임아웃
     확인을 기다리는 짧은 창) 상태로 남아있으면, 그 주문이 거래소 목록에는 "새 주문"으로
     보여 외부주문으로 오인될 수 있다(최종 브랜치 리뷰 Critical 3 — 오탐 정지 + upbit_uuid
-    UNIQUE 제약 위반으로 order_executor가 크래시). 그런 미확정 주문이 하나라도 있으면
-    이번 사이클은 감지를 건너뛴다 — 다음 사이클엔 그 주문의 uuid가 기록돼 있어 정상적으로
-    무시된다."""
-    if any(o["upbit_uuid"] is None for o in db.list_wait_orders(strategy["id"])):
+    UNIQUE 제약 위반으로 order_executor가 크래시). 그런 미확정 주문이 "최근"(전략의
+    order_timeout_sec + 여유분 이내) 것이면 이번 사이클은 감지를 건너뛴다 — 다음
+    사이클엔 그 주문의 uuid가 기록돼 있어 정상적으로 무시된다. 오래된 미확정 행(주문
+    실패 후 정리되지 않았거나, limit_timeout 잔량 전환 주문처럼 의도적으로 'wait'인 채
+    남는 행)까지 무기한 걸리게 두면 그 전략의 외부주문 감지가 영구히 멈춘다(최종
+    브랜치 리뷰 재검토 Important 1) — 나이 제한으로 그 문제를 막는다."""
+    risk_config = json.loads(strategy["risk_config_json"])
+    in_flight_window_sec = float(risk_config.get("order_timeout_sec", 10)) + 60
+    if any(
+        o["upbit_uuid"] is None and _is_recent(o["created_at"], in_flight_window_sec)
+        for o in db.list_wait_orders(strategy["id"])
+    ):
         return []
 
     market = strategy["market"]
@@ -108,7 +126,6 @@ async def _detect_external_orders(
         market=market, states=["done", "cancel"], client=client,
     )
 
-    risk_config = json.loads(strategy["risk_config_json"])
     policy = risk_config.get("manual_intervention_policy", "all_stop")
     # 정책 값이 없거나 오타여도 안전한 쪽(정지)으로 기울인다 — "acknowledge_and_continue"를
     # 명시적으로 고른 경우에만 계속 진행(최종 브랜치 리뷰 Important 4, 기존엔 반대였음).
