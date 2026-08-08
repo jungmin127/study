@@ -394,6 +394,62 @@ async def test_exit_market_capped_uses_lower_bound_price(monkeypatch, tmp_path):
     assert captured["price"] == str(order_executor.round_to_tick(50_000_000.0 * 0.995))
 
 
+async def test_enter_market_capped_sizes_volume_against_capped_price(monkeypatch, tmp_path):
+    """market_capped는 expected_price가 아니라 슬리피지 상한가(capped_price)로 주문하므로
+    수량도 capped_price 기준으로 계산해야 clamp된 capital을 넘기지 않는다(최종리뷰 Critical #2)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="market_capped", max_slippage_pct=0.5)
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(price=price, volume=volume)
+        return {"uuid": "uuid-capped-vol", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.009", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "450000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    capital = 500_000.0
+    order = await order_executor.enter(strategy, capital, 50_000_000.0)
+
+    capped_price = order_executor.round_to_tick(50_000_000.0 * 1.005)  # 50,250,000
+    # orders 행에도 실제로 낸 주문가(capped_price)가 남아야 감사추적이 맞다
+    assert order["requested_price"] == pytest.approx(capped_price)
+    sent_volume = float(captured["volume"])
+    assert sent_volume == pytest.approx(order_executor._floor_volume(capital / capped_price))
+    assert sent_volume != pytest.approx(order_executor._floor_volume(capital / 50_000_000.0))
+    assert capped_price * sent_volume <= capital  # clamp된 자본을 절대 넘지 않는다
+
+
+async def test_exit_market_capped_sells_whole_position_qty(monkeypatch, tmp_path):
+    """매도는 capital이 아니라 보유수량 전량을 팔므로 capped_price 재계산 대상이 아니다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="market_capped", max_slippage_pct=0.5)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(volume=volume)
+        return {"uuid": "uuid-capped-ask", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "497500.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await order_executor.exit(strategy, position, 50_000_000.0)
+
+    assert float(captured["volume"]) == pytest.approx(0.01)
+
+
 async def test_enter_market_polls_until_order_settles(monkeypatch, tmp_path):
     """업비트는 주문을 비동기 체결하므로 create_order 직후 조회는 아직 wait일 수 있다.
     확정될 때까지 짧게 재조회해야 한다(최종리뷰 Critical #1)."""

@@ -93,6 +93,12 @@ async def _fetch_fill(upbit_uuid: str, *, client: httpx.AsyncClient | None = Non
     }
 
 
+def _capped_price(expected_price: float, side: str, max_slippage_pct: float) -> float:
+    """market_capped 모드가 실제로 내는 주문가(허용 슬리피지 상한/하한가)."""
+    sign = 1 if side == "bid" else -1
+    return round_to_tick(expected_price * (1 + sign * max_slippage_pct / 100))
+
+
 async def _await_settlement(
     upbit_uuid: str, *, timeout: float = 3.0, interval: float = 0.2,
     client: httpx.AsyncClient | None = None,
@@ -208,10 +214,15 @@ async def _run_limit_timeout(
 
 async def _run_market_capped(
     order_id: str, market: str, side: str, expected_price: float, volume: float,
-    max_slippage_pct: float, *, client: httpx.AsyncClient | None = None,
+    max_slippage_pct: float, *, capital: float | None = None,
+    client: httpx.AsyncClient | None = None,
 ) -> dict:
-    sign = 1 if side == "bid" else -1
-    capped_price = round_to_tick(expected_price * (1 + sign * max_slippage_pct / 100))
+    capped_price = _capped_price(expected_price, side, max_slippage_pct)
+    if side == "bid":
+        # 실제 주문가는 expected_price가 아니라 더 불리한 capped_price다. 호출자가 넘긴
+        # expected_price 기준 수량을 그대로 쓰면 capped_price × volume이 clamp된 capital을
+        # max_slippage_pct%만큼 초과한다(최종리뷰 Critical #2).
+        volume = _floor_volume(capital / capped_price)
     resp = await _create_order_with_retry(
         market, side, "limit", order_id=order_id,
         price=str(capped_price), volume=str(volume), time_in_force="fok", client=client,
@@ -240,7 +251,12 @@ async def enter(
     risk_config = json.loads(strategy["risk_config_json"])
     mode = risk_config["order_execution_mode"]
     market = strategy["market"]
-    price = round_to_tick(expected_price)
+    # market_capped는 expected_price가 아니라 슬리피지 상한가로 주문하므로, orders 행의
+    # requested_price/requested_volume도 그 실제 주문가 기준이어야 한다.
+    price = (
+        _capped_price(expected_price, "bid", risk_config["max_slippage_pct"])
+        if mode == "market_capped" else round_to_tick(expected_price)
+    )
     volume = _floor_volume(capital / price)
 
     order_id = db.insert_order(strategy["id"], None, market, "bid", mode, price, volume, expected_price)
@@ -261,7 +277,8 @@ async def enter(
         )
     elif mode == "market_capped":
         result = await _run_market_capped(
-            order_id, market, "bid", expected_price, volume, risk_config["max_slippage_pct"], client=client,
+            order_id, market, "bid", expected_price, volume, risk_config["max_slippage_pct"],
+            capital=capital, client=client,
         )
     else:
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
@@ -283,7 +300,10 @@ async def exit(
     risk_config = json.loads(strategy["risk_config_json"])
     mode = risk_config["order_execution_mode"]
     market = strategy["market"]
-    price = round_to_tick(expected_price)
+    price = (
+        _capped_price(expected_price, "ask", risk_config["max_slippage_pct"])
+        if mode == "market_capped" else round_to_tick(expected_price)
+    )
     volume = position["entry_qty"]
 
     order_id = db.insert_order(strategy["id"], position["id"], market, "ask", mode, price, volume, expected_price)
@@ -304,7 +324,8 @@ async def exit(
         )
     elif mode == "market_capped":
         result = await _run_market_capped(
-            order_id, market, "ask", expected_price, volume, risk_config["max_slippage_pct"], client=client,
+            order_id, market, "ask", expected_price, volume, risk_config["max_slippage_pct"],
+            capital=None, client=client,  # 매도는 보유수량 전량이라 capital 기반 재계산 불필요
         )
     else:
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
