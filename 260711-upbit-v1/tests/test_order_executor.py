@@ -107,10 +107,12 @@ async def test_create_order_with_retry_reuses_existing_order_after_network_error
 
 async def test_create_order_with_retry_retries_when_confirmation_finds_nothing(monkeypatch):
     calls = {"create": 0}
+    identifiers = []
 
     async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
                                  time_in_force=None, identifier=None, client=None):
         calls["create"] += 1
+        identifiers.append(identifier)
         if calls["create"] == 1:
             raise httpx.TimeoutException("timed out")
         return {"uuid": "uuid-2", "state": "wait"}
@@ -128,6 +130,8 @@ async def test_create_order_with_retry_retries_when_confirmation_finds_nothing(m
 
     assert resp["uuid"] == "uuid-2"
     assert calls["create"] == 2
+    # 재시도가 같은 identifier를 재사용해야 이중주문이 안 난다(멱등성 설계의 핵심)
+    assert identifiers == ["order-1", "order-1"]
 
 
 import json
@@ -260,6 +264,29 @@ async def test_enter_limit_mode_leaves_order_waiting_without_opening_position(mo
     assert order["status"] == "wait"
     assert order["filled_price"] is None
     assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_exit_limit_mode_leaves_order_waiting_without_closing_position(monkeypatch, tmp_path):
+    """미체결 지정가 매도 주문으로 포지션을 닫아버리면 실제로는 코인을 들고 있는데
+    장부상 청산된 것으로 어긋난다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit")
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        assert ord_type == "limit"
+        assert side == "ask"
+        return {"uuid": "uuid-ask-limit", "state": "wait"}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+
+    order = await order_executor.exit(strategy, position, 50_000_000.0)
+
+    assert order["status"] == "wait"
+    assert order["filled_price"] is None
+    assert position_manager.get_open_position(strategy["id"]) is not None
 
 
 async def test_enter_limit_timeout_fills_within_timeout_without_conversion(monkeypatch, tmp_path):
