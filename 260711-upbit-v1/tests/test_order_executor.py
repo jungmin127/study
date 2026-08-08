@@ -183,7 +183,9 @@ async def test_enter_market_mode_places_price_order_and_records_fill(monkeypatch
     order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
 
     assert captured["ord_type"] == "price"  # 시장가 매수는 price 타입(설계 스펙 결정7)
-    assert captured["price"] == "500000"  # _fmt: str(500000.0)의 꼬리 '.0' 없이
+    # 주문금액 = capital에서 매수 수수료 여유를 뺀 값(_BID_FEE_RATE), 지수표기/꼬리'.0' 없이
+    assert "e" not in captured["price"]
+    assert float(captured["price"]) == pytest.approx(500_000.0 / 1.0005)
     assert captured["volume"] is None
     assert order["status"] == "done"
     assert order["filled_price"] == pytest.approx(500000.0 / 0.01)
@@ -417,11 +419,12 @@ async def test_enter_market_capped_sizes_volume_against_capped_price(monkeypatch
     order = await order_executor.enter(strategy, capital, 50_000_000.0)
 
     capped_price = order_executor.round_to_tick(50_000_000.0 * 1.005)  # 50,250,000
+    orderable = capital / 1.0005  # 매수 수수료 여유(Fix 7)를 뺀 실제 주문가능금액
     # orders 행에도 실제로 낸 주문가(capped_price)가 남아야 감사추적이 맞다
     assert order["requested_price"] == pytest.approx(capped_price)
     sent_volume = float(captured["volume"])
-    assert sent_volume == pytest.approx(order_executor._floor_volume(capital / capped_price))
-    assert sent_volume != pytest.approx(order_executor._floor_volume(capital / 50_000_000.0))
+    assert sent_volume == pytest.approx(order_executor._floor_volume(orderable / capped_price))
+    assert sent_volume != pytest.approx(order_executor._floor_volume(orderable / 50_000_000.0))
     assert capped_price * sent_volume <= capital  # clamp된 자본을 절대 넘지 않는다
 
 
@@ -512,6 +515,55 @@ async def test_enter_market_returns_wait_when_order_never_settles(monkeypatch, t
     assert order["status"] == "wait"
     assert calls["get"] > 1
     assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_enter_reserves_fee_headroom_from_capital(monkeypatch, tmp_path):
+    """업비트는 매수 시 주문금액+수수료를 묶으므로 capital 전액을 주문에 쓰면
+    완전복리 전략이 늘 잔고보다 조금 더 주문하게 된다(최종리뷰 Important #7)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(price=price)
+        return {"uuid": "uuid-fee", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "499750.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert float(captured["price"]) == pytest.approx(500_000.0 / 1.0005, rel=1e-9)
+
+
+async def test_exit_does_not_apply_fee_headroom(monkeypatch, tmp_path):
+    """매도는 capital 기반 사이징이 아니라 보유수량 전량이므로 수수료 여유를 빼지 않는다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(volume=volume)
+        return {"uuid": "uuid-fee-ask", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await order_executor.exit(strategy, position, 50_000_000.0)
+
+    assert float(captured["volume"]) == pytest.approx(0.01)
 
 
 def test_fmt_avoids_scientific_notation_and_float_noise():

@@ -44,6 +44,8 @@ _TICK_TABLE: list[tuple[float, float]] = [
 
 _SUPPORTED_MODES = frozenset({"market", "limit", "limit_timeout", "market_capped"})
 
+_BID_FEE_RATE = 0.0005  # 업비트 기본 매수 수수료율 0.05%
+
 
 def _validate_mode(mode: str, risk_config: dict) -> None:
     """orders 행을 만들기 전에 실행모드 설정을 검증한다. insert_order 뒤에서 검증하면
@@ -279,6 +281,11 @@ async def enter(
     risk_config = json.loads(strategy["risk_config_json"])
     mode = risk_config["order_execution_mode"]
     _validate_mode(mode, risk_config)
+
+    # 업비트는 매수 시 주문금액+수수료를 묶으므로, capital 전액을 주문금액으로 쓰면
+    # 완전복리 전략이 늘 보유 원화보다 조금 더 주문하게 된다(최종리뷰 Important #7).
+    # 모든 모드의 수량/금액 계산이 이 capital에서 파생되므로 여기서 한 번만 조정한다.
+    capital = capital / (1 + _BID_FEE_RATE)
 
     market = strategy["market"]
     # market_capped는 expected_price가 아니라 슬리피지 상한가로 주문하므로, orders 행의
