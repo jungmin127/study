@@ -550,3 +550,29 @@ def test_fetch_page_acquires_candle_bucket_before_each_request(monkeypatch):
     uds._fetch_page(client, "https://api.upbit.com/v1/candles/days", "KRW-BTC", None)
 
     assert calls["acquire"] == 1
+
+
+def test_get_server_time_offset_sec_computes_positive_when_local_is_behind(monkeypatch):
+    class _FakeResponse:
+        headers = {"Date": "Sat, 08 Aug 2026 00:00:00 GMT"}
+
+        def raise_for_status(self):
+            pass
+
+    def _fake_get(url, params=None, timeout=None):
+        assert "market/all" in url
+        return _FakeResponse()
+
+    monkeypatch.setattr(uds, "httpx", type("_FakeHttpx", (), {
+        "get": staticmethod(_fake_get),
+    }))
+    monkeypatch.setattr(
+        uds, "datetime",
+        type("_FixedDatetime", (), {
+            "now": staticmethod(lambda tz=None: datetime(2026, 8, 8, 0, 0, 5, tzinfo=timezone.utc))
+        }),
+    )
+
+    offset = uds.get_server_time_offset_sec()
+
+    assert offset == pytest.approx(5.0)
