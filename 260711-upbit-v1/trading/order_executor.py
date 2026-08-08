@@ -434,6 +434,25 @@ async def exit(
     return order
 
 
+async def exit_for_risk(
+    strategy: dict, position: dict, expected_price: float, reason: str,
+    *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
+) -> dict:
+    """ticker 트리거 손절/익절 전용 진입점(⑤-4c). handle_signal_result()와 달리
+    signals 테이블과 무관하다 — candle 사이클 밖에서 발생하는 이벤트라 대응되는 signal
+    row가 없다. 성공 시 record_trade_result()까지 호출(handle_signal_result의 매도
+    성공 분기와 동일한 부기 의무 — daemon.py의 check_circuit_breaker() 호출 전제)."""
+    order = await exit(
+        strategy, position, expected_price, client=client, dry_run=dry_run, close_reason=reason,
+    )
+    if order["status"] == "done":
+        risk_manager.record_trade_result(strategy["id"], order["realized_pnl"], order["capital_after"])
+        return {"action": "exited", "order_id": order["id"]}
+    if order["status"] == "cancel":
+        return {"action": "slippage_exceeded", "order_id": order["id"]}
+    return {"action": "pending", "order_id": order["id"]}
+
+
 async def handle_signal_result(
     strategy_id: str, signal_result: dict, *, dry_run: bool = False,
 ) -> dict:

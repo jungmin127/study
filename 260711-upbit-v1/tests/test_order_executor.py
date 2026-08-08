@@ -1167,3 +1167,76 @@ async def test_exit_records_custom_close_reason(monkeypatch, tmp_path):
     )
 
     assert dbm.get_position(position["id"])["close_reason"] == "stop_loss_pct"
+
+
+async def test_exit_for_risk_records_trade_result_and_close_reason_on_success(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    recorded = {}
+    monkeypatch.setattr(
+        risk_manager, "record_trade_result",
+        lambda sid, pnl, capital_after: recorded.update(sid=sid, pnl=pnl, capital_after=capital_after),
+    )
+
+    result = await order_executor.exit_for_risk(
+        strategy, position, 50_000_000.0, "stop_loss_pct", dry_run=True,
+    )
+
+    assert result["action"] == "exited"
+    assert recorded["sid"] == strategy["id"]
+    assert dbm.get_position(position["id"])["close_reason"] == "stop_loss_pct"
+
+
+async def test_exit_for_risk_marks_pending_without_recording_trade_when_not_filled(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit")
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    recorded = {"count": 0}
+    monkeypatch.setattr(
+        risk_manager, "record_trade_result",
+        lambda *a: recorded.__setitem__("count", recorded["count"] + 1),
+    )
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-risk-pending", "state": "wait"}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "take_profit_pct")
+
+    assert result["action"] == "pending"
+    assert recorded["count"] == 0
+    assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+async def test_exit_for_risk_marks_slippage_exceeded_on_cancel(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="market_capped", max_slippage_pct=0.1)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    recorded = {"count": 0}
+    monkeypatch.setattr(
+        risk_manager, "record_trade_result",
+        lambda *a: recorded.__setitem__("count", recorded["count"] + 1),
+    )
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-risk-cancel", "state": "cancel"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "cancel", "executed_volume": "0", "remaining_volume": "0.01",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert result["action"] == "slippage_exceeded"
+    assert recorded["count"] == 0
+    assert position_manager.get_open_position(strategy["id"]) is not None
