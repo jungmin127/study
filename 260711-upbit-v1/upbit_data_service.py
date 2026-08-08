@@ -242,7 +242,7 @@ def get_candles(market: str, timeframe: str, start: datetime, end: datetime) -> 
 
 def get_server_time_offset_sec() -> float:
     """업비트 서버 응답의 Date 헤더와 로컬 UTC 시각의 차이(초)를 반환한다. 양수면 로컬
-    시각이 서버보다 느리다는 뜻. 인증이 필요 없는 공개 엔드포인트(마켓 목록)를 재사용해
+    시각이 서버보다 빠르다는 뜻. 인증이 필요 없는 공개 엔드포인트(마켓 목록)를 재사용해
     가볍게 확인한다(설계 스펙 결정10)."""
     resp = httpx.get(f"{UPBIT_BASE_URL}/market/all", params={"isDetails": "false"}, timeout=10)
     resp.raise_for_status()
