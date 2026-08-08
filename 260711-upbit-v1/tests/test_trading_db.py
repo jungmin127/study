@@ -74,7 +74,7 @@ def test_live_strategies_columns(monkeypatch, tmp_path):
         "id", "source_run_id", "market", "timeframe", "buy_conditions_json",
         "sell_conditions_json", "risk_config_json", "current_capital", "status",
         "last_processed_candle_time", "created_at", "approved_at", "started_at",
-        "stopped_at",
+        "stopped_at", "baseline_qty",
     }
 
 
@@ -409,3 +409,13 @@ def test_update_signal_result_sets_skip_reason_without_order(monkeypatch, tmp_pa
         conn.close()
     assert row["resulting_order_id"] is None
     assert row["skip_reason"] == "circuit_breaker_tripped"
+
+
+def test_update_live_strategy_baseline_qty_sets_value(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    assert db.get_live_strategy(strategy_id)["baseline_qty"] is None
+
+    db.update_live_strategy_baseline_qty(strategy_id, 0.05)
+
+    assert db.get_live_strategy(strategy_id)["baseline_qty"] == 0.05

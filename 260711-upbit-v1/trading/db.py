@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS live_strategies (
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     approved_at         TEXT,
     started_at          TEXT,
-    stopped_at          TEXT
+    stopped_at          TEXT,
+    baseline_qty        REAL
 );
 
 CREATE TABLE IF NOT EXISTS positions (
@@ -390,6 +391,18 @@ def update_signal_result(
         conn.execute(
             "UPDATE signals SET resulting_order_id=?, skip_reason=? WHERE id=?",
             (resulting_order_id, skip_reason, signal_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_live_strategy_baseline_qty(live_strategy_id: str, baseline_qty: float) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE live_strategies SET baseline_qty = ? WHERE id = ?",
+            (baseline_qty, live_strategy_id),
         )
         conn.commit()
     finally:
