@@ -405,6 +405,59 @@ async def test_run_strategy_loop_survives_get_live_strategy_exception_mid_loop(m
     assert any(strategy_id in record.message for record in caplog.records)
 
 
+async def test_run_strategy_loop_serializes_signal_processing_through_shared_lock(monkeypatch, tmp_path):
+    """전략별 lock을 다른 코루틴이 이미 쥐고 있으면, _run_strategy_loop의
+    handle_signal_result 호출은 그 lock이 풀릴 때까지 기다려야 한다(⑤-4c 설계 스펙
+    결정4 — _run_risk_exit_loop와 주문실행이 겹치지 않게 하는 핵심 계약)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", timeframe="minutes1")
+    lock = asyncio.Lock()
+    events = []
+    real_sleep = asyncio.sleep  # daemon.asyncio.sleep을 아래서 monkeypatch하기 전에 붙잡아둔다
+
+    async def fake_hydrate_state(strategy, *, client=None):
+        return {"synced_wait_orders": 0, "baseline_captured": True}
+
+    def fake_evaluate_signals(sid, now=None):
+        return {"new_candle": True, "candle_time": "2026-08-08T00:00:00+00:00",
+                "buy_signal": False, "sell_signal": False,
+                "buy_signal_id": "b1", "sell_signal_id": "s1",
+                "latest_close": 50000000.0, "paused": False, "resumed": False}
+
+    async def fake_handle_signal_result(sid, result, *, dry_run=False):
+        events.append("handle_signal_result")
+        return {"buy_action": None, "sell_action": None, "buy_order_id": None, "sell_order_id": None}
+
+    async def fake_check_manual_intervention(strategy, *, own_fills=(), client=None):
+        return {"balance_mismatch": False, "action": "none", "paused": False}
+
+    async def fake_sync_pending_limit_orders(strategy, *, client=None):
+        return []
+
+    monkeypatch.setattr(reconciler, "hydrate_state", fake_hydrate_state)
+    monkeypatch.setattr(signal_engine, "evaluate_signals", fake_evaluate_signals)
+    monkeypatch.setattr(order_executor, "handle_signal_result", fake_handle_signal_result)
+    monkeypatch.setattr(reconciler, "check_manual_intervention", fake_check_manual_intervention)
+    monkeypatch.setattr(reconciler, "sync_pending_limit_orders", fake_sync_pending_limit_orders)
+    calls, fake_sleep = _stop_after_one_tick(dbm, strategy_id)
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    async with lock:
+        events.append("lock_held_by_other")
+        loop_task = asyncio.create_task(daemon._run_strategy_loop(strategy_id, lock))
+        # _run_strategy_loop가 lock 획득을 시도하다 블록되게 한 틱 양보한다. daemon.asyncio.sleep은
+        # 위에서 fake_sleep으로 전역 monkeypatch됐으므로(daemon.asyncio는 top-level import asyncio와
+        # 동일한 모듈 객체), 여기서 bare asyncio.sleep(0)을 쓰면 그 fake_sleep이 호출돼 전략 상태가
+        # 여기서 조기에 'stopped'로 바뀌어버린다 — 반드시 monkeypatch 전에 붙잡아둔 real_sleep을 쓴다.
+        await real_sleep(0)
+        assert "handle_signal_result" not in events
+        events.append("lock_released_by_other")
+
+    await loop_task
+
+    assert events == ["lock_held_by_other", "lock_released_by_other", "handle_signal_result"]
+
+
 async def test_task_set_manager_creates_task_for_new_strategy(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm, status="running")

@@ -40,13 +40,19 @@ def _poll_interval_sec(timeframe: str) -> float:
     return max(_MIN_POLL_INTERVAL_SEC, min(_MAX_POLL_INTERVAL_SEC, duration_sec // 12))
 
 
-async def _run_strategy_loop(strategy_id: str) -> None:
+async def _run_strategy_loop(strategy_id: str, lock: asyncio.Lock | None = None) -> None:
     """전략 하나를 담당하는 유일한 태스크(설계 스펙 결정3). hydrate_state() 1회 →
     무한루프(새 봉 처리 → 매도체결 시 서킷브레이커 판정 → 20초마다 reconciler 2종
     호출 → 봉타임 비례 sleep). status가 running/paused가 아니게 되면 스스로 종료한다.
     신호처리와 reconcile은 서로 독립된 try/except다 — 신호처리가 매 틱 죽어도 reconcile
     워치독은 계속 돌아야 하고, 그 반대도 마찬가지다(최종 브랜치 리뷰 Important 3).
-    예외는 로그만 남기고 다음 틱에 재시도(결정8)."""
+    예외는 로그만 남기고 다음 틱에 재시도(결정8). lock은 order_executor.enter()/exit()가
+    실제로 실행되는 구간(신호처리의 handle_signal_result 호출 + reconcile 블록 전체)을
+    감싸 _run_risk_exit_loop(⑤-4c)의 ticker 트리거 청산과 겹치지 않게 한다(⑤-4c 설계
+    스펙 결정4). lock이 None이면(기존 호출부와의 하위호환) 새 Lock을 만든다 — 아무도
+    공유하지 않으므로 사실상 no-op."""
+    if lock is None:
+        lock = asyncio.Lock()
     strategy = db.get_live_strategy(strategy_id)
     if strategy is None:
         return
@@ -79,10 +85,11 @@ async def _run_strategy_loop(strategy_id: str) -> None:
         try:
             result = await asyncio.to_thread(signal_engine.evaluate_signals, strategy_id)
             if result["new_candle"]:
-                action_result = await order_executor.handle_signal_result(strategy_id, result)
-                if action_result["sell_action"] == "exited":
-                    risk_config = json.loads(strategy["risk_config_json"])
-                    risk_manager.check_circuit_breaker(strategy_id, risk_config)
+                async with lock:
+                    action_result = await order_executor.handle_signal_result(strategy_id, result)
+                    if action_result["sell_action"] == "exited":
+                        risk_config = json.loads(strategy["risk_config_json"])
+                        risk_manager.check_circuit_breaker(strategy_id, risk_config)
         except Exception:
             logger.exception("전략 신호처리 중 예외 발생: strategy_id=%s", strategy_id)
 
@@ -92,9 +99,10 @@ async def _run_strategy_loop(strategy_id: str) -> None:
             # 20초 상한을 지키게 하기 위함이다(M3).
             last_reconcile = now
             try:
-                strategy = db.get_live_strategy(strategy_id) or strategy
-                synced = await reconciler.sync_pending_limit_orders(strategy)
-                await reconciler.check_manual_intervention(strategy, own_fills=synced)
+                async with lock:
+                    strategy = db.get_live_strategy(strategy_id) or strategy
+                    synced = await reconciler.sync_pending_limit_orders(strategy)
+                    await reconciler.check_manual_intervention(strategy, own_fills=synced)
             except Exception:
                 logger.exception("전략 reconcile 중 예외 발생: strategy_id=%s", strategy_id)
 
