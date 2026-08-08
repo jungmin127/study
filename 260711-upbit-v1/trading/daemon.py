@@ -65,9 +65,16 @@ async def _run_strategy_loop(strategy_id: str) -> None:
     last_reconcile = float("-inf")
 
     while True:
-        strategy = db.get_live_strategy(strategy_id)
-        if strategy is None or strategy["status"] not in ("running", "paused"):
+        try:
+            current = db.get_live_strategy(strategy_id)
+        except Exception:
+            # 조회 실패 시 이전 strategy로 이번 틱을 마저 진행한다 — 그러지 않으면
+            # 일시적 DB 오류로 태스크 자체가 로그 한 줄 없이 죽는다(코드 리뷰 지적).
+            logger.exception("전략 상태 재조회 중 예외 발생: strategy_id=%s", strategy_id)
+            current = strategy
+        if current is None or current["status"] not in ("running", "paused"):
             return
+        strategy = current
 
         try:
             result = await asyncio.to_thread(signal_engine.evaluate_signals, strategy_id)
@@ -100,16 +107,21 @@ async def _task_set_manager_loop() -> None:
     아님 -> task.cancel(). 재시작 없이 새로 승인된 전략을 자동으로 픽업한다."""
     tasks: dict[str, asyncio.Task] = {}
     while True:
-        active_ids = {s["id"] for s in db.list_active_strategies()}
+        try:
+            active_ids = {s["id"] for s in db.list_active_strategies()}
 
-        for strategy_id in active_ids:
-            if strategy_id not in tasks or tasks[strategy_id].done():
-                tasks[strategy_id] = asyncio.create_task(_run_strategy_loop(strategy_id))
+            for strategy_id in active_ids:
+                if strategy_id not in tasks or tasks[strategy_id].done():
+                    tasks[strategy_id] = asyncio.create_task(_run_strategy_loop(strategy_id))
 
-        for strategy_id in list(tasks):
-            if strategy_id not in active_ids:
-                tasks[strategy_id].cancel()
-                del tasks[strategy_id]
+            for strategy_id in list(tasks):
+                if strategy_id not in active_ids:
+                    tasks[strategy_id].cancel()
+                    del tasks[strategy_id]
+        except Exception:
+            # 이 루프가 죽으면 새 전략을 영영 못 집는다(설계 스펙 '에러 처리' 절) —
+            # 로그만 남기고 다음 스캔 주기에 재시도한다(코드 리뷰 지적).
+            logger.exception("태스크셋 스캔 중 예외 발생")
 
         await asyncio.sleep(_TASK_REFRESH_INTERVAL_SEC)
 

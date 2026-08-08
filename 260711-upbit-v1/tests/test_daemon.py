@@ -363,6 +363,48 @@ async def test_run_strategy_loop_throttles_reconcile_retries_even_on_failure(mon
     assert reconcile_calls["count"] == 1
 
 
+async def test_run_strategy_loop_survives_get_live_strategy_exception_mid_loop(monkeypatch, tmp_path, caplog):
+    """루프 최상단(while True: 바로 아래)의 db.get_live_strategy() 재조회는 신호처리/
+    reconcile 블록과 달리 try/except 밖에 있었다 — 락 경합 같은 일시적 DB 오류가 나면
+    로그 한 줄 없이 태스크 전체가 죽는다(코드 리뷰 지적). 실패 시 이전 strategy 값으로
+    이번 틱을 마저 진행하고 다음 틱에 다시 시도해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", timeframe="minutes1")
+
+    real_get_live_strategy = db.get_live_strategy
+    call_count = {"n": 0}
+
+    def flaky_get_live_strategy(sid):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("일시적 DB 락 경합")
+        return real_get_live_strategy(sid)
+
+    monkeypatch.setattr(db, "get_live_strategy", flaky_get_live_strategy)
+
+    async def fake_hydrate_state(strategy, *, client=None):
+        return {"synced_wait_orders": 0, "baseline_captured": True}
+
+    async def fake_check_manual_intervention(strategy, *, own_fills=(), client=None):
+        return {"balance_mismatch": False, "action": "none", "paused": False}
+
+    async def fake_sync_pending_limit_orders(strategy, *, client=None):
+        return []
+
+    monkeypatch.setattr(reconciler, "hydrate_state", fake_hydrate_state)
+    monkeypatch.setattr(reconciler, "check_manual_intervention", fake_check_manual_intervention)
+    monkeypatch.setattr(reconciler, "sync_pending_limit_orders", fake_sync_pending_limit_orders)
+    monkeypatch.setattr(signal_engine, "evaluate_signals", lambda sid, now=None: _no_new_candle_result())
+    calls, fake_sleep = _stop_after_one_tick(dbm, strategy_id)
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    with caplog.at_level("ERROR", logger="trading.daemon"):
+        await daemon._run_strategy_loop(strategy_id)  # 예외가 밖으로 전파되면 테스트 실패
+
+    assert calls["count"] == 1  # 예외에도 불구하고 이번 틱을 마저 처리하고 sleep까지 도달
+    assert any(strategy_id in record.message for record in caplog.records)
+
+
 async def test_task_set_manager_creates_task_for_new_strategy(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm, status="running")
@@ -443,6 +485,29 @@ async def test_task_set_manager_cancels_task_for_removed_strategy(monkeypatch, t
     await real_sleep(0)
 
     assert cancelled["count"] == 1
+
+
+async def test_task_set_manager_survives_exception_from_scan(monkeypatch, tmp_path, caplog):
+    """스캔 본문(db.list_active_strategies() 조회 + 태스크 생성/취소)이 try/except 밖에
+    있었다 — 일시적 DB 오류가 나면 이 루프 자체가 죽고, main()의 asyncio.gather() 밖으로
+    전파되어 데몬 프로세스 전체가 죽는다(코드 리뷰 지적, 설계 스펙 '에러 처리' 절 위반).
+    실패해도 로그만 남기고 다음 스캔 주기(20초)에 재시도해야 한다."""
+    _fresh_db(monkeypatch, tmp_path)
+
+    def failing_list_active_strategies():
+        raise RuntimeError("일시적 DB 오류")
+
+    monkeypatch.setattr(db, "list_active_strategies", failing_list_active_strategies)
+
+    async def stop_after_one_scan(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_scan)
+
+    with caplog.at_level("ERROR", logger="trading.daemon"), pytest.raises(asyncio.CancelledError):
+        await daemon._task_set_manager_loop()  # RuntimeError가 밖으로 새면 테스트 실패
+
+    assert len(caplog.records) == 1
 
 
 async def test_ntp_check_loop_logs_warning_when_drift_exceeds_threshold(monkeypatch, caplog):
