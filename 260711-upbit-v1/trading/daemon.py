@@ -92,3 +92,23 @@ async def _run_strategy_loop(strategy_id: str) -> None:
                 logger.exception("전략 reconcile 중 예외 발생: strategy_id=%s", strategy_id)
 
         await asyncio.sleep(_poll_interval_sec(strategy["timeframe"]))
+
+
+async def _task_set_manager_loop() -> None:
+    """20초마다 db.list_active_strategies()를 다시 조회해 태스크 집합을 갱신한다
+    (설계 스펙 결정2). 새 전략 -> create_task(_run_strategy_loop), 더 이상 대상
+    아님 -> task.cancel(). 재시작 없이 새로 승인된 전략을 자동으로 픽업한다."""
+    tasks: dict[str, asyncio.Task] = {}
+    while True:
+        active_ids = {s["id"] for s in db.list_active_strategies()}
+
+        for strategy_id in active_ids:
+            if strategy_id not in tasks or tasks[strategy_id].done():
+                tasks[strategy_id] = asyncio.create_task(_run_strategy_loop(strategy_id))
+
+        for strategy_id in list(tasks):
+            if strategy_id not in active_ids:
+                tasks[strategy_id].cancel()
+                del tasks[strategy_id]
+
+        await asyncio.sleep(_TASK_REFRESH_INTERVAL_SEC)

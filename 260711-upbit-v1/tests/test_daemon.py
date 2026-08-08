@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 import trading.daemon as daemon
@@ -358,3 +360,66 @@ async def test_run_strategy_loop_throttles_reconcile_retries_even_on_failure(mon
     assert tick_count["n"] == 2
     # 두 번째 틱에서는 last_reconcile이 이미 갱신돼 있어 재시도하지 않아야 한다.
     assert reconcile_calls["count"] == 1
+
+
+async def test_task_set_manager_creates_task_for_new_strategy(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running")
+    started = {"ids": []}
+    # daemon.asyncio는 top-level `import asyncio`와 동일한 모듈 객체라서
+    # monkeypatch.setattr(daemon.asyncio, "sleep", ...)는 asyncio.sleep 자체를
+    # 전역으로 바꿔버린다. 아래에서 실제 스케줄링 양보용으로 쓸 원본 sleep을
+    # 패치 전에 미리 붙잡아둔다.
+    real_sleep = asyncio.sleep
+
+    async def fake_run_strategy_loop(sid):
+        started["ids"].append(sid)
+        await asyncio.sleep(3600)  # 태스크가 살아있는 채로 유지(취소되기 전까지)
+
+    monkeypatch.setattr(daemon, "_run_strategy_loop", fake_run_strategy_loop)
+
+    async def stop_after_one_scan(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_scan)
+
+    with pytest.raises(asyncio.CancelledError):
+        await daemon._task_set_manager_loop()
+    await real_sleep(0)  # 생성된 태스크가 실제로 스케줄되게 한 틱 양보
+
+    assert started["ids"] == [strategy_id]
+
+
+async def test_task_set_manager_cancels_task_for_removed_strategy(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running")
+    cancelled = {"count": 0}
+    # 위 테스트와 동일한 이유로 패치 전 원본 sleep을 붙잡아둔다.
+    real_sleep = asyncio.sleep
+
+    async def fake_run_strategy_loop(sid):
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            cancelled["count"] += 1
+            raise
+
+    monkeypatch.setattr(daemon, "_run_strategy_loop", fake_run_strategy_loop)
+
+    scan_count = {"n": 0}
+
+    async def fake_sleep(seconds):
+        scan_count["n"] += 1
+        if scan_count["n"] == 1:
+            dbm.update_live_strategy_status(strategy_id, "stopped")
+            await real_sleep(0)  # 태스크가 실제로 스케줄되어 sleep(3600)까지 진행되게 양보
+        else:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await daemon._task_set_manager_loop()
+    await real_sleep(0)
+
+    assert cancelled["count"] == 1
