@@ -217,7 +217,7 @@ class _SyncTokenBucket:
 _CANDLE_BUCKET = _SyncTokenBucket(rate_per_sec=10)  # 업비트 candle 그룹 실제 한도, IP 단위
 
 def get_server_time_offset_sec() -> float:
-    """공개 엔드포인트 응답의 Date 헤더 vs 로컬 UTC 시각 차이(초, 양수=로컬이 느림).
+    """공개 엔드포인트 응답의 Date 헤더 vs 로컬 UTC 시각 차이(초, 양수=로컬이 빠름).
     인증 불필요(결정10)."""
 
 

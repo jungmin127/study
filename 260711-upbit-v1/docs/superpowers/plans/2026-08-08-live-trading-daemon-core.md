@@ -304,7 +304,7 @@ git commit -m "feat: 캔들조회 경로에 _SyncTokenBucket(업비트 candle �
 **Interfaces:**
 - Consumes: `httpx.get`(기존, 이미 `get_krw_markets()`가 씀).
 - Produces: `upbit_data_service.get_server_time_offset_sec() -> float`(로컬 UTC 시각 −
-  서버 시각, 초 단위. 양수면 로컬이 느림).
+  서버 시각, 초 단위. 양수면 로컬이 빠름).
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
