@@ -35,7 +35,7 @@ async def _get_coin_account(market: str, *, client: httpx.AsyncClient | None = N
     return None
 
 
-async def _sync_pending_limit_orders(
+async def sync_pending_limit_orders(
     strategy: dict, *, client: httpx.AsyncClient | None = None,
 ) -> list[dict]:
     """내부 status='wait', order_type='limit' 주문(오프라인 동안 결과를 못 받은 사용자
@@ -77,7 +77,7 @@ async def hydrate_state(strategy: dict, *, client: httpx.AsyncClient | None = No
     흡수돼 사라진다) 불일치 검사 없이 반환한다. 이미 baseline이 있으면
     _run_reconcile_pipeline()에 이번에 동기화한 own_fills를 넘겨 수행한다."""
     strategy = db.get_live_strategy(strategy["id"]) or strategy
-    synced_orders = await _sync_pending_limit_orders(strategy, client=client)
+    synced_orders = await sync_pending_limit_orders(strategy, client=client)
 
     if strategy["baseline_qty"] is None:
         account = await _get_coin_account(strategy["market"], client=client)
@@ -234,7 +234,7 @@ async def _reconcile_position(
     own_fills: list[dict] = (), client: httpx.AsyncClient | None = None,
 ) -> dict:
     """own_fills는 이번 사이클에 동기화된 "우리가 낸" 주문(hydrate_state의
-    _sync_pending_limit_orders 결과)이다 — 잔고 변화를 설명하는 데는 external_orders와
+    sync_pending_limit_orders 결과)이다 — 잔고 변화를 설명하는 데는 external_orders와
     똑같이 쓰이지만, 이것만으로 설명되는 변화는 수동개입이 아니므로 정책 적용/이벤트
     기록 대상에서 제외한다(최종 브랜치 리뷰 Critical 1)."""
     market = strategy["market"]

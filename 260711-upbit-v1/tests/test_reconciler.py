@@ -70,7 +70,7 @@ async def test_sync_pending_limit_orders_updates_filled_order(monkeypatch, tmp_p
 
     monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
 
-    synced = await reconciler._sync_pending_limit_orders(strategy)
+    synced = await reconciler.sync_pending_limit_orders(strategy)
 
     assert len(synced) == 1
     assert synced[0]["id"] == order_id
@@ -94,7 +94,7 @@ async def test_sync_pending_limit_orders_skips_orders_still_waiting(monkeypatch,
 
     monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
 
-    synced = await reconciler._sync_pending_limit_orders(strategy)
+    synced = await reconciler.sync_pending_limit_orders(strategy)
 
     assert synced == []
     assert dbm.get_order_by_id(order_id)["status"] == "wait"
@@ -113,7 +113,7 @@ async def test_sync_pending_limit_orders_ignores_non_limit_wait_orders(monkeypat
 
     monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
 
-    synced = await reconciler._sync_pending_limit_orders(strategy)
+    synced = await reconciler.sync_pending_limit_orders(strategy)
 
     assert synced == []
     assert calls["count"] == 0
