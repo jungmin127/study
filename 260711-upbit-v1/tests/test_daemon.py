@@ -1,3 +1,5 @@
+import pytest
+
 import trading.daemon as daemon
 
 
@@ -19,6 +21,24 @@ import trading.reconciler as reconciler
 import trading.risk_manager as risk_manager
 import trading.signal_engine as signal_engine
 from tests.trading_db_fixtures import insert_live_strategy
+
+
+@pytest.fixture(autouse=True)
+def _default_reconciler_mocks(monkeypatch):
+    """I2 — last_reconcile=float('-inf') 초기화 때문에 이 파일의 거의 모든 테스트가 첫
+    틱에서 reconciler.check_manual_intervention/sync_pending_limit_orders를 실제로
+    호출한다. 이 sandbox엔 API 키가 없어 UpbitCredentialsError가 나서(루프의 예외
+    흡수 덕에) 눈에 띄지 않았을 뿐, 실제 키가 설정된 머신에서는 이 파일을 돌리는 것만으로
+    진짜 업비트 계정에 인증된 호출이 나간다. 안전한 기본 mock을 autouse로 깔아둔다 —
+    개별 테스트가 이후 같은 함수에 monkeypatch.setattr을 다시 하면 그쪽이 이긴다."""
+    async def fake_check_manual_intervention(strategy, *, own_fills=(), client=None):
+        return {"balance_mismatch": False, "action": "none", "paused": False}
+
+    async def fake_sync_pending_limit_orders(strategy, *, client=None):
+        return []
+
+    monkeypatch.setattr(reconciler, "check_manual_intervention", fake_check_manual_intervention)
+    monkeypatch.setattr(reconciler, "sync_pending_limit_orders", fake_sync_pending_limit_orders)
 
 
 def _fresh_db(monkeypatch, tmp_path):
@@ -149,18 +169,20 @@ async def test_run_strategy_loop_skips_circuit_breaker_when_sell_not_exited(monk
 async def test_run_strategy_loop_reconciles_when_interval_elapsed(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm, status="running", timeframe="minutes1")
-    reconcile_calls = {"manual": 0, "sync": 0}
+    reconcile_calls = {"manual": 0, "sync": 0, "own_fills": "not-called"}
+    sync_result = [{"id": "order-1", "side": "bid", "filled_volume": 0.01}]
 
     async def fake_hydrate_state(strategy, *, client=None):
         return {"synced_wait_orders": 0, "baseline_captured": True}
 
-    async def fake_check_manual_intervention(strategy, *, client=None):
+    async def fake_check_manual_intervention(strategy, *, own_fills=(), client=None):
         reconcile_calls["manual"] += 1
+        reconcile_calls["own_fills"] = own_fills
         return {"balance_mismatch": False, "action": "none", "paused": False}
 
     async def fake_sync_pending_limit_orders(strategy, *, client=None):
         reconcile_calls["sync"] += 1
-        return []
+        return sync_result
 
     monkeypatch.setattr(reconciler, "hydrate_state", fake_hydrate_state)
     monkeypatch.setattr(reconciler, "check_manual_intervention", fake_check_manual_intervention)
@@ -175,6 +197,42 @@ async def test_run_strategy_loop_reconciles_when_interval_elapsed(monkeypatch, t
 
     assert reconcile_calls["manual"] == 1
     assert reconcile_calls["sync"] == 1
+    # C1 — sync_pending_limit_orders()의 결과가 check_manual_intervention의 own_fills로
+    # 전달돼야 한다. 그렇지 않으면 자체 체결이 수동개입으로 오인된다.
+    assert reconcile_calls["own_fills"] == sync_result
+
+
+async def test_run_strategy_loop_forwards_synced_orders_as_own_fills(monkeypatch, tmp_path):
+    """C1 — sync_pending_limit_orders()가 먼저 실행돼 그 반환값이 check_manual_intervention에
+    own_fills로 전달돼야 한다. 현재 코드는 두 함수를 독립적으로 호출하고 sync 결과를
+    버리므로, 오프라인 중 체결된 plain limit 주문이 다음 사이클에 "설명 안 되는 잔고
+    변화"로 오인돼 포지션이 잘못 강제조정되고 스퓨리어스 정지가 걸린다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", timeframe="minutes1")
+    captured = {"own_fills": "not-called"}
+    synced_orders = [{"id": "order-1", "side": "bid", "filled_volume": 0.01}]
+
+    async def fake_hydrate_state(strategy, *, client=None):
+        return {"synced_wait_orders": 0, "baseline_captured": True}
+
+    async def fake_sync_pending_limit_orders(strategy, *, client=None):
+        return synced_orders
+
+    async def fake_check_manual_intervention(strategy, *, own_fills=(), client=None):
+        captured["own_fills"] = own_fills
+        return {"balance_mismatch": False, "action": "none", "paused": False}
+
+    monkeypatch.setattr(reconciler, "hydrate_state", fake_hydrate_state)
+    monkeypatch.setattr(reconciler, "sync_pending_limit_orders", fake_sync_pending_limit_orders)
+    monkeypatch.setattr(reconciler, "check_manual_intervention", fake_check_manual_intervention)
+    monkeypatch.setattr(signal_engine, "evaluate_signals", lambda sid, now=None: _no_new_candle_result())
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: 10_000.0)
+    calls, fake_sleep = _stop_after_one_tick(dbm, strategy_id)
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    await daemon._run_strategy_loop(strategy_id)
+
+    assert captured["own_fills"] == synced_orders
 
 
 async def test_run_strategy_loop_returns_immediately_when_strategy_missing(monkeypatch, tmp_path):
@@ -202,3 +260,101 @@ async def test_run_strategy_loop_logs_and_continues_on_exception(monkeypatch, tm
     await daemon._run_strategy_loop(strategy_id)  # 예외가 밖으로 전파되면 테스트 실패
 
     assert calls["count"] == 1
+
+
+async def test_run_strategy_loop_returns_when_hydrate_state_fails(monkeypatch, tmp_path, caplog):
+    """I1 — hydrate_state()가 try/except 밖에 있으면 일시적 네트워크 장애가 태스크 전체를
+    로그 한 줄 없이 죽인다. 실패 시 예외를 흡수하고 로그를 남긴 뒤 조용히 반환해야 한다
+    (다음 태스크셋 매니저 스캔 주기에 재시도됨)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", timeframe="minutes1")
+
+    async def failing_hydrate_state(strategy, *, client=None):
+        raise RuntimeError("network hiccup")
+
+    monkeypatch.setattr(reconciler, "hydrate_state", failing_hydrate_state)
+    evaluate_calls = {"count": 0}
+
+    def fake_evaluate_signals(sid, now=None):
+        evaluate_calls["count"] += 1
+        return _no_new_candle_result()
+
+    monkeypatch.setattr(signal_engine, "evaluate_signals", fake_evaluate_signals)
+
+    with caplog.at_level("ERROR", logger="trading.daemon"):
+        await daemon._run_strategy_loop(strategy_id)  # 예외가 밖으로 전파되면 테스트 실패
+
+    assert evaluate_calls["count"] == 0  # hydrate_state 실패 시 루프에 진입조차 하지 않음
+    assert any("hydrate_state" in record.message or "hydrate" in record.message.lower()
+               or strategy_id in record.message for record in caplog.records)
+
+
+async def test_run_strategy_loop_reconciles_even_when_signal_processing_raises(monkeypatch, tmp_path):
+    """I3 — 신호처리(evaluate_signals/handle_signal_result)가 매 틱 예외를 던지는 상황에서도
+    reconcile 워치독은 별도 try/except여야 계속 돌아간다. 지금은 한 try 안에 다 있어서
+    신호처리가 죽으면 reconcile도 같이 건너뛴다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", timeframe="minutes1")
+    reconcile_calls = {"count": 0}
+
+    async def fake_hydrate_state(strategy, *, client=None):
+        return {"synced_wait_orders": 0, "baseline_captured": True}
+
+    def failing_evaluate_signals(sid, now=None):
+        raise RuntimeError("신호처리 깨짐")
+
+    async def fake_check_manual_intervention(strategy, *, own_fills=(), client=None):
+        reconcile_calls["count"] += 1
+        return {"balance_mismatch": False, "action": "none", "paused": False}
+
+    async def fake_sync_pending_limit_orders(strategy, *, client=None):
+        return []
+
+    monkeypatch.setattr(reconciler, "hydrate_state", fake_hydrate_state)
+    monkeypatch.setattr(signal_engine, "evaluate_signals", failing_evaluate_signals)
+    monkeypatch.setattr(reconciler, "check_manual_intervention", fake_check_manual_intervention)
+    monkeypatch.setattr(reconciler, "sync_pending_limit_orders", fake_sync_pending_limit_orders)
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: 10_000.0)
+    calls, fake_sleep = _stop_after_one_tick(dbm, strategy_id)
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    await daemon._run_strategy_loop(strategy_id)  # 예외가 밖으로 전파되면 테스트 실패
+
+    assert reconcile_calls["count"] == 1
+
+
+async def test_run_strategy_loop_throttles_reconcile_retries_even_on_failure(monkeypatch, tmp_path):
+    """M3 — reconcile 호출 자체가 실패해도 last_reconcile은 시도 직전에 갱신돼야 한다.
+    그렇지 않으면 고장난 reconciler가 20초 상한 대신 매 틱(5~60초)마다 재시도된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", timeframe="minutes1")
+    reconcile_calls = {"count": 0}
+
+    async def fake_hydrate_state(strategy, *, client=None):
+        return {"synced_wait_orders": 0, "baseline_captured": True}
+
+    async def failing_sync_pending_limit_orders(strategy, *, client=None):
+        reconcile_calls["count"] += 1
+        raise RuntimeError("reconcile 실패")
+
+    monkeypatch.setattr(reconciler, "hydrate_state", fake_hydrate_state)
+    monkeypatch.setattr(signal_engine, "evaluate_signals", lambda sid, now=None: _no_new_candle_result())
+    monkeypatch.setattr(reconciler, "sync_pending_limit_orders", failing_sync_pending_limit_orders)
+    # time.monotonic()을 상수로 고정 — 실제 시간 흐름과 무관하게 두 번째 틱에서도
+    # "20초가 지났는지"를 last_reconcile 갱신 여부만으로 판별하게 만든다.
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: 10_000.0)
+
+    tick_count = {"n": 0}
+
+    async def fake_sleep(seconds):
+        tick_count["n"] += 1
+        if tick_count["n"] >= 2:
+            dbm.update_live_strategy_status(strategy_id, "stopped")
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    await daemon._run_strategy_loop(strategy_id)
+
+    assert tick_count["n"] == 2
+    # 두 번째 틱에서는 last_reconcile이 이미 갱신돼 있어 재시도하지 않아야 한다.
+    assert reconcile_calls["count"] == 1

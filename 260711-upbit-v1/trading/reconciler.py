@@ -313,6 +313,11 @@ async def _run_reconcile_pipeline(
         return {"error": str(exc)}
 
 
-async def check_manual_intervention(strategy: dict, *, client: httpx.AsyncClient | None = None) -> dict:
-    """러닝 중 데몬이 주기적으로(15~30초, 스케줄링은 daemon.py 몫) 호출한다."""
-    return await _run_reconcile_pipeline(strategy, client=client)
+async def check_manual_intervention(
+    strategy: dict, *, own_fills: list[dict] = (), client: httpx.AsyncClient | None = None,
+) -> dict:
+    """러닝 중 데몬이 주기적으로(15~30초, 스케줄링은 daemon.py 몫) 호출한다. own_fills는
+    daemon이 같은 사이클에 sync_pending_limit_orders()로 먼저 동기화한 우리 자신의 체결
+    결과를 넘길 때 쓴다(자체 체결이 수동개입으로 오인되지 않게, 최종 브랜치 리뷰 재검토
+    Critical 1과 동일한 원칙)."""
+    return await _run_reconcile_pipeline(strategy, own_fills=own_fills, client=client)

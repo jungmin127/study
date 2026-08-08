@@ -437,6 +437,41 @@ async def test_check_manual_intervention_runs_pipeline_directly(monkeypatch, tmp
     assert result == {"balance_mismatch": False, "action": "none", "paused": False}
 
 
+async def test_check_manual_intervention_forwards_own_fills_to_reconcile_position(monkeypatch, tmp_path):
+    """C1 — daemon이 넘긴 own_fills가 공개 진입점(check_manual_intervention)을 거쳐
+    _reconcile_position까지 도달해 정밀 self-heal에 실제로 쓰이는지 검증한다. own_fills만
+    으로 잔고 변화가 전부 설명되면 정책이 all_stop이어도 수동개입으로 처리되면 안 된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.01)]
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    own_fills = [{"side": "bid", "filled_volume": 0.01, "filled_price": 50_000_000.0, "fee": 500.0}]
+    result = await reconciler.check_manual_intervention(strategy, own_fills=own_fills)
+
+    assert result == {"balance_mismatch": True, "action": "opened", "paused": False}
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_qty"] == 0.01
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "running"
+    conn = dbm._connect()
+    try:
+        rows = conn.execute("SELECT COUNT(*) FROM manual_intervention_events").fetchone()
+    finally:
+        conn.close()
+    assert rows[0] == 0
+
+
 async def test_hydrate_state_runs_pipeline_when_baseline_already_set(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm, baseline_qty=0.0)
