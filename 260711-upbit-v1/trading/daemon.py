@@ -112,3 +112,28 @@ async def _task_set_manager_loop() -> None:
                 del tasks[strategy_id]
 
         await asyncio.sleep(_TASK_REFRESH_INTERVAL_SEC)
+
+
+async def _run_ntp_check_loop() -> None:
+    """시작 직후 1회 + 10분마다 로컬 시각과 업비트 서버 시각의 오차를 확인한다
+    (설계 스펙 결정10). 임계치(500ms) 초과 시 로그만 남긴다 — 자동조치는 2단계
+    텔레그램 이후."""
+    while True:
+        try:
+            offset = await asyncio.to_thread(upbit_data_service.get_server_time_offset_sec)
+            if abs(offset) > _NTP_DRIFT_THRESHOLD_SEC:
+                logger.warning("로컬 시각이 업비트 서버와 %.3f초 어긋남", offset)
+        except Exception:
+            logger.exception("NTP 드리프트 체크 실패")
+        await asyncio.sleep(_NTP_CHECK_INTERVAL_SEC)
+
+
+async def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    await asyncio.gather(_task_set_manager_loop(), _run_ntp_check_loop())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -22,6 +22,7 @@ import trading.order_executor as order_executor
 import trading.reconciler as reconciler
 import trading.risk_manager as risk_manager
 import trading.signal_engine as signal_engine
+import upbit_data_service
 from tests.trading_db_fixtures import insert_live_strategy
 
 
@@ -442,3 +443,46 @@ async def test_task_set_manager_cancels_task_for_removed_strategy(monkeypatch, t
     await real_sleep(0)
 
     assert cancelled["count"] == 1
+
+
+async def test_ntp_check_loop_logs_warning_when_drift_exceeds_threshold(monkeypatch, caplog):
+    monkeypatch.setattr(upbit_data_service, "get_server_time_offset_sec", lambda: 1.2)
+
+    async def stop_after_one_check(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_check)
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await daemon._run_ntp_check_loop()
+
+    assert any("1.2" in r.message or "1.20" in r.message for r in caplog.records)
+
+
+async def test_ntp_check_loop_silent_when_drift_within_threshold(monkeypatch, caplog):
+    monkeypatch.setattr(upbit_data_service, "get_server_time_offset_sec", lambda: 0.05)
+
+    async def stop_after_one_check(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_check)
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await daemon._run_ntp_check_loop()
+
+    assert len(caplog.records) == 0
+
+
+async def test_ntp_check_loop_survives_exception(monkeypatch):
+    def fake_offset():
+        raise RuntimeError("네트워크 순간 장애")
+
+    monkeypatch.setattr(upbit_data_service, "get_server_time_offset_sec", fake_offset)
+
+    async def stop_after_one_check(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_check)
+
+    with pytest.raises(asyncio.CancelledError):
+        await daemon._run_ntp_check_loop()  # RuntimeError가 밖으로 새면 테스트 실패
