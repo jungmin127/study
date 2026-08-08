@@ -9,10 +9,13 @@ trading.risk_manager를 엮는 이 서브플랜의 유일한 모듈. engine/ 미
 """
 from __future__ import annotations
 
+import json
 import math
 
 import httpx
 
+import trading.db as db
+import trading.position_manager as position_manager
 import trading.upbit_client as upbit_client
 
 # 업비트 원화마켓 주문가격단위(2026-08 기준, docs.upbit.com/kr/docs/krw-market-info).
@@ -90,3 +93,90 @@ async def _fetch_fill(upbit_uuid: str, *, client: httpx.AsyncClient | None = Non
 
 def _slippage_pct(filled_price: float, expected_price: float) -> float:
     return (filled_price - expected_price) / expected_price * 100
+
+
+async def _run_market(
+    order_id: str, market: str, side: str, capital: float | None, volume: float,
+    expected_price: float, *, client: httpx.AsyncClient | None = None,
+) -> dict:
+    if side == "bid":
+        resp = await _create_order_with_retry(
+            market, "bid", "price", order_id=order_id, price=str(capital), client=client,
+        )
+    else:
+        resp = await _create_order_with_retry(
+            market, "ask", "market", order_id=order_id, volume=str(volume), client=client,
+        )
+    fill = await _fetch_fill(resp["uuid"], client=client)
+    db.update_order_filled(
+        order_id, resp["uuid"], fill["filled_price"], fill["executed_volume"], fill["fee"],
+        _slippage_pct(fill["filled_price"], expected_price), "done",
+    )
+    return {"order_id": order_id, "status": "done", "filled_price": fill["filled_price"],
+            "filled_volume": fill["executed_volume"], "fee": fill["fee"]}
+
+
+async def enter(
+    strategy: dict, capital: float, expected_price: float,
+    *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
+) -> dict:
+    if position_manager.get_open_position(strategy["id"]) is not None:
+        raise ValueError(f"이미 오픈 포지션이 있습니다: {strategy['id']}")
+
+    risk_config = json.loads(strategy["risk_config_json"])
+    mode = risk_config["order_execution_mode"]
+    market = strategy["market"]
+    price = round_to_tick(expected_price)
+    volume = _floor_volume(capital / price)
+
+    order_id = db.insert_order(strategy["id"], None, market, "bid", mode, price, volume, expected_price)
+
+    if dry_run:
+        db.update_order_filled(order_id, None, price, volume, 0.0, 0.0, "done")
+        result = {"order_id": order_id, "status": "done", "filled_price": price,
+                   "filled_volume": volume, "fee": 0.0}
+    elif mode == "market":
+        result = await _run_market(order_id, market, "bid", capital, volume, expected_price, client=client)
+    else:
+        raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
+
+    if result["status"] != "done":
+        return db.get_order_by_id(result["order_id"])
+
+    position_manager.open_position(strategy["id"], market, result["filled_price"], result["filled_volume"])
+    return db.get_order_by_id(result["order_id"])
+
+
+async def exit(
+    strategy: dict, position: dict, expected_price: float,
+    *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
+) -> dict:
+    if position is None:
+        raise ValueError("오픈 포지션이 없습니다")
+
+    risk_config = json.loads(strategy["risk_config_json"])
+    mode = risk_config["order_execution_mode"]
+    market = strategy["market"]
+    price = round_to_tick(expected_price)
+    volume = position["entry_qty"]
+
+    order_id = db.insert_order(strategy["id"], position["id"], market, "ask", mode, price, volume, expected_price)
+
+    if dry_run:
+        db.update_order_filled(order_id, None, price, volume, 0.0, 0.0, "done")
+        result = {"order_id": order_id, "status": "done", "filled_price": price,
+                   "filled_volume": volume, "fee": 0.0}
+    elif mode == "market":
+        result = await _run_market(order_id, market, "ask", None, volume, expected_price, client=client)
+    else:
+        raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
+
+    if result["status"] != "done":
+        return db.get_order_by_id(result["order_id"])
+
+    close_result = position_manager.close_position(
+        position["id"], result["filled_price"], result["filled_volume"], result["fee"], "signal",
+    )
+    order = db.get_order_by_id(result["order_id"])
+    order.update(close_result)
+    return order

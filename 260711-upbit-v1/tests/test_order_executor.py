@@ -120,3 +120,115 @@ async def test_create_order_with_retry_retries_when_confirmation_finds_nothing(m
 
     assert resp["uuid"] == "uuid-2"
     assert calls["create"] == 2
+
+
+import json
+
+import trading.db as db
+import trading.position_manager as position_manager
+from tests.trading_db_fixtures import insert_live_strategy
+
+
+def _fresh_db(monkeypatch, tmp_path):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "trading.db")
+    return db
+
+
+def _strategy_row(dbm, **risk_overrides):
+    risk_config = {
+        "order_execution_mode": "market",
+        "max_position_per_market": 1_000_000.0,
+        "max_slippage_pct": 0.5,
+        "order_timeout_sec": 10,
+    }
+    risk_config.update(risk_overrides)
+    strategy_id = insert_live_strategy(
+        dbm, market="KRW-BTC", current_capital=1_000_000.0,
+        risk_config_json=json.dumps(risk_config),
+    )
+    return dbm.get_live_strategy(strategy_id)
+
+
+async def test_enter_dry_run_opens_position_at_requested_price(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0, dry_run=True)
+
+    assert order["status"] == "done"
+    assert order["filled_price"] == 50_000_000.0
+    assert order["fee"] == 0.0
+    position = position_manager.get_open_position(strategy["id"])
+    assert position is not None
+    assert position["entry_price"] == 50_000_000.0
+
+
+async def test_enter_market_mode_places_price_order_and_records_fill(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(market=market, side=side, ord_type=ord_type, volume=volume, price=price)
+        return {"uuid": "uuid-1", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert captured["ord_type"] == "price"  # 시장가 매수는 price 타입(설계 스펙 결정7)
+    assert captured["price"] == "500000.0"
+    assert captured["volume"] is None
+    assert order["status"] == "done"
+    assert order["filled_price"] == pytest.approx(500000.0 / 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    assert position is not None
+
+
+async def test_enter_raises_when_position_already_open(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 100.0, 1.0)
+
+    with pytest.raises(ValueError):
+        await order_executor.enter(strategy, 500_000.0, 50_000_000.0, dry_run=True)
+
+
+async def test_exit_market_mode_places_market_order_and_closes_position(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(side=side, ord_type=ord_type, volume=volume, price=price)
+        return {"uuid": "uuid-2", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    order = await order_executor.exit(strategy, position, 50_000_000.0)
+
+    assert captured["ord_type"] == "market"  # 시장가 매도는 market 타입(설계 스펙 결정7)
+    assert captured["volume"] == "0.01"
+    assert captured["price"] is None
+    assert order["status"] == "done"
+    assert "realized_pnl" in order
+    assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_exit_raises_when_no_open_position():
+    with pytest.raises(ValueError):
+        await order_executor.exit({"id": "s1", "risk_config_json": "{}", "market": "KRW-BTC"}, None, 100.0)
