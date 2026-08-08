@@ -5,9 +5,11 @@ trading/daemon.py
 ('running','paused'))을 전략별 asyncio 태스크로 동시에 처리한다 — 각 태스크는 봉타임에
 비례한 주기로 signal_engine -> order_executor를 돌리고, 그 안에서 reconciler(수동개입
 감지)와 서킷브레이커 판정까지 순차적으로 실행해 동시성 충돌을 원천 차단한다(설계 스펙
-결정3). 실시간 손절/익절(ticker 기반)은 ⑤-4c 몫이라 여기 없다. trading.db +
-trading.signal_engine + trading.order_executor + trading.reconciler +
-trading.risk_manager + upbit_data_service만 의존. engine/ 미의존.
+결정3). 실시간 손절/익절(ticker 기반, ⑤-4c)은 전략별 개별 ticker WS 연결
+(_run_risk_exit_loop)로 처리하며, _run_strategy_loop와 전략별 asyncio.Lock을 공유해
+주문실행이 겹치지 않게 한다. trading.db + trading.signal_engine +
+trading.order_executor + trading.position_manager + trading.reconciler +
+trading.risk_manager + trading.upbit_ws + upbit_data_service만 의존. engine/ 미의존.
 """
 from __future__ import annotations
 
@@ -18,9 +20,11 @@ import time
 
 import trading.db as db
 import trading.order_executor as order_executor
+import trading.position_manager as position_manager
 import trading.reconciler as reconciler
 import trading.risk_manager as risk_manager
 import trading.signal_engine as signal_engine
+import trading.upbit_ws as upbit_ws
 import upbit_data_service
 
 logger = logging.getLogger(__name__)
@@ -107,6 +111,50 @@ async def _run_strategy_loop(strategy_id: str, lock: asyncio.Lock | None = None)
                 logger.exception("전략 reconcile 중 예외 발생: strategy_id=%s", strategy_id)
 
         await asyncio.sleep(_poll_interval_sec(strategy["timeframe"]))
+
+
+async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None) -> None:
+    """전략 하나의 ticker 기반 실시간 손절/익절 전용 태스크(⑤-4c 설계 스펙). 시작 시
+    sell_conditions_json에 STOP_LOSS_PCT/TAKE_PROFIT_PCT가 없으면 WS 연결 없이 즉시
+    반환한다(결정7 — 위험조건 없는 전략까지 연결을 열 이유가 없음). 있으면 해당 마켓의
+    ticker를 구독해(결정3) 매 tick마다 position_return_pct를 계산하고 독립 안전망으로
+    평가(결정1) — 위반 시 lock을 잡고(결정4) exit_for_risk() 호출(결정5), 청산 성공
+    시에만 check_circuit_breaker()까지 호출(결정7 재사용). 예외는 로그만 남기고 다음
+    tick에 계속(⑤-4b 결정8과 동일 원칙)."""
+    if lock is None:
+        lock = asyncio.Lock()
+    strategy = db.get_live_strategy(strategy_id)
+    if strategy is None:
+        return
+    sell_conditions = json.loads(strategy["sell_conditions_json"])
+    if not signal_engine.has_risk_exit_conditions(sell_conditions):
+        return
+
+    market = strategy["market"]
+    async for tick in upbit_ws.stream_ticker([market]):
+        try:
+            trade_price = tick["trade_price"]
+            async with lock:
+                position = position_manager.get_open_position(strategy_id)
+                if position is None:
+                    continue
+                position_return_pct = (
+                    (trade_price - position["entry_price"]) / position["entry_price"] * 100
+                )
+                matched = signal_engine.matched_risk_exit_indicator(sell_conditions, position_return_pct)
+                if matched is None:
+                    continue
+                fresh_strategy = db.get_live_strategy(strategy_id)
+                if fresh_strategy is None:
+                    continue
+                result = await order_executor.exit_for_risk(
+                    fresh_strategy, position, trade_price, matched.lower(),
+                )
+                if result["action"] == "exited":
+                    risk_config = json.loads(fresh_strategy["risk_config_json"])
+                    risk_manager.check_circuit_breaker(strategy_id, risk_config)
+        except Exception:
+            logger.exception("실시간 손절/익절 처리 중 예외 발생: strategy_id=%s", strategy_id)
 
 
 async def _task_set_manager_loop() -> None:

@@ -19,9 +19,11 @@ import json
 
 import trading.db as db
 import trading.order_executor as order_executor
+import trading.position_manager as position_manager
 import trading.reconciler as reconciler
 import trading.risk_manager as risk_manager
 import trading.signal_engine as signal_engine
+import trading.upbit_ws as upbit_ws
 import upbit_data_service
 from tests.trading_db_fixtures import insert_live_strategy
 
@@ -604,3 +606,210 @@ async def test_ntp_check_loop_survives_exception(monkeypatch):
 
     with pytest.raises(asyncio.CancelledError):
         await daemon._run_ntp_check_loop()  # RuntimeError가 밖으로 새면 테스트 실패
+
+
+async def test_run_risk_exit_loop_skips_ws_subscription_without_risk_conditions(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70},
+        ]}),
+    )
+    calls = {"n": 0}
+
+    def fake_stream_ticker(markets):
+        # 위험조건 없는 전략은 이 함수가 아예 호출되면 안 된다(호출되면 결정7 위반).
+        # 호출됐을 때 억지로 예외를 던지는 대신 카운트만 남긴다 — async for가 이 반환값을
+        # 바로 순회하려 들면 그 자체로 TypeError가 나서 테스트가 실패하므로 충분하다.
+        calls["n"] += 1
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert calls["n"] == 0
+
+
+async def test_run_risk_exit_loop_returns_immediately_when_strategy_missing(monkeypatch, tmp_path):
+    _fresh_db(monkeypatch, tmp_path)
+
+    await daemon._run_risk_exit_loop("no-such-strategy-id")
+    # 예외 없이 조용히 반환하면 성공
+
+
+async def test_run_risk_exit_loop_skips_tick_without_open_position(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        assert markets == ["KRW-BTC"]
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert exit_calls["n"] == 0
+
+
+async def test_run_risk_exit_loop_skips_tick_within_thresholds(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 49_000_000.0}  # -2%, 손절선(-5%) 안 뚫림
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert exit_calls["n"] == 0
+
+
+async def test_run_risk_exit_loop_triggers_exit_for_risk_when_stop_loss_breached(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    captured = {}
+    cb_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}  # -6%, 손절선(-5%) 뚫림
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        captured.update(strategy_id=strategy["id"], price=price, reason=reason)
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(
+        risk_manager, "check_circuit_breaker",
+        lambda sid, cfg: cb_calls.__setitem__("n", cb_calls["n"] + 1),
+    )
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert captured["strategy_id"] == strategy_id
+    assert captured["price"] == 47_000_000.0
+    assert captured["reason"] == "stop_loss_pct"  # matched_risk_exit_indicator 반환값을 소문자로
+    assert cb_calls["n"] == 1  # action=="exited"이면 서킷브레이커 판정도 호출돼야 한다
+
+
+async def test_run_risk_exit_loop_skips_circuit_breaker_when_exit_pending(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 10},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    cb_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 56_000_000.0}  # +12%, 익절선(10%) 뚫림
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        return {"action": "pending", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(
+        risk_manager, "check_circuit_breaker",
+        lambda sid, cfg: cb_calls.__setitem__("n", cb_calls["n"] + 1),
+    )
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert cb_calls["n"] == 0
+
+
+async def test_run_risk_exit_loop_logs_and_continues_on_exception(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    processed = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def failing_exit_for_risk(strategy, position, price, reason, **kwargs):
+        processed["n"] += 1
+        raise RuntimeError("네트워크 순간 장애")
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", failing_exit_for_risk)
+
+    await daemon._run_risk_exit_loop(strategy_id)  # 예외가 밖으로 전파되면 테스트 실패
+
+    assert processed["n"] == 2  # 첫 tick 실패 후에도 두 번째 tick을 계속 처리
+
+
+async def test_run_risk_exit_loop_waits_for_lock_before_exiting(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    lock = asyncio.Lock()
+    events = []
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        events.append("exit_for_risk")
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    async with lock:
+        events.append("lock_held_by_other")
+        loop_task = asyncio.create_task(daemon._run_risk_exit_loop(strategy_id, lock))
+        await asyncio.sleep(0)
+        assert "exit_for_risk" not in events
+        events.append("lock_released_by_other")
+
+    await loop_task
+
+    assert events == ["lock_held_by_other", "lock_released_by_other", "exit_for_risk"]
