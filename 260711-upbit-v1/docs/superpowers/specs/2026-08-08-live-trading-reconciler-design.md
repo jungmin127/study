@@ -200,11 +200,11 @@ async def _reconcile_position(
 
 ## `trading/db.py` 스키마 변경 + 추가 함수
 
-`live_strategies`에 `baseline_qty REAL` 컬럼 추가(결정9, 기본값 NULL) — 기존
-`_SCHEMA`의 `CREATE TABLE IF NOT EXISTS`는 이미 만들어진 DB 파일의 컬럼을 추가해주지
-않으므로, `_connect()`가 `executescript(_SCHEMA)` 뒤에 `ALTER TABLE live_strategies ADD
-COLUMN baseline_qty REAL`을 컬럼 존재 여부 확인 후 조건부로 실행하도록 한다(이미 컬럼이
-있으면 스킵 — 여러 프로세스가 동시에 `_connect()`해도 안전하게).
+`live_strategies`에 `baseline_qty REAL` 컬럼 추가(결정9, 기본값 NULL). 실제
+`data/trading.db` 파일이 아직 생성된 적이 없으므로(⑤-1~⑤-3은 전부 테스트에서만
+`tmp_path` DB를 썼다) 마이그레이션 대상 데이터가 없다 — `_SCHEMA`의
+`CREATE TABLE live_strategies` 정의에 `baseline_qty REAL` 컬럼을 바로 추가한다(YAGNI,
+이 저장소에 기존 `ALTER TABLE` 마이그레이션 관례 자체가 없다).
 
 ```python
 def get_order_by_upbit_uuid(upbit_uuid: str) -> dict | None:
