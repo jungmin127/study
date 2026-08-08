@@ -23,7 +23,8 @@ reconciler.py부터 순차 진행). 이 문서를 ⑤-4a, 다음 daemon.py 스�
 - 외부(수동) 주문 감지 방식, 잔고-포지션 대조 방식, self-heal(자동 보정) 규칙
 - 체결가 추적 정밀도(설명 가능한 불일치 vs 설명 불가 불일치)와 각각의 처리 정책
 - `trading/db.py`에 추가할 함수(외부주문 기록, 수동개입 이벤트 기록, 미체결 주문 조회,
-  포지션 수량 보정)
+  포지션 수량 보정) + `live_strategies.baseline_qty` 스키마 추가(전략 시작 전 보유
+  코인 격리, 결정9)
 
 **이 스펙에서 다루지 않는 것(⑤-4b daemon.py 및 후속 서브플랜에서):**
 - `hydrate_state`/`check_manual_intervention`을 언제(재시작 시 1회, 몇 초 주기) 호출할지의
@@ -115,6 +116,33 @@ Reconciler는 감시자이지 트레이더가 아니다 — 이번 실행에서 
 ⑤-3 결정5가 "우리가 낸 주문"의 이중주문 방지를 위해 재시도하는 것과는 성격이 다르다).
 연속 실패 횟수는 반환값에 실어 daemon이 로그/알림 여부를 판단하게 한다.
 
+### 결정 9 — 전략 시작 전부터 보유하던 코인은 `baseline_qty`로 격리한다
+
+기반 스펙 결정6("코인당 전략 1개")은 "그 코인의 실제 잔고 = 그 전략이 만든 포지션"을
+암묵적으로 가정하지만, 사용자가 전략을 승인하기 전부터 그 코인을 이미 보유하고 있으면
+(사용자 확인: 현재 실제로 BTC를 보유 중) 이 가정이 깨진다. `hydrate_state()`가 첫 호출
+때 "내부엔 포지션이 없는데 잔고엔 코인이 있다"를 외부 매수로 오인해 매칭되는 주문을
+못 찾고 결정5에 따라 시작하자마자 강제 `paused`로 빠지는 문제가 있었다(사용자가
+브레인스토밍 중 발견).
+
+**결정:** `live_strategies`에 `baseline_qty REAL` 컬럼을 추가한다(기본값 NULL).
+`hydrate_state()`는 `strategy['baseline_qty']`가 NULL이면 이번이 그 전략의 첫 호출이라고
+판단해, 그 시점의 실제 코인 잔고를 그대로 `baseline_qty`로 저장하고 **이번 호출은
+불일치 검사를 건너뛴다**(비교 기준을 막 세운 시점이라 비교할 게 없음). 이후
+`_reconcile_position()`은 항상 raw 잔고가 아니라 `실제잔고 - baseline_qty`를 "그 전략이
+직접 만든 포지션 몫"으로 계산해서 내부 `positions`와 비교한다.
+
+**효과:** 승인 전부터 보유하던 코인은 baseline으로 격리돼 계속 그대로 둔다. 봇이 실제로
+사고 판 만큼만 정확히 추적되고, baseline 확정 이후 그 코인 잔고가 또(baseline 캡처分을
+넘어) 변하면 여전히 정상적으로 수동개입/불일치로 감지된다 — "예외를 만든다"기보다
+"비교 기준점을 0이 아니라 실제 시작 시점 잔고로 잡는다"에 가깝다. 사용자가 확인한 대로
+현재 코인당 전략 1개 원칙(결정6)을 지킬 계획이므로, 이 baseline은 승인 시점 딱 한 번만
+의미를 가지면 충분하고 이후 재조정 UI 등은 이 스펙 범위 밖이다.
+
+**KRW 잔고 이자와의 구분:** 업비트가 지급하는 KRW 보관이자는 `_reconcile_position()`이
+비교하는 대상(그 전략의 마켓 코인 잔고)과 무관한 별개 통화(KRW)라서 애초에 이 로직에
+영향을 주지 않는다 — 별도 처리가 필요 없다.
+
 ## `trading/reconciler.py`
 
 ```python
@@ -122,8 +150,12 @@ _QTY_EPSILON = 1e-6  # 실제잔고 vs 내부 positions 수량 비교 허용오�
 
 async def hydrate_state(strategy: dict, *, client: httpx.AsyncClient | None = None) -> dict:
     """데몬 시작 시 전략 1개당 1회 호출. 내부 status='wait' limit 주문을 먼저
-    동기화(결정6, catch-up)한 뒤 _run_reconcile_pipeline()을 그대로 수행한다.
-    반환: {"synced_wait_orders": int, **_run_reconcile_pipeline()의 반환값}."""
+    동기화(결정6, catch-up)한다. 이어서 strategy['baseline_qty']가 None이면(결정9,
+    이 전략의 첫 호출) 그 시점 실제 코인 잔고를 db.update_live_strategy_baseline_qty()로
+    저장하고 이번 호출은 불일치 검사 없이 반환한다({"baseline_captured": True, ...}).
+    이미 baseline이 있으면 _run_reconcile_pipeline()을 그대로 수행한다.
+    반환: {"synced_wait_orders": int, "baseline_captured": bool,
+    **_run_reconcile_pipeline()의 반환값(baseline_captured=True인 호출은 생략)}."""
 
 async def check_manual_intervention(strategy: dict, *, client=None) -> dict:
     """러닝 중 데몬이 주기적으로 호출. _run_reconcile_pipeline()을 그대로 수행한다."""
@@ -147,9 +179,10 @@ async def _detect_external_orders(strategy: dict, *, client=None) -> list[dict]:
 async def _reconcile_position(
     strategy: dict, external_orders: list[dict], *, client=None,
 ) -> dict:
-    """get_accounts()에서 market의 코인 잔고(balance+locked)를 읽어 내부
-    position_manager.get_open_position()의 entry_qty(없으면 0)와 대조.
-    |실제잔고 - 내부수량| <= _QTY_EPSILON이면 변화 없음.
+    """get_accounts()에서 market의 코인 잔고(balance+locked)를 읽고 strategy['baseline_qty']
+    (결정9)를 뺀 값을 "그 전략 자신의 몫"으로 삼아 내부 position_manager.get_open_position()의
+    entry_qty(없으면 0)와 대조한다.
+    |(실제잔고 - baseline_qty) - 내부수량| <= _QTY_EPSILON이면 변화 없음.
     차이가 external_orders(결정7 가중평균)로 _QTY_EPSILON 이내까지 설명되면(결정4):
       - 내부 포지션 없었는데 잔고 생김 → position_manager.open_position(가중평균가)
       - 내부 포지션 전량 사라짐 → position_manager.close_position(close_reason='manual')
@@ -165,7 +198,13 @@ async def _reconcile_position(
     "unexplained", "paused": bool}."""
 ```
 
-## `trading/db.py` 추가 함수
+## `trading/db.py` 스키마 변경 + 추가 함수
+
+`live_strategies`에 `baseline_qty REAL` 컬럼 추가(결정9, 기본값 NULL) — 기존
+`_SCHEMA`의 `CREATE TABLE IF NOT EXISTS`는 이미 만들어진 DB 파일의 컬럼을 추가해주지
+않으므로, `_connect()`가 `executescript(_SCHEMA)` 뒤에 `ALTER TABLE live_strategies ADD
+COLUMN baseline_qty REAL`을 컬럼 존재 여부 확인 후 조건부로 실행하도록 한다(이미 컬럼이
+있으면 스킵 — 여러 프로세스가 동시에 `_connect()`해도 안전하게).
 
 ```python
 def get_order_by_upbit_uuid(upbit_uuid: str) -> dict | None:
@@ -189,6 +228,10 @@ def insert_manual_intervention_event(
 def list_wait_orders(live_strategy_id: str, order_type: str | None = None) -> list[dict]:
     """orders(status='wait', live_strategy_id=..., [order_type=...])를 조회.
     _sync_pending_limit_orders()가 order_type='limit'로 호출."""
+
+def update_live_strategy_baseline_qty(live_strategy_id: str, baseline_qty: float) -> None:
+    """live_strategies.baseline_qty를 설정한다(결정9, hydrate_state의 첫 호출에서 1회만
+    호출됨 — 이미 값이 있으면 호출하지 않는 게 호출자의 책임)."""
 
 def adjust_position_qty(position_id: str, new_qty: float) -> None:
     """positions.entry_qty를 직접 보정한다(부분 외부체결 self-heal 전용 — 정상 매매
@@ -229,10 +272,14 @@ def adjust_position_qty(position_id: str, new_qty: float) -> None:
 - API 실패 → 예외가 전파되지 않고 `{"error": ...}` 반환, DB 변경 없음(결정8).
 - 재시작 시 발견된 수동개입도 러닝 중과 동일 정책 적용 확인(결정2) — `hydrate_state`
   케이스로 `all_stop`/`acknowledge_and_continue` 둘 다 검증.
+- `baseline_qty`가 NULL인 전략의 첫 `hydrate_state` 호출 → 실제 잔고(승인 전부터 보유하던
+  코인 포함)가 그대로 `baseline_qty`로 저장되고, 그 잔고가 `positions`에 아무 영향도
+  주지 않으며 `paused` 전환도 없는지 확인(결정9, 사용자가 발견한 "기존 보유 BTC" 케이스
+  재현). 이어지는 두 번째 호출부터 `실제잔고 - baseline_qty`로 정상 대조되는지 확인.
 
 ## 자기 검토(스펙 완성도)
 
-- 플레이스홀더 없음 — 8개 핵심 결정 각각 "왜"와 기각한 대안을 남겼다.
+- 플레이스홀더 없음 — 9개 핵심 결정 각각 "왜"와 기각한 대안을 남겼다.
 - 결정1(공유 파이프라인) ↔ 결정6(hydrate_state만 추가 단계)이 서로 모순 없이
   `_run_reconcile_pipeline()` 하나로 수렴함을 함수 시그니처에서 확인했다.
 - 결정3(self-heal) ↔ 결정4(정밀 계산) ↔ 결정5(설명 안 되면 강제 all_stop)이 하나의
