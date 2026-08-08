@@ -15,6 +15,14 @@ def test_round_to_tick_boundaries():
 def test_floor_volume_truncates_to_eight_decimals():
     assert order_executor._floor_volume(0.123456789) == 0.12345678
     assert order_executor._floor_volume(1.0) == 1.0
+    assert order_executor._floor_volume(0.29999999999) == 0.29999999
+
+
+def test_floor_volume_does_not_shave_satoshi_on_binary_representation_error():
+    """0.00998 * 1e8 == 997999.9999999999 이라 단순 floor는 1사토시를 깎아먹는다.
+    이미 8자리인 값은 그대로 보존돼야 한다(exit()이 보유수량 전량을 팔 수 있도록)."""
+    assert order_executor._floor_volume(0.00998) == 0.00998
+    assert order_executor._floor_volume(0.1 + 0.2) == 0.3
 
 
 import httpx
@@ -515,6 +523,239 @@ async def test_enter_market_returns_wait_when_order_never_settles(monkeypatch, t
     assert order["status"] == "wait"
     assert calls["get"] > 1
     assert position_manager.get_open_position(strategy["id"]) is None
+
+
+def _http_error(status=400):
+    request = httpx.Request("DELETE", "https://api.upbit.com/v1/order")
+    return httpx.HTTPStatusError(
+        str(status), request=request, response=httpx.Response(status, request=request),
+    )
+
+
+async def test_limit_timeout_uses_fast_path_when_cancel_finds_order_already_done(
+    monkeypatch, tmp_path,
+):
+    """조회와 취소 사이에 전량 체결되면 cancel_order가 실패한다. 이때 재조회해서
+    done이면 잔량 전환 없이 그대로 확정해야 한다(최종리뷰 Important #8-a)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+    calls = {"create": 0, "get": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls["create"] += 1
+        return {"uuid": "uuid-limit", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        calls["get"] += 1
+        if calls["get"] == 1:  # 타임아웃 직후: 아직 부분체결
+            return {"state": "wait", "executed_volume": "0.004", "remaining_volume": "0.006",
+                    "paid_fee": "100.0", "trades": [{"funds": "200000.0"}]}
+        # 취소 실패 후 재조회: 그 사이 전량 체결돼 있었다
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "500000.0"}]}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        raise _http_error()
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert calls["create"] == 1  # 잔량 시장가 주문을 내지 않았다
+    assert order["status"] == "done"
+    assert order["filled_volume"] == pytest.approx(0.01)
+    assert order["filled_price"] == pytest.approx(500_000.0 / 0.01)
+    assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+async def test_limit_timeout_propagates_cancel_error_when_order_still_not_done(
+    monkeypatch, tmp_path,
+):
+    """취소가 실패했는데 재조회해도 done이 아니면 진짜 장애이므로 삼키면 안 된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-limit", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "executed_volume": "0.004", "remaining_volume": "0.006",
+                "paid_fee": "100.0", "trades": [{"funds": "200000.0"}]}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        raise _http_error(500)
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+
+async def test_limit_timeout_skips_remainder_below_min_order_amount(monkeypatch, tmp_path):
+    """잔량 환산금액이 업비트 최소주문금액(5,000원) 미만이면 전환 주문 자체가 거부되므로
+    1차 체결만으로 확정한다(최종리뷰 Important #8-b)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+    calls = {"create": 0, "cancel": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls["create"] += 1
+        return {"uuid": "uuid-limit", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        # 잔량 0.00002 × 5천만원 = 1,000원 < 5,000원
+        return {"state": "wait", "executed_volume": "0.00998", "remaining_volume": "0.00002",
+                "paid_fee": "249.0", "trades": [{"funds": "499000.0"}]}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        calls["cancel"] += 1
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert calls["create"] == 1  # 잔량 전환 주문을 내지 않았다
+    assert calls["cancel"] == 1
+    assert order["status"] == "done"
+    assert order["filled_volume"] == pytest.approx(0.00998)
+    assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+async def test_limit_timeout_prices_remainder_from_first_leg_fill(monkeypatch, tmp_path):
+    """잔량 매수금액 기준가는 timeout_sec 전의 expected_price가 아니라, 방금 체결된
+    1차 체결가를 써야 한다(최종리뷰 Important #8-c)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+    calls = {"create": 0}
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls["create"] += 1
+        if calls["create"] == 1:
+            return {"uuid": "uuid-limit", "state": "wait"}
+        captured.update(price=price)
+        return {"uuid": "uuid-market", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if uuid == "uuid-limit":
+            # 1차 체결가 5,100만원 (expected_price 5,000만원과 다르다)
+            return {"state": "wait", "executed_volume": "0.004", "remaining_volume": "0.006",
+                    "paid_fee": "100.0", "trades": [{"funds": "204000.0"}]}
+        return {"state": "done", "executed_volume": "0.006", "remaining_volume": "0",
+                "paid_fee": "150.0", "trades": [{"funds": "306000.0"}]}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert float(captured["price"]) == pytest.approx(51_000_000.0 * 0.006)  # 1차 체결가 기준
+    assert float(captured["price"]) != pytest.approx(50_000_000.0 * 0.006)  # expected_price 아님
+
+
+async def test_limit_timeout_keeps_first_leg_when_remainder_order_fails(monkeypatch, tmp_path):
+    """잔량 전환 주문이 실패해도 이미 실제로 체결된 1차 부분체결(=보유 코인)을
+    통째로 날려선 안 된다(최종리뷰 Important #8-d)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+    calls = {"create": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls["create"] += 1
+        if calls["create"] == 1:
+            return {"uuid": "uuid-limit", "state": "wait"}
+        raise _http_error(400)
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "executed_volume": "0.004", "remaining_volume": "0.006",
+                "paid_fee": "100.0", "trades": [{"funds": "200000.0"}]}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert calls["create"] == 2
+    assert order["status"] == "done"
+    assert order["filled_volume"] == pytest.approx(0.004)  # 1차 부분체결이 보존된다
+    assert order["filled_price"] == pytest.approx(200_000.0 / 0.004)
+    position = position_manager.get_open_position(strategy["id"])
+    assert position is not None
+    assert position["entry_qty"] == pytest.approx(0.004)
+
+
+async def test_limit_timeout_propagates_remainder_failure_when_nothing_filled(
+    monkeypatch, tmp_path,
+):
+    """1차에서 한 주도 안 체결됐다면 보호할 부분체결이 없으므로 에러를 그대로 올린다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+    calls = {"create": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls["create"] += 1
+        if calls["create"] == 1:
+            return {"uuid": "uuid-limit", "state": "wait"}
+        raise _http_error(400)
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "executed_volume": "0", "remaining_volume": "0.01",
+                "paid_fee": "0", "trades": []}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
 
 
 async def test_enter_reserves_fee_headroom_from_capital(monkeypatch, tmp_path):

@@ -46,6 +46,8 @@ _SUPPORTED_MODES = frozenset({"market", "limit", "limit_timeout", "market_capped
 
 _BID_FEE_RATE = 0.0005  # 업비트 기본 매수 수수료율 0.05%
 
+_MIN_ORDER_AMOUNT_KRW = 5000  # 업비트 원화마켓 최소 주문금액
+
 
 def _validate_mode(mode: str, risk_config: dict) -> None:
     """orders 행을 만들기 전에 실행모드 설정을 검증한다. insert_order 뒤에서 검증하면
@@ -65,7 +67,9 @@ def round_to_tick(price: float) -> float:
 
 
 def _floor_volume(volume: float) -> float:
-    return math.floor(volume * 1e8) / 1e8
+    # 이진 표현 오차 보정 후 내림한다. 보정 없이 floor하면 0.00998 * 1e8 == 997999.9999999999
+    # 이라 이미 8자리인 값에서도 1사토시를 깎아먹는다(exit()의 전량매도가 먼지를 남긴다).
+    return math.floor(round(volume * 1e8, 6)) / 1e8
 
 
 def _fmt(value: float) -> str:
@@ -187,6 +191,25 @@ async def _run_limit(
     return {"order_id": order_id, "status": "wait", "filled_price": None, "filled_volume": None, "fee": None}
 
 
+def _finalize_first_leg(
+    order_id: str, upbit_uuid: str, fill: dict, expected_price: float,
+) -> dict:
+    """1차 지정가 주문의 체결만으로 주문을 확정한다(타임아웃 내 전량체결 / 잔량이
+    최소주문금액 미만 / 잔량 전환 실패 — 세 경우 모두 결과 형태가 같다)."""
+    volume = _floor_volume(fill["executed_volume"])
+    if volume <= 0:
+        db.update_order_filled(order_id, upbit_uuid, None, None, None, None, "cancel")
+        return {"order_id": order_id, "status": "cancel", "filled_price": None,
+                "filled_volume": None, "fee": None}
+
+    db.update_order_filled(
+        order_id, upbit_uuid, fill["filled_price"], volume, fill["fee"],
+        _slippage_pct(fill["filled_price"], expected_price), "done",
+    )
+    return {"order_id": order_id, "status": "done", "filled_price": fill["filled_price"],
+            "filled_volume": volume, "fee": fill["fee"]}
+
+
 async def _run_limit_timeout(
     order_id: str, live_strategy_id: str, position_id: str | None, market: str, side: str,
     price: float, volume: float, expected_price: float, timeout_sec: float,
@@ -199,34 +222,59 @@ async def _run_limit_timeout(
     fill = await _fetch_fill(resp["uuid"], client=client)
 
     if fill["state"] == "done":
-        db.update_order_filled(
-            order_id, resp["uuid"], fill["filled_price"], fill["executed_volume"], fill["fee"],
-            _slippage_pct(fill["filled_price"], expected_price), "done",
-        )
-        return {"order_id": order_id, "status": "done", "filled_price": fill["filled_price"],
-                "filled_volume": fill["executed_volume"], "fee": fill["fee"]}
+        return _finalize_first_leg(order_id, resp["uuid"], fill, expected_price)
 
-    await upbit_client.cancel_order(uuid=resp["uuid"], client=client)
+    try:
+        await upbit_client.cancel_order(uuid=resp["uuid"], client=client)
+    except httpx.HTTPStatusError:
+        # 조회와 취소 사이에 전량 체결되면 업비트는 취소를 거부한다. 그 사이 실제로 확정된
+        # 상태를 다시 읽어 done이면 잔량 전환 없이 확정한다(최종리뷰 Important #8-a).
+        # done이 아니면 진짜 장애이므로 삼키지 않고 그대로 올린다.
+        fill = await _fetch_fill(resp["uuid"], client=client)
+        if fill["state"] != "done":
+            raise
+        return _finalize_first_leg(order_id, resp["uuid"], fill, expected_price)
+
     first_volume = fill["executed_volume"]
     first_funds = fill["filled_price"] * first_volume if first_volume else 0.0
     first_fee = fill["fee"]
+    remaining_volume = fill["remaining_volume"]
+
+    # 잔량 환산 기준가: timeout_sec 동안 시세가 움직였을 수 있으므로 원래의 expected_price보다
+    # 방금 체결된 1차 체결가가 훨씬 신선하다. 1차가 한 주도 안 붙었을 때만 폴백한다
+    # (실시간 호가 조회는 이 모듈 범위 밖 — 이후 서브플랜의 WebSocket ticker 과제).
+    price_basis = fill["filled_price"] if first_volume > 0 else round_to_tick(expected_price)
+
+    # 잔량이 업비트 최소주문금액 미만이면 전환 주문 자체가 거부되므로 시도하지 않고
+    # 1차 체결만으로 확정한다(최종리뷰 Important #8-b).
+    if remaining_volume * price_basis < _MIN_ORDER_AMOUNT_KRW:
+        return _finalize_first_leg(order_id, resp["uuid"], fill, expected_price)
+
     db.update_order_filled(order_id, resp["uuid"], fill["filled_price"], first_volume, first_fee, None, "cancel")
 
-    remaining_volume = fill["remaining_volume"]
     market_order_id = db.insert_order(
         live_strategy_id, position_id, market, side, "market", None, remaining_volume, expected_price,
         replaces_order_id=order_id,
     )
-    if side == "bid":
-        market_resp = await _create_order_with_retry(
-            market, "bid", "price", order_id=market_order_id,
-            price=_fmt(round_to_tick(expected_price) * remaining_volume), client=client,
-        )
-    else:
-        market_resp = await _create_order_with_retry(
-            market, "ask", "market", order_id=market_order_id, volume=_fmt(remaining_volume), client=client,
-        )
-    second_fill = await _await_settlement(market_resp["uuid"], client=client)
+    try:
+        if side == "bid":
+            market_resp = await _create_order_with_retry(
+                market, "bid", "price", order_id=market_order_id,
+                price=_fmt(price_basis * remaining_volume), client=client,
+            )
+        else:
+            market_resp = await _create_order_with_retry(
+                market, "ask", "market", order_id=market_order_id,
+                volume=_fmt(remaining_volume), client=client,
+            )
+        second_fill = await _await_settlement(market_resp["uuid"], client=client)
+    except Exception:
+        # 잔량 전환이 실패해도 1차 부분체결은 이미 실제로 보유 중인 코인이다. 예외를 그대로
+        # 올리면 그 체결이 아무 데도 기록되지 않는다(최종리뷰 Important #8-d).
+        # 전환 주문 행(market_order_id)은 실제 접수 여부를 알 수 없으므로 'wait'인 채로 둔다.
+        if first_volume == 0:
+            raise  # 보호할 부분체결이 없으면 진짜 실패다
+        return _finalize_first_leg(order_id, resp["uuid"], fill, expected_price)
 
     # 단순 합은 0.30000000000000004 같은 8자리 초과 값이 되므로 내림한다. avg_price도
     # 내림된 수량으로 나눠, 실제 기록되는 filled_volume과 금액 정합성을 맞춘다.
