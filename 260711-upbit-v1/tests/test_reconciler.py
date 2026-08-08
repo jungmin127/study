@@ -316,6 +316,66 @@ async def test_reconcile_position_unexplained_forces_paused_regardless_of_policy
     assert position["entry_qty"] == pytest.approx(0.005)
 
 
+async def test_reconcile_position_negative_actual_qty_from_baseline_does_not_open_position(
+    monkeypatch, tmp_path,
+):
+    """Finding 1 — baseline_qty>0(봇 시작 전부터 보유하던 코인)인 상태에서 사용자가
+    그 보유분 일부를 수동 매도하면 actual_qty(raw_balance - baseline_qty)가 음수가 될 수
+    있다. 그 diff가 외부 매도주문과 정확히 매칭되더라도, position이 None인 상태에서
+    음수/0 수량으로 포지션을 여는 것은 금지되어야 한다 — entry_qty<0, entry_price=0.0인
+    자기영속(self-perpetuating) 포지션은 이후 청산 시 position_manager.close_position()에서
+    ZeroDivisionError를 일으킨다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(
+        dbm, baseline_qty=0.02, manual_intervention_policy="acknowledge_and_continue",
+    )
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.01)]  # raw_balance=0.01, baseline=0.02 -> actual_qty=-0.01
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    external_orders = [{"side": "ask", "filled_volume": 0.01, "filled_price": 50_000_000.0, "fee": 500.0}]
+    result = await reconciler._reconcile_position(strategy, external_orders)
+
+    assert result == {"balance_mismatch": True, "action": "unexplained", "paused": True}
+    assert position_manager.get_open_position(strategy["id"]) is None
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+    conn = dbm._connect()
+    try:
+        rows = conn.execute(
+            "SELECT description FROM manual_intervention_events"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert any("설명 안 되는 잔고 변화" in row[0] for row in rows)
+
+
+async def test_reconcile_position_blends_entry_price_on_partial_external_buy_topup(
+    monkeypatch, tmp_path,
+):
+    """Finding 2 — 포지션이 열려 있는 상태에서 매칭된 외부 매수주문으로 순매수(top-up)가
+    발생하면, entry_qty만 갱신하고 entry_price를 그대로 두면 원가가 과소평가된다.
+    거래량가중평균(volume-weighted average)으로 entry_price도 재계산해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="acknowledge_and_continue")
+    position_manager.open_position(strategy["id"], "KRW-BTC", 40_000_000.0, 0.01)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.02)]  # 0.01 보유 + 외부매수 0.01 = 0.02
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    external_orders = [{"side": "bid", "filled_volume": 0.01, "filled_price": 60_000_000.0, "fee": 300.0}]
+    result = await reconciler._reconcile_position(strategy, external_orders)
+
+    assert result["action"] == "adjusted"
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_qty"] == pytest.approx(0.02)
+    # 가중평균 원가 = (40M*0.01 + 60M*0.01) / 0.02 = 50,000,000
+    assert position["entry_price"] == pytest.approx(50_000_000.0)
+
+
 async def test_reconcile_position_unexplained_open_uses_avg_buy_price(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm, baseline_qty=0.0)

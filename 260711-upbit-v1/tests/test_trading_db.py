@@ -487,3 +487,27 @@ def test_adjust_position_qty_updates_open_position_only(monkeypatch, tmp_path):
     db.adjust_position_qty(position_id, 0.006)
 
     assert db.get_position(position_id)["entry_qty"] == 0.006
+
+
+def test_adjust_position_qty_with_new_entry_price_updates_both(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    db.adjust_position_qty(position_id, 0.02, 51_000_000.0)
+
+    position = db.get_position(position_id)
+    assert position["entry_qty"] == 0.02
+    assert position["entry_price"] == 51_000_000.0
+
+
+def test_adjust_position_qty_without_new_entry_price_leaves_price_unchanged(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    db.adjust_position_qty(position_id, 0.006)
+
+    position = db.get_position(position_id)
+    assert position["entry_qty"] == 0.006
+    assert position["entry_price"] == 50_000_000.0

@@ -478,13 +478,21 @@ def list_wait_orders(live_strategy_id: str, order_type: str | None = None) -> li
         conn.close()
 
 
-def adjust_position_qty(position_id: str, new_qty: float) -> None:
+def adjust_position_qty(
+    position_id: str, new_qty: float, new_entry_price: float | None = None,
+) -> None:
     conn = _connect()
     try:
-        conn.execute(
-            "UPDATE positions SET entry_qty = ? WHERE id = ? AND status = 'open'",
-            (new_qty, position_id),
-        )
+        if new_entry_price is not None:
+            conn.execute(
+                "UPDATE positions SET entry_qty = ?, entry_price = ? WHERE id = ? AND status = 'open'",
+                (new_qty, new_entry_price, position_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE positions SET entry_qty = ? WHERE id = ? AND status = 'open'",
+                (new_qty, position_id),
+            )
         conn.commit()
     finally:
         conn.close()

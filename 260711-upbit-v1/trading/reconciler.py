@@ -142,9 +142,14 @@ def _weighted_fill(orders: list[dict]) -> tuple[float, float, float]:
 def _apply_explained_change(
     strategy: dict, position: dict | None, actual_qty: float,
     buy_volume: float, buy_price: float, sell_price: float, sell_fee: float,
-) -> str:
-    """설계 스펙 결정4/7 — 매칭된 외부주문의 실제 체결가로 정밀하게 self-heal한다."""
+) -> str | None:
+    """설계 스펙 결정4/7 — 매칭된 외부주문의 실제 체결가로 정밀하게 self-heal한다.
+    None을 반환하면 "정밀하게 open으로 설명할 수 없다"는 뜻이며, 호출자는 unexplained
+    처리로 넘어가야 한다(Finding 1 — baseline_qty로 인해 actual_qty가 0 이하가 되는
+    경우, 음수/영 수량 포지션을 여는 것을 방지)."""
     if position is None:
+        if actual_qty <= _QTY_EPSILON:
+            return None
         position_manager.open_position(strategy["id"], strategy["market"], buy_price, actual_qty)
         return "opened"
 
@@ -157,7 +162,15 @@ def _apply_explained_change(
         )
         return "closed"
 
-    db.adjust_position_qty(position["id"], actual_qty)
+    if actual_qty > position["entry_qty"] + _QTY_EPSILON:
+        # 순매수(외부 매수로 top-up) — 원가를 가중평균으로 재계산(정밀 계산 원칙, Finding 2)
+        old_cost = position["entry_price"] * position["entry_qty"]
+        added_cost = buy_price * (actual_qty - position["entry_qty"])
+        blended_price = (old_cost + added_cost) / actual_qty
+        db.adjust_position_qty(position["id"], actual_qty, blended_price)
+    else:
+        # 순매도(부분청산) — 원가는 그대로, 수량만 축소
+        db.adjust_position_qty(position["id"], actual_qty)
     return "adjusted"
 
 
@@ -204,10 +217,13 @@ async def _reconcile_position(
     sell_volume, sell_price, sell_fee = _weighted_fill(done_sells)
     explained_diff = buy_volume - sell_volume
 
+    action = None
     if (buy_volume > 0 or sell_volume > 0) and abs(diff - explained_diff) <= _QTY_EPSILON:
         action = _apply_explained_change(
             strategy, position, actual_qty, buy_volume, buy_price, sell_price, sell_fee,
         )
+
+    if action is not None:
         paused = policy == "all_stop"
         if paused:
             db.update_live_strategy_status(strategy["id"], "paused")
