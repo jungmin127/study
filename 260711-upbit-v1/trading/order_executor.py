@@ -93,6 +93,23 @@ async def _fetch_fill(upbit_uuid: str, *, client: httpx.AsyncClient | None = Non
     }
 
 
+async def _await_settlement(
+    upbit_uuid: str, *, timeout: float = 3.0, interval: float = 0.2,
+    client: httpx.AsyncClient | None = None,
+) -> dict:
+    """체결 상태가 확정(done/cancel)될 때까지 짧은 간격으로 폴링한다. 업비트는 주문을
+    비동기로 체결하므로, create_order() 직후 즉시 조회하면 아직 wait 상태일 수 있다.
+    timeout 안에 확정되지 않으면 마지막으로 조회한 상태를 그대로 반환한다(호출자가 그
+    상태를 판단)."""
+    elapsed = 0.0
+    fill = await _fetch_fill(upbit_uuid, client=client)
+    while fill["state"] not in ("done", "cancel") and elapsed < timeout:
+        await asyncio.sleep(interval)
+        elapsed += interval
+        fill = await _fetch_fill(upbit_uuid, client=client)
+    return fill
+
+
 def _slippage_pct(filled_price: float, expected_price: float) -> float:
     return (filled_price - expected_price) / expected_price * 100
 
@@ -109,12 +126,19 @@ async def _run_market(
         resp = await _create_order_with_retry(
             market, "ask", "market", order_id=order_id, volume=str(volume), client=client,
         )
-    fill = await _fetch_fill(resp["uuid"], client=client)
+    fill = await _await_settlement(resp["uuid"], client=client)
+    # 폴링 타임아웃까지 확정되지 않았으면 wait으로 보고한다. 무조건 "done"으로 기록하면
+    # 미체결/부분체결 주문이 전량체결로 둔갑한다(최종리뷰 Critical #1).
+    status = fill["state"] if fill["state"] in ("done", "cancel") else "wait"
+    slippage = (
+        _slippage_pct(fill["filled_price"], expected_price)
+        if fill["filled_price"] is not None else None
+    )
     db.update_order_filled(
         order_id, resp["uuid"], fill["filled_price"], fill["executed_volume"], fill["fee"],
-        _slippage_pct(fill["filled_price"], expected_price), "done",
+        slippage, status,
     )
-    return {"order_id": order_id, "status": "done", "filled_price": fill["filled_price"],
+    return {"order_id": order_id, "status": status, "filled_price": fill["filled_price"],
             "filled_volume": fill["executed_volume"], "fee": fill["fee"]}
 
 
@@ -168,7 +192,7 @@ async def _run_limit_timeout(
         market_resp = await _create_order_with_retry(
             market, "ask", "market", order_id=market_order_id, volume=str(remaining_volume), client=client,
         )
-    second_fill = await _fetch_fill(market_resp["uuid"], client=client)
+    second_fill = await _await_settlement(market_resp["uuid"], client=client)
 
     total_volume = first_volume + second_fill["executed_volume"]
     total_funds = first_funds + second_fill["filled_price"] * second_fill["executed_volume"]
@@ -192,7 +216,7 @@ async def _run_market_capped(
         market, side, "limit", order_id=order_id,
         price=str(capped_price), volume=str(volume), time_in_force="fok", client=client,
     )
-    fill = await _fetch_fill(resp["uuid"], client=client)
+    fill = await _await_settlement(resp["uuid"], client=client)
     if fill["state"] != "done" or fill["executed_volume"] == 0:
         db.update_order_filled(order_id, resp["uuid"], None, None, None, None, "cancel")
         return {"order_id": order_id, "status": "cancel", "filled_price": None,

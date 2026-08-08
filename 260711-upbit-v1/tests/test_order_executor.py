@@ -394,6 +394,70 @@ async def test_exit_market_capped_uses_lower_bound_price(monkeypatch, tmp_path):
     assert captured["price"] == str(order_executor.round_to_tick(50_000_000.0 * 0.995))
 
 
+async def test_enter_market_polls_until_order_settles(monkeypatch, tmp_path):
+    """업비트는 주문을 비동기 체결하므로 create_order 직후 조회는 아직 wait일 수 있다.
+    확정될 때까지 짧게 재조회해야 한다(최종리뷰 Critical #1)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    calls = {"get": 0, "sleep": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-settle", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        calls["get"] += 1
+        if calls["get"] == 1:
+            return {"state": "wait", "executed_volume": "0", "remaining_volume": "0.01",
+                    "paid_fee": "0", "trades": []}
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "500000.0"}]}
+
+    async def fake_sleep(seconds):
+        calls["sleep"] += 1
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert calls["get"] == 2  # 첫 조회가 wait였으므로 한 번 더 폴링
+    assert calls["sleep"] >= 1
+    assert order["status"] == "done"
+    assert order["filled_price"] == pytest.approx(500_000.0 / 0.01)
+    assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+async def test_enter_market_returns_wait_when_order_never_settles(monkeypatch, tmp_path):
+    """폴링 타임아웃까지 wait이면 crash도, 거짓 done도 아닌 wait으로 보고한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    calls = {"get": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-never", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        calls["get"] += 1
+        return {"state": "wait", "executed_volume": "0", "remaining_volume": "0.01",
+                "paid_fee": "0", "trades": []}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert order["status"] == "wait"
+    assert calls["get"] > 1
+    assert position_manager.get_open_position(strategy["id"]) is None
+
+
 import trading.risk_manager as risk_manager
 
 
