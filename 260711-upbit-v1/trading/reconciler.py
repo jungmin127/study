@@ -30,3 +30,32 @@ async def _get_coin_account(market: str, *, client: httpx.AsyncClient | None = N
         if account["currency"] == currency:
             return account
     return None
+
+
+async def _sync_pending_limit_orders(
+    strategy: dict, *, client: httpx.AsyncClient | None = None,
+) -> int:
+    """내부 status='wait', order_type='limit' 주문(오프라인 동안 결과를 못 받은 사용자
+    선택 방치 주문, 설계 스펙 결정6)을 재조회해 조용히 동기화한다. 우리가 낸 주문이므로
+    수동개입으로 기록하지 않는다."""
+    wait_orders = db.list_wait_orders(strategy["id"], order_type="limit")
+    synced = 0
+    for order in wait_orders:
+        if not order["upbit_uuid"]:
+            continue
+        resp = await upbit_client.get_order(uuid=order["upbit_uuid"], client=client)
+        if resp["state"] == "wait":
+            continue
+
+        executed_volume = float(resp["executed_volume"])
+        filled_price = (
+            sum(float(t["funds"]) for t in resp["trades"]) / executed_volume
+            if executed_volume > 0 else None
+        )
+        status = "done" if resp["state"] == "done" else "cancel"
+        db.update_order_filled(
+            order["id"], order["upbit_uuid"], filled_price, executed_volume,
+            float(resp["paid_fee"]), None, status,
+        )
+        synced += 1
+    return synced
