@@ -16,6 +16,7 @@ import pandas as pd
 
 from engine.condition_tree import (
     POSITION_RELATIVE_INDICATORS,
+    apply_operator,
     collect_blocks,
     eval_group_values,
     indicator_key,
@@ -281,3 +282,25 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
         "paused": paused,
         "resumed": resumed,
     }
+
+
+_TICKER_RISK_INDICATORS = {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT"}
+
+
+def has_risk_exit_conditions(sell_conditions: dict) -> bool:
+    """sell_conditions_json에 STOP_LOSS_PCT/TAKE_PROFIT_PCT 블록이 하나라도 있는지
+    확인한다(⑤-4c: 없는 전략은 daemon.py가 ticker WS 연결 자체를 안 열기 위한
+    최적화용, 설계 스펙 결정7)."""
+    return any(b["indicator"] in _TICKER_RISK_INDICATORS for b in collect_blocks(sell_conditions))
+
+
+def matched_risk_exit_indicator(sell_conditions: dict, position_return_pct: float) -> str | None:
+    """STOP_LOSS_PCT/TAKE_PROFIT_PCT를 sell_conditions_json 안의 다른 조건과의 AND/OR
+    결합과 무관하게 독립 안전망으로 평가한다(⑤-4c 설계 스펙 결정1). 위반된 블록의
+    indicator 이름(트리에서 먼저 발견된 것)을 반환, 없으면 None. daemon.py가 반환값을
+    order_executor.exit_for_risk()의 close_reason 기록에 그대로 쓴다."""
+    for block in collect_blocks(sell_conditions):
+        if block["indicator"] in _TICKER_RISK_INDICATORS:
+            if apply_operator(position_return_pct, block["operator"], float(block["threshold"])):
+                return block["indicator"]
+    return None

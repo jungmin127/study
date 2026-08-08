@@ -467,3 +467,51 @@ def test_evaluate_signals_returns_signal_ids_and_latest_close(monkeypatch, tmp_p
         conn.close()
     assert buy_row["signal_type"] == "buy"
     assert sell_row["signal_type"] == "sell"
+
+
+def test_has_risk_exit_conditions_true_when_stop_loss_present():
+    sell = {"type": "OR", "conditions": [
+        {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70},
+        {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+    ]}
+    assert signal_engine.has_risk_exit_conditions(sell) is True
+
+
+def test_has_risk_exit_conditions_false_when_absent():
+    sell = {"type": "OR", "conditions": [
+        {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70},
+    ]}
+    assert signal_engine.has_risk_exit_conditions(sell) is False
+
+
+def test_matched_risk_exit_indicator_ignores_and_or_combination_with_other_indicators():
+    # RSI 조건이 False라도(다른 지표는 이 테스트에서 아예 계산되지 않음) STOP_LOSS_PCT
+    # 단독 위반만으로 매치돼야 한다 — 결정1의 핵심 계약("독립 안전망").
+    sell = {"type": "AND", "conditions": [
+        {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70},
+        {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+    ]}
+    assert signal_engine.matched_risk_exit_indicator(sell, -6.0) == "STOP_LOSS_PCT"
+
+
+def test_matched_risk_exit_indicator_returns_take_profit_when_breached():
+    sell = {"type": "OR", "conditions": [
+        {"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 10},
+    ]}
+    assert signal_engine.matched_risk_exit_indicator(sell, 12.0) == "TAKE_PROFIT_PCT"
+
+
+def test_matched_risk_exit_indicator_returns_none_when_within_thresholds():
+    sell = {"type": "OR", "conditions": [
+        {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        {"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 10},
+    ]}
+    assert signal_engine.matched_risk_exit_indicator(sell, 0.0) is None
+
+
+def test_matched_risk_exit_indicator_ignores_holding_period_bars():
+    # HOLDING_PERIOD_BARS는 봉 개수 기반이라 ticker 실시간 평가 대상이 아니다(스펙 범위 밖).
+    sell = {"type": "OR", "conditions": [
+        {"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">=", "threshold": 1},
+    ]}
+    assert signal_engine.matched_risk_exit_indicator(sell, -100.0) is None
