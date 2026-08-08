@@ -72,7 +72,10 @@ async def test_sync_pending_limit_orders_updates_filled_order(monkeypatch, tmp_p
 
     synced = await reconciler._sync_pending_limit_orders(strategy)
 
-    assert synced == 1
+    assert len(synced) == 1
+    assert synced[0]["id"] == order_id
+    assert synced[0]["filled_price"] == 100.0
+    assert synced[0]["filled_volume"] == 1.0
     order = dbm.get_order_by_id(order_id)
     assert order["status"] == "done"
     assert order["filled_price"] == 100.0
@@ -93,7 +96,7 @@ async def test_sync_pending_limit_orders_skips_orders_still_waiting(monkeypatch,
 
     synced = await reconciler._sync_pending_limit_orders(strategy)
 
-    assert synced == 0
+    assert synced == []
     assert dbm.get_order_by_id(order_id)["status"] == "wait"
 
 
@@ -112,7 +115,7 @@ async def test_sync_pending_limit_orders_ignores_non_limit_wait_orders(monkeypat
 
     synced = await reconciler._sync_pending_limit_orders(strategy)
 
-    assert synced == 0
+    assert synced == []
     assert calls["count"] == 0
 
 
@@ -352,12 +355,14 @@ async def test_reconcile_position_negative_actual_qty_from_baseline_does_not_ope
     assert any("설명 안 되는 잔고 변화" in row[0] for row in rows)
 
 
-async def test_reconcile_position_blends_entry_price_on_partial_external_buy_topup(
+async def test_reconcile_position_treats_topup_while_open_as_unexplained(
     monkeypatch, tmp_path,
 ):
-    """Finding 2 — 포지션이 열려 있는 상태에서 매칭된 외부 매수주문으로 순매수(top-up)가
-    발생하면, entry_qty만 갱신하고 entry_price를 그대로 두면 원가가 과소평가된다.
-    거래량가중평균(volume-weighted average)으로 entry_price도 재계산해야 한다."""
+    """최종 브랜치 리뷰 Important 3(사용자 확정) — 포지션이 열려 있는 상태에서 매칭된
+    외부 매수주문으로 순매수(top-up)가 발생해도, 사용자 개인자금이 전략 자금에 조용히
+    섞여 들어가는 걸 막기 위해 "정밀 self-heal"이 아니라 "설명 안 됨"으로 처리한다 —
+    수량만 실제 잔고로 보정하고 entry_price는 건드리지 않으며, 정책과 무관하게
+    강제 정지된다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="acknowledge_and_continue")
     position_manager.open_position(strategy["id"], "KRW-BTC", 40_000_000.0, 0.01)
@@ -370,11 +375,12 @@ async def test_reconcile_position_blends_entry_price_on_partial_external_buy_top
     external_orders = [{"side": "bid", "filled_volume": 0.01, "filled_price": 60_000_000.0, "fee": 300.0}]
     result = await reconciler._reconcile_position(strategy, external_orders)
 
-    assert result["action"] == "adjusted"
+    assert result["action"] == "unexplained"
+    assert result["paused"] is True
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
     position = position_manager.get_open_position(strategy["id"])
     assert position["entry_qty"] == pytest.approx(0.02)
-    # 가중평균 원가 = (40M*0.01 + 60M*0.01) / 0.02 = 50,000,000
-    assert position["entry_price"] == pytest.approx(50_000_000.0)
+    assert position["entry_price"] == 40_000_000.0  # 원가는 건드리지 않음
 
 
 async def test_reconcile_position_unexplained_open_uses_avg_buy_price(monkeypatch, tmp_path):
@@ -453,3 +459,169 @@ async def test_hydrate_state_runs_pipeline_when_baseline_already_set(monkeypatch
     assert result["baseline_captured"] is False
     assert result["balance_mismatch"] is False
     assert result["synced_wait_orders"] == 0
+
+
+async def test_detect_external_orders_skips_cycle_when_own_order_in_flight(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 Critical 3 — order_executor가 방금 낸 주문은 체결/타임아웃 확인이
+    끝나야 upbit_uuid가 기록된다. 그 사이 창(status='wait', upbit_uuid IS NULL)에
+    reconciler가 돌면 그 주문이 거래소 목록엔 "새 주문"으로 보여 외부주문으로 오인되고,
+    나중에 order_executor가 같은 uuid를 기록하려 할 때 UNIQUE 제약 위반이 난다. 그런
+    미확정 주문이 있으면 이번 사이클은 아예 감지를 건너뛴다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+    dbm.insert_order(strategy["id"], None, "KRW-BTC", "bid", "market", 100.0, 1.0, 100.0)
+    calls = {"count": 0}
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        calls["count"] += 1
+        return [{"uuid": "some-uuid"}]
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert found == []
+    assert calls["count"] == 0
+
+
+async def test_reconcile_position_own_fills_alone_do_not_trigger_manual_intervention(
+    monkeypatch, tmp_path,
+):
+    """최종 브랜치 리뷰 Critical 1 — 오프라인 중 체결된 우리 자신의 plain limit 주문
+    (own_fills)만으로 잔고 변화가 전부 설명되면, 이건 수동개입이 아니다. paused는 항상
+    False여야 하고 manual_intervention_events도 기록되면 안 된다(정책이 all_stop이어도)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.01)]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    own_fills = [{"side": "bid", "filled_volume": 0.01, "filled_price": 50_000_000.0, "fee": 500.0}]
+    result = await reconciler._reconcile_position(strategy, [], own_fills=own_fills)
+
+    assert result == {"balance_mismatch": True, "action": "opened", "paused": False}
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "running"
+    conn = dbm._connect()
+    try:
+        rows = conn.execute("SELECT COUNT(*) FROM manual_intervention_events").fetchone()
+    finally:
+        conn.close()
+    assert rows[0] == 0
+
+
+async def test_run_reconcile_pipeline_rereads_strategy_row_not_stale_dict(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 Critical 2 — 호출자가 baseline_qty를 캡처하기 전의 오래된
+    strategy dict를 그대로 들고 있다가 넘겨도, 파이프라인은 DB에서 최신 행을 다시 읽어야
+    한다. 그렇지 않으면 baseline 격리(결정9)가 무력화된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.05)
+    stale_strategy = dict(strategy)
+    stale_strategy["baseline_qty"] = None  # 캡처 이전 시점의 오래된 스냅샷을 흉내낸다
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.05)]  # baseline과 정확히 일치 — 봇 자신의 포지션은 0
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler._run_reconcile_pipeline(stale_strategy)
+
+    assert result == {"balance_mismatch": False, "action": "none", "paused": False}
+
+
+async def test_detect_external_orders_unrecognized_policy_still_pauses(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 Important 4 — manual_intervention_policy에 오타/미지원 값이 들어와도
+    안전한 쪽(정지)으로 기울여야 한다. "acknowledge_and_continue"를 명시적으로 고른
+    경우에만 계속 진행한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="some_typo")
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "ext-uuid-typo"}]
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "side": "bid", "ord_type": "limit",
+                "executed_volume": "0", "remaining_volume": "1.0",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await reconciler._detect_external_orders(strategy)
+
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+
+
+async def test_self_heal_unexplained_skips_open_when_avg_buy_price_is_zero(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 Important 6 — avg_buy_price가 0(입금/에어드롭 등으로 업비트가
+    원가를 추적하지 못한 코인)이면 entry_price=0으로 포지션을 열지 않는다 — 그렇게 열면
+    나중에 정상 청산 시 ZeroDivisionError로 죽는다. 정지는 여전히 걸린다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.02, avg_buy_price="0")]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler._reconcile_position(strategy, [])
+
+    assert result == {"balance_mismatch": True, "action": "unexplained", "paused": True}
+    assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_hydrate_state_first_call_excludes_existing_position_from_baseline(
+    monkeypatch, tmp_path,
+):
+    """최종 브랜치 리뷰 Important 7 — 스키마가 나중에 기존에 매매 중이던 전략에 추가되는
+    등, baseline_qty가 없는 채로 오픈 포지션이 이미 존재하는 상태에서 첫 hydrate_state가
+    불리면, 그 포지션 수량까지 baseline으로 흡수해버려서 다음 사이클에 포지션이 통째로
+    사라진다. 오픈 포지션 수량은 baseline 계산에서 제외해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 50_000_000.0, 0.01)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.03)]  # 봇 포지션 0.01 + 승인 전부터 보유하던 0.02
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler.hydrate_state(strategy)
+
+    assert result["baseline_captured"] is True
+    assert dbm.get_live_strategy(strategy["id"])["baseline_qty"] == pytest.approx(0.02)
+
+
+async def test_reconcile_position_mixed_side_treated_as_unexplained(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 Important 1(사용자 확정) — 한 틱 안에 매수/매도 외부주문이 동시에
+    매칭되면(설계 스펙 에러 처리 절), 순매매량이 실제 잔고차와 정확히 맞아떨어져도
+    "설명 안 됨"으로 처리한다. 방향이 섞인 자동 매칭은 오탐 위험이 크다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="acknowledge_and_continue")
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.005)]  # 매수 0.01 - 매도 0.005 = 순증 0.005
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    external_orders = [
+        {"side": "bid", "filled_volume": 0.01, "filled_price": 50_000_000.0, "fee": 500.0},
+        {"side": "ask", "filled_volume": 0.005, "filled_price": 51_000_000.0, "fee": 250.0},
+    ]
+    result = await reconciler._reconcile_position(strategy, external_orders)
+
+    assert result["action"] == "unexplained"
+    assert result["paused"] is True

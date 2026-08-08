@@ -36,12 +36,14 @@ async def _get_coin_account(market: str, *, client: httpx.AsyncClient | None = N
 
 async def _sync_pending_limit_orders(
     strategy: dict, *, client: httpx.AsyncClient | None = None,
-) -> int:
+) -> list[dict]:
     """내부 status='wait', order_type='limit' 주문(오프라인 동안 결과를 못 받은 사용자
     선택 방치 주문, 설계 스펙 결정6)을 재조회해 조용히 동기화한다. 우리가 낸 주문이므로
-    수동개입으로 기록하지 않는다."""
+    수동개입으로 기록하지 않는다. 반환값(동기화된 주문 행들)은 _reconcile_position이
+    own_fills로 재사용한다 — 그렇지 않으면 이 체결이 "설명 안 되는 잔고 변화"로 오인돼
+    포지션이 잘못 강제종료된다(최종 브랜치 리뷰 Critical 1)."""
     wait_orders = db.list_wait_orders(strategy["id"], order_type="limit")
-    synced = 0
+    synced: list[dict] = []
     for order in wait_orders:
         if not order["upbit_uuid"]:
             continue
@@ -59,32 +61,47 @@ async def _sync_pending_limit_orders(
             order["id"], order["upbit_uuid"], filled_price, executed_volume,
             float(resp["paid_fee"]), None, status,
         )
-        synced += 1
+        synced.append(db.get_order_by_id(order["id"]))
     return synced
 
 
 async def hydrate_state(strategy: dict, *, client: httpx.AsyncClient | None = None) -> dict:
     """데몬 시작 시 전략 1개당 1회 호출. 내부 wait limit 주문을 먼저 동기화(결정6)한 뒤,
-    strategy['baseline_qty']가 None이면(결정9, 이 전략의 첫 호출) 그 시점 실제 코인 잔고를
-    baseline으로 저장하고 불일치 검사 없이 반환한다. 이미 baseline이 있으면
-    _run_reconcile_pipeline()을 수행한다(Task8에서 연결)."""
-    synced = await _sync_pending_limit_orders(strategy, client=client)
+    strategy['baseline_qty']가 None이면(결정9, 이 전략의 첫 호출) 그 시점 실제 코인 잔고에서
+    이미 봇이 추적 중인 오픈 포지션 수량을 뺀 값을 baseline으로 저장하고(최종 브랜치 리뷰
+    Important 7 — 포지션이 있는 채로 baseline을 다시 잡으면 그 포지션이 baseline에
+    흡수돼 사라진다) 불일치 검사 없이 반환한다. 이미 baseline이 있으면
+    _run_reconcile_pipeline()에 이번에 동기화한 own_fills를 넘겨 수행한다."""
+    synced_orders = await _sync_pending_limit_orders(strategy, client=client)
 
     if strategy["baseline_qty"] is None:
         account = await _get_coin_account(strategy["market"], client=client)
-        baseline = (float(account["balance"]) + float(account["locked"])) if account else 0.0
+        raw_balance = (float(account["balance"]) + float(account["locked"])) if account else 0.0
+        existing_position = position_manager.get_open_position(strategy["id"])
+        own_qty = existing_position["entry_qty"] if existing_position else 0.0
+        baseline = max(raw_balance - own_qty, 0.0)
         db.update_live_strategy_baseline_qty(strategy["id"], baseline)
-        return {"synced_wait_orders": synced, "baseline_captured": True}
+        return {"synced_wait_orders": len(synced_orders), "baseline_captured": True}
 
-    result = await _run_reconcile_pipeline(strategy, client=client)
-    return {"synced_wait_orders": synced, "baseline_captured": False, **result}
+    result = await _run_reconcile_pipeline(strategy, own_fills=synced_orders, client=client)
+    return {"synced_wait_orders": len(synced_orders), "baseline_captured": False, **result}
 
 
 async def _detect_external_orders(
     strategy: dict, *, client: httpx.AsyncClient | None = None,
 ) -> list[dict]:
     """그 마켓의 미체결+최근 종료 주문을 조회해 내부 DB에 없는 uuid만 골라 기록한다
-    (설계 스펙 결정7 준비 — 여기서 찾은 주문들을 _reconcile_position이 재사용)."""
+    (설계 스펙 결정7 준비 — 여기서 찾은 주문들을 _reconcile_position이 재사용).
+
+    우리가 방금 낸 주문이 아직 upbit_uuid를 기록하기 전(order_executor가 체결/타임아웃
+    확인을 기다리는 짧은 창) 상태로 남아있으면, 그 주문이 거래소 목록에는 "새 주문"으로
+    보여 외부주문으로 오인될 수 있다(최종 브랜치 리뷰 Critical 3 — 오탐 정지 + upbit_uuid
+    UNIQUE 제약 위반으로 order_executor가 크래시). 그런 미확정 주문이 하나라도 있으면
+    이번 사이클은 감지를 건너뛴다 — 다음 사이클엔 그 주문의 uuid가 기록돼 있어 정상적으로
+    무시된다."""
+    if any(o["upbit_uuid"] is None for o in db.list_wait_orders(strategy["id"])):
+        return []
+
     market = strategy["market"]
     open_orders = await upbit_client.list_open_orders(market=market, client=client)
     closed_orders = await upbit_client.list_closed_orders(
@@ -93,6 +110,9 @@ async def _detect_external_orders(
 
     risk_config = json.loads(strategy["risk_config_json"])
     policy = risk_config.get("manual_intervention_policy", "all_stop")
+    # 정책 값이 없거나 오타여도 안전한 쪽(정지)으로 기울인다 — "acknowledge_and_continue"를
+    # 명시적으로 고른 경우에만 계속 진행(최종 브랜치 리뷰 Important 4, 기존엔 반대였음).
+    should_pause = policy != "acknowledge_and_continue"
 
     found: list[dict] = []
     for raw in open_orders + closed_orders:
@@ -117,14 +137,14 @@ async def _detect_external_orders(
         )
         found.append(db.get_order_by_id(order_id))
 
-        action_taken = "all_stop" if policy == "all_stop" else "acknowledged_and_continued"
+        action_taken = "all_stop" if should_pause else "acknowledged_and_continued"
         db.insert_manual_intervention_event(
             market,
             f"내부에 없는 외부주문 발견: uuid={upbit_uuid}, side={detail['side']}, "
             f"state={detail['state']}",
             action_taken,
         )
-        if policy == "all_stop":
+        if should_pause:
             db.update_live_strategy_status(strategy["id"], "paused")
 
     return found
@@ -141,12 +161,15 @@ def _weighted_fill(orders: list[dict]) -> tuple[float, float, float]:
 
 def _apply_explained_change(
     strategy: dict, position: dict | None, actual_qty: float,
-    buy_volume: float, buy_price: float, sell_price: float, sell_fee: float,
+    buy_price: float, sell_price: float, sell_fee: float,
 ) -> str | None:
-    """설계 스펙 결정4/7 — 매칭된 외부주문의 실제 체결가로 정밀하게 self-heal한다.
-    None을 반환하면 "정밀하게 open으로 설명할 수 없다"는 뜻이며, 호출자는 unexplained
-    처리로 넘어가야 한다(Finding 1 — baseline_qty로 인해 actual_qty가 0 이하가 되는
-    경우, 음수/영 수량 포지션을 여는 것을 방지)."""
+    """설계 스펙 결정4/7 — 매칭된 외부주문의 실제 체결가로 정밀하게 self-heal한다. 호출자
+    (_reconcile_position)가 이미 "매수+매도 동시 매칭"과 "포지션 보유 중 top-up" 두
+    케이스를 걸러내므로(최종 브랜치 리뷰 Important 1·3, 사용자 확정 — 둘 다 설명 안 됨
+    으로 처리), 여기 도달하는 건 순수 신규진입/전량청산/부분청산(순매도)뿐이다. None을
+    반환하면 "정밀하게 open으로 설명할 수 없다"는 뜻이며, 호출자는 unexplained 처리로
+    넘어가야 한다(baseline_qty로 인해 actual_qty가 0 이하가 되는 경우, 음수/영 수량
+    포지션을 여는 것을 방지)."""
     if position is None:
         if actual_qty <= _QTY_EPSILON:
             return None
@@ -162,15 +185,9 @@ def _apply_explained_change(
         )
         return "closed"
 
-    if actual_qty > position["entry_qty"] + _QTY_EPSILON:
-        # 순매수(외부 매수로 top-up) — 원가를 가중평균으로 재계산(정밀 계산 원칙, Finding 2)
-        old_cost = position["entry_price"] * position["entry_qty"]
-        added_cost = buy_price * (actual_qty - position["entry_qty"])
-        blended_price = (old_cost + added_cost) / actual_qty
-        db.adjust_position_qty(position["id"], actual_qty, blended_price)
-    else:
-        # 순매도(부분청산) — 원가는 그대로, 수량만 축소
-        db.adjust_position_qty(position["id"], actual_qty)
+    # 부분청산(순매도)만 여기 도달한다(top-up은 호출자가 이미 걸러냄) — 원가는 그대로,
+    # 수량만 축소
+    db.adjust_position_qty(position["id"], actual_qty)
     return "adjusted"
 
 
@@ -178,9 +195,13 @@ def _self_heal_unexplained(strategy: dict, position: dict | None, actual_qty: fl
     """설계 스펙 결정5 — 가격 근거가 없으므로 PnL/current_capital은 건드리지 않고
     수량만 실제 잔고에 맞춘다. 신규 포지션은 업비트가 자체 관리하는 avg_buy_price를
     근사 원가로 쓴다(정확한 매도가는 알 수 없어도, 향후 정상 청산 시 PnL 계산의 기준점은
-    있어야 한다)."""
+    있어야 한다). avg_buy_price가 0 이하(입금/에어드롭 등으로 업비트가 원가를 추적하지
+    못한 코인)면 아예 열지 않는다 — entry_price=0으로 열면 나중에 정상 청산 시
+    ZeroDivisionError로 죽는다(최종 브랜치 리뷰 Important 6). 이 경우 코인은 추적되지
+    않은 채로 남지만, 이미 "설명 안 됨"으로 정지된 상태라 사용자의 수동 확인이 필요한
+    상황이라는 점은 동일하다."""
     if position is None:
-        if actual_qty > _QTY_EPSILON:
+        if actual_qty > _QTY_EPSILON and avg_buy_price > 0:
             position_manager.open_position(strategy["id"], strategy["market"], avg_buy_price, actual_qty)
         return
 
@@ -192,8 +213,13 @@ def _self_heal_unexplained(strategy: dict, position: dict | None, actual_qty: fl
 
 
 async def _reconcile_position(
-    strategy: dict, external_orders: list[dict], *, client: httpx.AsyncClient | None = None,
+    strategy: dict, external_orders: list[dict], *,
+    own_fills: list[dict] = (), client: httpx.AsyncClient | None = None,
 ) -> dict:
+    """own_fills는 이번 사이클에 동기화된 "우리가 낸" 주문(hydrate_state의
+    _sync_pending_limit_orders 결과)이다 — 잔고 변화를 설명하는 데는 external_orders와
+    똑같이 쓰이지만, 이것만으로 설명되는 변화는 수동개입이 아니므로 정책 적용/이벤트
+    기록 대상에서 제외한다(최종 브랜치 리뷰 Critical 1)."""
     market = strategy["market"]
     risk_config = json.loads(strategy["risk_config_json"])
     policy = risk_config.get("manual_intervention_policy", "all_stop")
@@ -211,20 +237,35 @@ async def _reconcile_position(
     if abs(diff) <= _QTY_EPSILON:
         return {"balance_mismatch": False, "action": "none", "paused": False}
 
-    done_buys = [o for o in external_orders if o["side"] == "bid" and o["filled_volume"]]
-    done_sells = [o for o in external_orders if o["side"] == "ask" and o["filled_volume"]]
+    matched_orders = list(external_orders) + list(own_fills)
+    done_buys = [o for o in matched_orders if o["side"] == "bid" and o["filled_volume"]]
+    done_sells = [o for o in matched_orders if o["side"] == "ask" and o["filled_volume"]]
     buy_volume, buy_price, _buy_fee = _weighted_fill(done_buys)
     sell_volume, sell_price, sell_fee = _weighted_fill(done_sells)
     explained_diff = buy_volume - sell_volume
 
+    # 정밀 self-heal(_apply_explained_change) 대상은 순수 신규진입/전량청산/순매도뿐이다.
+    # 매수+매도가 한 틱에 섞여 매칭되거나(Important 1), 포지션 보유 중 순매수로 top-up
+    # 되는 경우(Important 3)는 사용자 확정으로 둘 다 "설명 안 됨" 경로로 보낸다 —
+    # 전자는 방향이 섞인 자동 매칭의 오탐 위험, 후자는 사용자 개인자금이 전략 자금에
+    # 조용히 섞여 들어가는 걸 막기 위함.
+    is_mixed_side = buy_volume > 0 and sell_volume > 0
+    is_topup = position is not None and actual_qty > position["entry_qty"] + _QTY_EPSILON
+
     action = None
-    if (buy_volume > 0 or sell_volume > 0) and abs(diff - explained_diff) <= _QTY_EPSILON:
-        action = _apply_explained_change(
-            strategy, position, actual_qty, buy_volume, buy_price, sell_price, sell_fee,
-        )
+    if (
+        not is_mixed_side and not is_topup
+        and (buy_volume > 0 or sell_volume > 0)
+        and abs(diff - explained_diff) <= _QTY_EPSILON
+    ):
+        action = _apply_explained_change(strategy, position, actual_qty, buy_price, sell_price, sell_fee)
 
     if action is not None:
-        paused = policy == "all_stop"
+        # own_fills만으로 전부 설명됐다면(external_orders가 이번에 아무것도 못 찾았다면)
+        # 수동개입이 아니라 우리 자신의 정상 체결이 뒤늦게 반영된 것뿐이다 — 정책과
+        # 무관하게 정지시키지 않는다.
+        is_manual = bool(external_orders)
+        paused = is_manual and policy != "acknowledge_and_continue"
         if paused:
             db.update_live_strategy_status(strategy["id"], "paused")
         return {"balance_mismatch": True, "action": action, "paused": paused}
@@ -239,13 +280,18 @@ async def _reconcile_position(
     return {"balance_mismatch": True, "action": "unexplained", "paused": True}
 
 
-async def _run_reconcile_pipeline(strategy: dict, *, client: httpx.AsyncClient | None = None) -> dict:
+async def _run_reconcile_pipeline(
+    strategy: dict, *, own_fills: list[dict] = (), client: httpx.AsyncClient | None = None,
+) -> dict:
     """_detect_external_orders() → _reconcile_position() 순서로 실행한다. 업비트 API 실패는
     여기서 흡수하고(설계 스펙 결정8) 매매를 막지 않는다 — reconciler는 감시자이지
-    트레이더가 아니다."""
+    트레이더가 아니다. 매 호출마다 최신 strategy 행을 다시 읽는다 — 호출자가 이전에 읽은
+    stale한 dict(예: 방금 hydrate_state가 baseline_qty를 막 저장한 그 dict)를 그대로
+    재사용하면 baseline 격리가 무력화된다(최종 브랜치 리뷰 Critical 2)."""
     try:
+        strategy = db.get_live_strategy(strategy["id"]) or strategy
         external_orders = await _detect_external_orders(strategy, client=client)
-        return await _reconcile_position(strategy, external_orders, client=client)
+        return await _reconcile_position(strategy, external_orders, own_fills=own_fills, client=client)
     except (httpx.HTTPError, upbit_client.UpbitRateLimitError) as exc:
         return {"error": str(exc)}
 
