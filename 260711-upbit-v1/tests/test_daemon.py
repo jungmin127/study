@@ -980,6 +980,20 @@ async def test_strategy_loop_and_risk_exit_loop_serialize_order_execution_via_sh
     calls, fake_sleep = _stop_after_one_tick(dbm, strategy_id)
     monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
 
+    async def fake_to_thread(func, *args):
+        # _run_strategy_loop는 evaluate_signals를 asyncio.to_thread로 실행하는데,
+        # 이건 실제 OS 스레드풀을 거치는 지연이라 _run_risk_exit_loop의 in-loop
+        # sleep(0)보다 훨씬 느리고 비결정적이다 — 그 결과 두 태스크가 실제로 같은
+        # 시점에 lock 획득을 시도하지 못하고(스케줄링 우연으로 절대 안 겹침), lock이
+        # 공유되지 않아도(심지어 lock 자체가 없어도) 이 테스트가 우연히 통과해버린다
+        # (리뷰에서 실증됨). to_thread를 in-loop sleep(0)로 대체해 두 태스크의 lock
+        # 시도 타이밍을 동질화하면, 진짜 lock 경합이 일어나 broken lock을 실제로
+        # 탐지할 수 있다.
+        await real_sleep(0)
+        return func(*args)
+
+    monkeypatch.setattr(daemon.asyncio, "to_thread", fake_to_thread)
+
     await asyncio.gather(
         daemon._run_strategy_loop(strategy_id, lock),
         daemon._run_risk_exit_loop(strategy_id, lock),
