@@ -116,6 +116,17 @@ async def _run_market(
             "filled_volume": fill["executed_volume"], "fee": fill["fee"]}
 
 
+async def _run_limit(
+    order_id: str, market: str, side: str, price: float, volume: float,
+    *, client: httpx.AsyncClient | None = None,
+) -> dict:
+    resp = await _create_order_with_retry(
+        market, side, "limit", order_id=order_id, price=str(price), volume=str(volume), client=client,
+    )
+    db.update_order_filled(order_id, resp["uuid"], None, None, None, None, "wait")
+    return {"order_id": order_id, "status": "wait", "filled_price": None, "filled_volume": None, "fee": None}
+
+
 async def enter(
     strategy: dict, capital: float, expected_price: float,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
@@ -137,6 +148,8 @@ async def enter(
                    "filled_volume": volume, "fee": 0.0}
     elif mode == "market":
         result = await _run_market(order_id, market, "bid", capital, volume, expected_price, client=client)
+    elif mode == "limit":
+        result = await _run_limit(order_id, market, "bid", price, volume, client=client)
     else:
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
 
@@ -168,6 +181,8 @@ async def exit(
                    "filled_volume": volume, "fee": 0.0}
     elif mode == "market":
         result = await _run_market(order_id, market, "ask", None, volume, expected_price, client=client)
+    elif mode == "limit":
+        result = await _run_limit(order_id, market, "ask", price, volume, client=client)
     else:
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
 

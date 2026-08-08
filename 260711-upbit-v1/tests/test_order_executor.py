@@ -232,3 +232,21 @@ async def test_exit_market_mode_places_market_order_and_closes_position(monkeypa
 async def test_exit_raises_when_no_open_position():
     with pytest.raises(ValueError):
         await order_executor.exit({"id": "s1", "risk_config_json": "{}", "market": "KRW-BTC"}, None, 100.0)
+
+
+async def test_enter_limit_mode_leaves_order_waiting_without_opening_position(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit")
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        assert ord_type == "limit"
+        return {"uuid": "uuid-3", "state": "wait"}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert order["status"] == "wait"
+    assert order["filled_price"] is None
+    assert position_manager.get_open_position(strategy["id"]) is None
