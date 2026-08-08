@@ -407,3 +407,84 @@ def update_live_strategy_baseline_qty(live_strategy_id: str, baseline_qty: float
         conn.commit()
     finally:
         conn.close()
+
+
+def get_order_by_upbit_uuid(upbit_uuid: str) -> dict | None:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM orders WHERE upbit_uuid = ?", (upbit_uuid,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def insert_external_order(
+    live_strategy_id: str, position_id: str | None, market: str, side: str,
+    order_type: str, upbit_uuid: str, filled_price: float | None,
+    filled_volume: float | None, fee: float | None, status: str,
+) -> str:
+    order_id = str(uuid.uuid4())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO orders "
+            "(id, upbit_uuid, live_strategy_id, position_id, market, side, order_type, "
+            "filled_price, filled_volume, fee, status, is_external, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))",
+            (order_id, upbit_uuid, live_strategy_id, position_id, market, side, order_type,
+             filled_price, filled_volume, fee, status),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return order_id
+
+
+def insert_manual_intervention_event(market: str, description: str, action_taken: str) -> str:
+    event_id = str(uuid.uuid4())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO manual_intervention_events (id, market, description, action_taken) "
+            "VALUES (?, ?, ?, ?)",
+            (event_id, market, description, action_taken),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return event_id
+
+
+def list_wait_orders(live_strategy_id: str, order_type: str | None = None) -> list[dict]:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        if order_type is not None:
+            rows = conn.execute(
+                "SELECT * FROM orders WHERE live_strategy_id = ? AND status = 'wait' "
+                "AND order_type = ?",
+                (live_strategy_id, order_type),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM orders WHERE live_strategy_id = ? AND status = 'wait'",
+                (live_strategy_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def adjust_position_qty(position_id: str, new_qty: float) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE positions SET entry_qty = ? WHERE id = ? AND status = 'open'",
+            (new_qty, position_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()

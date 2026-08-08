@@ -419,3 +419,71 @@ def test_update_live_strategy_baseline_qty_sets_value(monkeypatch, tmp_path):
     db.update_live_strategy_baseline_qty(strategy_id, 0.05)
 
     assert db.get_live_strategy(strategy_id)["baseline_qty"] == 0.05
+
+
+def test_get_order_by_upbit_uuid_returns_none_when_missing(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    assert db.get_order_by_upbit_uuid("nonexistent-uuid") is None
+
+
+def test_insert_external_order_is_findable_by_upbit_uuid(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    order_id = db.insert_external_order(
+        strategy_id, None, "KRW-BTC", "bid", "limit", "upbit-ext-1",
+        50_000_000.0, 0.01, 500.0, "done",
+    )
+
+    found = db.get_order_by_upbit_uuid("upbit-ext-1")
+    assert found["id"] == order_id
+    assert found["is_external"] == 1
+    assert found["status"] == "done"
+    assert found["filled_price"] == 50_000_000.0
+    assert found["live_strategy_id"] == strategy_id
+
+
+def test_insert_manual_intervention_event_creates_row(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+
+    event_id = db.insert_manual_intervention_event(
+        "KRW-BTC", "설명 안 되는 잔고 변화", "all_stop",
+    )
+
+    conn = db._connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM manual_intervention_events WHERE id = ?", (event_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["market"] == "KRW-BTC"
+    assert row["description"] == "설명 안 되는 잔고 변화"
+    assert row["action_taken"] == "all_stop"
+    assert row["detected_at"] is not None
+
+
+def test_list_wait_orders_filters_by_status_and_optional_type(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    wait_limit_id = db.insert_order(strategy_id, None, "KRW-BTC", "bid", "limit", 100.0, 1.0, 100.0)
+    wait_market_id = db.insert_order(strategy_id, None, "KRW-BTC", "bid", "market", 100.0, 1.0, 100.0)
+    done_id = db.insert_order(strategy_id, None, "KRW-BTC", "bid", "limit", 100.0, 1.0, 100.0)
+    db.update_order_filled(done_id, "uuid-done", 100.0, 1.0, 0.0, 0.0, "done")
+
+    all_wait = db.list_wait_orders(strategy_id)
+    limit_only = db.list_wait_orders(strategy_id, order_type="limit")
+
+    assert {o["id"] for o in all_wait} == {wait_limit_id, wait_market_id}
+    assert {o["id"] for o in limit_only} == {wait_limit_id}
+
+
+def test_adjust_position_qty_updates_open_position_only(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    db.adjust_position_qty(position_id, 0.006)
+
+    assert db.get_position(position_id)["entry_qty"] == 0.006
