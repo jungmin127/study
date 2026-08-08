@@ -346,7 +346,9 @@ async def handle_signal_result(
 ) -> dict:
     result = {"buy_action": None, "sell_action": None, "buy_order_id": None, "sell_order_id": None}
 
-    if signal_result["paused"]:
+    # 새 봉이 없으면 signal_engine._no_new_candle_result()가 latest_close/*_signal_id 없는
+    # 축약 dict를 주므로, paused만 보고 진행하면 KeyError로 터진다(최종리뷰 Important #3).
+    if not signal_result["new_candle"] or signal_result["paused"]:
         return result
 
     strategy = db.get_live_strategy(strategy_id)

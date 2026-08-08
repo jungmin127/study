@@ -540,6 +540,22 @@ async def test_handle_signal_result_does_nothing_when_paused(monkeypatch, tmp_pa
     assert position_manager.get_open_position(strategy["id"]) is None
 
 
+async def test_handle_signal_result_returns_early_when_no_new_candle(monkeypatch, tmp_path):
+    """새 봉이 없을 때가 실제로 가장 흔한 호출인데, 그 결과 dict에는 latest_close가 아예
+    없어서 KeyError로 터졌다(최종리뷰 Important #3). 전략 행조차 만들지 않고 호출해
+    조기 반환(=DB 조회 없음)을 검증한다."""
+    import trading.signal_engine as signal_engine
+
+    _fresh_db(monkeypatch, tmp_path)
+
+    result = await order_executor.handle_signal_result(
+        "no-such-strategy", signal_engine._no_new_candle_result(), dry_run=True,
+    )
+
+    assert result == {"buy_action": None, "sell_action": None,
+                      "buy_order_id": None, "sell_order_id": None}
+
+
 async def test_handle_signal_result_enters_on_buy_signal(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)
