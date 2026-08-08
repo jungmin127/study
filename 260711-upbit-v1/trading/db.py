@@ -496,3 +496,15 @@ def adjust_position_qty(
         conn.commit()
     finally:
         conn.close()
+
+
+def list_active_strategies() -> list[dict]:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM live_strategies WHERE status IN ('running', 'paused')"
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()

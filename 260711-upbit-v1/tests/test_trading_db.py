@@ -511,3 +511,16 @@ def test_adjust_position_qty_without_new_entry_price_leaves_price_unchanged(monk
     position = db.get_position(position_id)
     assert position["entry_qty"] == 0.006
     assert position["entry_price"] == 50_000_000.0
+
+
+def test_list_active_strategies_returns_only_running_and_paused(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    running_id = insert_live_strategy(db, status="running")
+    paused_id = insert_live_strategy(db, status="paused")
+    insert_live_strategy(db, status="draft")
+    insert_live_strategy(db, status="approved")
+    insert_live_strategy(db, status="stopped")
+
+    active = db.list_active_strategies()
+
+    assert {s["id"] for s in active} == {running_id, paused_id}
