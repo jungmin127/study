@@ -489,3 +489,64 @@ def test_get_market_cautions_flags_warning_or_any_caution(monkeypatch):
 
     cautions = upbit_data_service.get_market_cautions()
     assert cautions == {"KRW-BTC": False, "KRW-XXX": True, "KRW-WARN": True}
+
+
+def _fake_clock_and_sleep():
+    fake_time = [0.0]
+
+    def clock() -> float:
+        return fake_time[0]
+
+    def sleep(seconds: float) -> None:
+        fake_time[0] += seconds
+
+    return fake_time, clock, sleep
+
+
+def test_sync_token_bucket_allows_burst_up_to_capacity():
+    fake_time, clock, sleep = _fake_clock_and_sleep()
+    bucket = uds._SyncTokenBucket(rate_per_sec=2, capacity=2, clock=clock, sleep=sleep)
+    bucket.acquire()
+    bucket.acquire()
+    assert fake_time[0] == 0.0
+
+
+def test_sync_token_bucket_waits_when_capacity_exhausted():
+    fake_time, clock, sleep = _fake_clock_and_sleep()
+    bucket = uds._SyncTokenBucket(rate_per_sec=2, capacity=2, clock=clock, sleep=sleep)
+    bucket.acquire()
+    bucket.acquire()
+    bucket.acquire()
+    assert fake_time[0] == pytest.approx(0.5)
+
+
+def test_sync_token_bucket_refills_over_time():
+    fake_time, clock, sleep = _fake_clock_and_sleep()
+    bucket = uds._SyncTokenBucket(rate_per_sec=1, capacity=1, clock=clock, sleep=sleep)
+    bucket.acquire()
+    fake_time[0] += 2.0
+    bucket.acquire()
+    assert fake_time[0] == 2.0
+
+
+def test_candle_bucket_default_rate_is_ten_per_sec():
+    assert uds._CANDLE_BUCKET._rate == 10
+
+
+def test_fetch_page_acquires_candle_bucket_before_each_request(monkeypatch):
+    calls = {"acquire": 0}
+
+    class _FakeBucket:
+        def acquire(self):
+            calls["acquire"] += 1
+
+    monkeypatch.setattr(uds, "_CANDLE_BUCKET", _FakeBucket())
+
+    def handler(request):
+        return httpx.Response(200, json=[])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    uds._fetch_page(client, "https://api.upbit.com/v1/candles/days", "KRW-BTC", None)
+
+    assert calls["acquire"] == 1

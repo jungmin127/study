@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +16,45 @@ RATE_LIMIT_BACKOFF_SECONDS = 5.0
 REQUEST_DELAY_SECONDS = 0.15
 
 _CANDLE_COLUMNS = ["candle_time", "open", "high", "low", "close", "volume", "trade_value"]
+
+
+class _SyncTokenBucket:
+    """trading.upbit_client.TokenBucket과 동일한 토큰버킷 알고리즘의 동기 버전(설계
+    스펙 결정6) — get_candles() 호출 체인이 전부 동기 함수라 asyncio 기반
+    TokenBucket을 쓸 수 없다. clock/sleep을 주입할 수 있어 테스트에서 실제 대기 없이
+    결정론적으로 검증 가능하다."""
+
+    def __init__(
+        self,
+        rate_per_sec: float,
+        capacity: float | None = None,
+        *,
+        clock=time.monotonic,
+        sleep=time.sleep,
+    ) -> None:
+        self._rate = rate_per_sec
+        self._capacity = capacity if capacity is not None else rate_per_sec
+        self._tokens = self._capacity
+        self._clock = clock
+        self._sleep = sleep
+        self._last = clock()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        with self._lock:
+            while True:
+                now = self._clock()
+                elapsed = now - self._last
+                self._last = now
+                self._tokens = min(self._capacity, self._tokens + elapsed * self._rate)
+                if self._tokens >= 1:
+                    self._tokens -= 1
+                    return
+                wait_seconds = (1 - self._tokens) / self._rate
+                self._sleep(wait_seconds)
+
+
+_CANDLE_BUCKET = _SyncTokenBucket(rate_per_sec=10)  # 업비트 candle 그룹 실제 한도(IP 단위)
 
 
 def _endpoint_for_timeframe(timeframe: str) -> str:
@@ -52,6 +92,7 @@ def _fetch_page(
 
     last_exc: Exception | None = None
     for attempt in range(RETRY_ATTEMPTS):
+        _CANDLE_BUCKET.acquire()
         try:
             resp = client.get(url, params=params)
             if resp.status_code == 429:
