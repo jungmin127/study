@@ -332,3 +332,65 @@ def insert_signal(
     finally:
         conn.close()
     return signal_id
+
+
+def insert_order(
+    live_strategy_id: str, position_id: str | None, market: str, side: str, order_type: str,
+    requested_price: float | None, requested_volume: float | None, expected_price: float | None,
+    *, replaces_order_id: str | None = None,
+) -> str:
+    order_id = str(uuid.uuid4())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO orders "
+            "(id, live_strategy_id, position_id, replaces_order_id, market, side, order_type, "
+            "requested_price, requested_volume, expected_price, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wait')",
+            (order_id, live_strategy_id, position_id, replaces_order_id, market, side, order_type,
+             requested_price, requested_volume, expected_price),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return order_id
+
+
+def update_order_filled(
+    order_id: str, upbit_uuid: str | None, filled_price: float | None,
+    filled_volume: float | None, fee: float | None, slippage_pct: float | None, status: str,
+) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE orders SET upbit_uuid=?, filled_price=?, filled_volume=?, fee=?, "
+            "slippage_pct=?, status=?, updated_at=datetime('now') WHERE id=?",
+            (upbit_uuid, filled_price, filled_volume, fee, slippage_pct, status, order_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_order_by_id(order_id: str) -> dict | None:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_signal_result(
+    signal_id: str, resulting_order_id: str | None, skip_reason: str | None,
+) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE signals SET resulting_order_id=?, skip_reason=? WHERE id=?",
+            (resulting_order_id, skip_reason, signal_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()

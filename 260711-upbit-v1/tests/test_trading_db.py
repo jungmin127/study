@@ -317,3 +317,95 @@ def test_insert_signal_stores_skip_reason(monkeypatch, tmp_path):
         conn.close()
 
     assert row["skip_reason"] == "unknown"
+
+
+def test_insert_order_creates_wait_row(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    order_id = db.insert_order(
+        strategy_id, None, "KRW-BTC", "bid", "market", 50000000.0, 0.01, 50000000.0,
+    )
+
+    order = db.get_order_by_id(order_id)
+    assert order["live_strategy_id"] == strategy_id
+    assert order["position_id"] is None
+    assert order["market"] == "KRW-BTC"
+    assert order["side"] == "bid"
+    assert order["order_type"] == "market"
+    assert order["requested_price"] == 50000000.0
+    assert order["requested_volume"] == 0.01
+    assert order["expected_price"] == 50000000.0
+    assert order["status"] == "wait"
+    assert order["replaces_order_id"] is None
+
+
+def test_insert_order_with_replaces_order_id(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    original_id = db.insert_order(strategy_id, None, "KRW-BTC", "bid", "limit", 100.0, 1.0, 100.0)
+
+    child_id = db.insert_order(
+        strategy_id, None, "KRW-BTC", "bid", "market", None, 0.5, 100.0,
+        replaces_order_id=original_id,
+    )
+
+    order = db.get_order_by_id(child_id)
+    assert order["replaces_order_id"] == original_id
+
+
+def test_update_order_filled_sets_fill_fields_and_updated_at(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    order_id = db.insert_order(strategy_id, None, "KRW-BTC", "bid", "market", 100.0, 1.0, 100.0)
+
+    db.update_order_filled(order_id, "upbit-uuid-1", 101.0, 1.0, 0.05, 1.0, "done")
+
+    order = db.get_order_by_id(order_id)
+    assert order["upbit_uuid"] == "upbit-uuid-1"
+    assert order["filled_price"] == 101.0
+    assert order["filled_volume"] == 1.0
+    assert order["fee"] == 0.05
+    assert order["slippage_pct"] == 1.0
+    assert order["status"] == "done"
+    assert order["updated_at"] is not None
+
+
+def test_get_order_by_id_returns_none_when_missing(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    assert db.get_order_by_id("nonexistent") is None
+
+
+def test_update_signal_result_sets_resulting_order_id(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    signal_id = db.insert_signal(strategy_id, "buy", "2026-08-08T10:00:00+00:00", "{}")
+    order_id = db.insert_order(strategy_id, None, "KRW-BTC", "bid", "market", 100.0, 1.0, 100.0)
+
+    db.update_signal_result(signal_id, order_id, None)
+
+    conn = db._connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
+    finally:
+        conn.close()
+    assert row["resulting_order_id"] == order_id
+    assert row["skip_reason"] is None
+
+
+def test_update_signal_result_sets_skip_reason_without_order(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    signal_id = db.insert_signal(strategy_id, "buy", "2026-08-08T10:00:00+00:00", "{}")
+
+    db.update_signal_result(signal_id, None, "circuit_breaker_tripped")
+
+    conn = db._connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
+    finally:
+        conn.close()
+    assert row["resulting_order_id"] is None
+    assert row["skip_reason"] == "circuit_breaker_tripped"
