@@ -128,3 +128,96 @@ async def _detect_external_orders(
             db.update_live_strategy_status(strategy["id"], "paused")
 
     return found
+
+
+def _weighted_fill(orders: list[dict]) -> tuple[float, float, float]:
+    """반환: (총체결수량, 가중평균체결가, 총수수료). 빈 리스트면 (0, 0, 0)."""
+    total_volume = sum(o["filled_volume"] for o in orders)
+    total_funds = sum(o["filled_price"] * o["filled_volume"] for o in orders)
+    total_fee = sum(o["fee"] or 0.0 for o in orders)
+    avg_price = total_funds / total_volume if total_volume > 0 else 0.0
+    return total_volume, avg_price, total_fee
+
+
+def _apply_explained_change(
+    strategy: dict, position: dict | None, actual_qty: float,
+    buy_volume: float, buy_price: float, sell_price: float, sell_fee: float,
+) -> str:
+    """설계 스펙 결정4/7 — 매칭된 외부주문의 실제 체결가로 정밀하게 self-heal한다."""
+    if position is None:
+        position_manager.open_position(strategy["id"], strategy["market"], buy_price, actual_qty)
+        return "opened"
+
+    if actual_qty <= _QTY_EPSILON:
+        close_result = position_manager.close_position(
+            position["id"], sell_price, position["entry_qty"], sell_fee, "manual",
+        )
+        risk_manager.record_trade_result(
+            strategy["id"], close_result["realized_pnl"], close_result["capital_after"],
+        )
+        return "closed"
+
+    db.adjust_position_qty(position["id"], actual_qty)
+    return "adjusted"
+
+
+def _self_heal_unexplained(strategy: dict, position: dict | None, actual_qty: float, avg_buy_price: float) -> None:
+    """설계 스펙 결정5 — 가격 근거가 없으므로 PnL/current_capital은 건드리지 않고
+    수량만 실제 잔고에 맞춘다. 신규 포지션은 업비트가 자체 관리하는 avg_buy_price를
+    근사 원가로 쓴다(정확한 매도가는 알 수 없어도, 향후 정상 청산 시 PnL 계산의 기준점은
+    있어야 한다)."""
+    if position is None:
+        if actual_qty > _QTY_EPSILON:
+            position_manager.open_position(strategy["id"], strategy["market"], avg_buy_price, actual_qty)
+        return
+
+    if actual_qty <= _QTY_EPSILON:
+        db.close_position_row(position["id"], None, position["entry_qty"], None, None, "manual_unexplained")
+        return
+
+    db.adjust_position_qty(position["id"], actual_qty)
+
+
+async def _reconcile_position(
+    strategy: dict, external_orders: list[dict], *, client: httpx.AsyncClient | None = None,
+) -> dict:
+    market = strategy["market"]
+    risk_config = json.loads(strategy["risk_config_json"])
+    policy = risk_config.get("manual_intervention_policy", "all_stop")
+
+    account = await _get_coin_account(market, client=client)
+    raw_balance = (float(account["balance"]) + float(account["locked"])) if account else 0.0
+    avg_buy_price = float(account["avg_buy_price"]) if account and account.get("avg_buy_price") else 0.0
+    baseline_qty = strategy["baseline_qty"] or 0.0
+    actual_qty = raw_balance - baseline_qty
+
+    position = position_manager.get_open_position(strategy["id"])
+    internal_qty = position["entry_qty"] if position else 0.0
+
+    diff = actual_qty - internal_qty
+    if abs(diff) <= _QTY_EPSILON:
+        return {"balance_mismatch": False, "action": "none", "paused": False}
+
+    done_buys = [o for o in external_orders if o["side"] == "bid" and o["filled_volume"]]
+    done_sells = [o for o in external_orders if o["side"] == "ask" and o["filled_volume"]]
+    buy_volume, buy_price, _buy_fee = _weighted_fill(done_buys)
+    sell_volume, sell_price, sell_fee = _weighted_fill(done_sells)
+    explained_diff = buy_volume - sell_volume
+
+    if (buy_volume > 0 or sell_volume > 0) and abs(diff - explained_diff) <= _QTY_EPSILON:
+        action = _apply_explained_change(
+            strategy, position, actual_qty, buy_volume, buy_price, sell_price, sell_fee,
+        )
+        paused = policy == "all_stop"
+        if paused:
+            db.update_live_strategy_status(strategy["id"], "paused")
+        return {"balance_mismatch": True, "action": action, "paused": paused}
+
+    _self_heal_unexplained(strategy, position, actual_qty, avg_buy_price)
+    db.insert_manual_intervention_event(
+        market,
+        f"설명 안 되는 잔고 변화: 기대수량={internal_qty}, 실제수량={actual_qty}",
+        "all_stop",
+    )
+    db.update_live_strategy_status(strategy["id"], "paused")
+    return {"balance_mismatch": True, "action": "unexplained", "paused": True}

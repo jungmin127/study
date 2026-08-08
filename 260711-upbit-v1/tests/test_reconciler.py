@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 import trading.db as db
 import trading.reconciler as reconciler
 import trading.upbit_client as upbit_client
@@ -216,3 +218,116 @@ async def test_detect_external_orders_ignores_already_known_uuid(monkeypatch, tm
 
     assert found == []
     assert calls["get_order"] == 0
+
+
+import trading.position_manager as position_manager
+
+
+def _account(balance, locked="0", avg_buy_price="0"):
+    return {"currency": "BTC", "balance": str(balance), "locked": locked,
+            "avg_buy_price": avg_buy_price}
+
+
+async def test_reconcile_position_no_mismatch_returns_none_action(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0)]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler._reconcile_position(strategy, [])
+
+    assert result == {"balance_mismatch": False, "action": "none", "paused": False}
+
+
+async def test_reconcile_position_opens_from_matched_external_buy(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="acknowledge_and_continue")
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.01)]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    external_orders = [{"side": "bid", "filled_volume": 0.01, "filled_price": 50_000_000.0, "fee": 500.0}]
+    result = await reconciler._reconcile_position(strategy, external_orders)
+
+    assert result == {"balance_mismatch": True, "action": "opened", "paused": False}
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_qty"] == 0.01
+    assert position["entry_price"] == 50_000_000.0
+
+
+async def test_reconcile_position_closes_from_matched_external_sell(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0)]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    external_orders = [{"side": "ask", "filled_volume": 0.01, "filled_price": 50_000_000.0, "fee": 500.0}]
+    result = await reconciler._reconcile_position(strategy, external_orders)
+
+    assert result == {"balance_mismatch": True, "action": "closed", "paused": True}
+    assert position_manager.get_open_position(strategy["id"]) is None
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+
+
+async def test_reconcile_position_adjusts_qty_on_partial_external_sell(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="acknowledge_and_continue")
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    capital_before = dbm.get_live_strategy(strategy["id"])["current_capital"]
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.006)]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    external_orders = [{"side": "ask", "filled_volume": 0.004, "filled_price": 50_000_000.0, "fee": 200.0}]
+    result = await reconciler._reconcile_position(strategy, external_orders)
+
+    assert result["action"] == "adjusted"
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_qty"] == pytest.approx(0.006)
+    assert dbm.get_live_strategy(strategy["id"])["current_capital"] == capital_before
+
+
+async def test_reconcile_position_unexplained_forces_paused_regardless_of_policy(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="acknowledge_and_continue")
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.005)]  # 절반만 남았는데 설명할 외부주문이 없음
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler._reconcile_position(strategy, [])
+
+    assert result == {"balance_mismatch": True, "action": "unexplained", "paused": True}
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_qty"] == pytest.approx(0.005)
+
+
+async def test_reconcile_position_unexplained_open_uses_avg_buy_price(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.02, avg_buy_price="48000000")]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler._reconcile_position(strategy, [])
+
+    assert result["action"] == "unexplained"
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_price"] == 48_000_000.0
+    assert position["entry_qty"] == pytest.approx(0.02)
