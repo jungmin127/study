@@ -439,3 +439,31 @@ def test_evaluate_signals_stays_paused_when_already_paused_and_still_unknown(mon
     # 가드가 `==`로 뒤집히면 이 값 자체는 여전히 "paused"라 status 필드만 보는 assert로는
     # 못 잡으므로, 호출 여부 자체를 스파이로 검증한다.
     assert status_update_calls == []
+
+
+def test_evaluate_signals_returns_signal_ids_and_latest_close(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["latest_close"] == pytest.approx(df["close"].iloc[-1])
+
+    conn = dbm._connect()
+    try:
+        conn.row_factory = __import__("sqlite3").Row
+        buy_row = conn.execute(
+            "SELECT * FROM signals WHERE id = ?", (result["buy_signal_id"],)
+        ).fetchone()
+        sell_row = conn.execute(
+            "SELECT * FROM signals WHERE id = ?", (result["sell_signal_id"],)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert buy_row["signal_type"] == "buy"
+    assert sell_row["signal_type"] == "sell"

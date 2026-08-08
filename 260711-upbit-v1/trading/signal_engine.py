@@ -231,11 +231,11 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
     snapshot_json = json.dumps({k: (None if v != v else v) for k, v in values.items()})
     candle_time_str = latest_candle_time.isoformat()
 
-    db.insert_signal(
+    buy_signal_id = db.insert_signal(
         live_strategy_id, "buy", candle_time_str, snapshot_json,
         skip_reason="unknown" if buy_result is None else None,
     )
-    db.insert_signal(
+    sell_signal_id = db.insert_signal(
         live_strategy_id, "sell", candle_time_str, snapshot_json,
         skip_reason="unknown" if sell_result is None else None,
     )
@@ -275,6 +275,9 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
         "candle_time": candle_time_str,
         "buy_signal": buy_result,
         "sell_signal": sell_result,
+        "buy_signal_id": buy_signal_id,
+        "sell_signal_id": sell_signal_id,
+        "latest_close": float(latest_close),
         "paused": paused,
         "resumed": resumed,
     }
