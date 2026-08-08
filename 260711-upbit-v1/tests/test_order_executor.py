@@ -250,3 +250,73 @@ async def test_enter_limit_mode_leaves_order_waiting_without_opening_position(mo
     assert order["status"] == "wait"
     assert order["filled_price"] is None
     assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_enter_limit_timeout_fills_within_timeout_without_conversion(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        assert ord_type == "limit"
+        return {"uuid": "uuid-4", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "500000.0"}]}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert order["status"] == "done"
+    assert order["filled_price"] == pytest.approx(500000.0 / 0.01)
+    assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+async def test_enter_limit_timeout_converts_remainder_to_market_after_timeout(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+    calls = {"create": 0, "cancel": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls["create"] += 1
+        if calls["create"] == 1:
+            assert ord_type == "limit"
+            return {"uuid": "uuid-limit", "state": "wait"}
+        assert ord_type == "price"  # 잔량 매수 전환도 시장가 매수라 price 타입(결정7)
+        return {"uuid": "uuid-market", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if uuid == "uuid-limit":
+            return {"state": "wait", "executed_volume": "0.004", "remaining_volume": "0.006",
+                    "paid_fee": "100.0", "trades": [{"funds": "200000.0"}]}
+        return {"state": "done", "executed_volume": "0.006", "remaining_volume": "0",
+                "paid_fee": "150.0", "trades": [{"funds": "300000.0"}]}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        calls["cancel"] += 1
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert calls["create"] == 2
+    assert calls["cancel"] == 1
+    assert order["status"] == "done"
+    assert order["filled_volume"] == pytest.approx(0.01)
+    assert order["filled_price"] == pytest.approx(500_000.0 / 0.01)  # (200000+300000)/0.01
+    assert position_manager.get_open_position(strategy["id"]) is not None

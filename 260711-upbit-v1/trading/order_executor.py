@@ -9,6 +9,7 @@ trading.risk_manager를 엮는 이 서브플랜의 유일한 모듈. engine/ 미
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 
@@ -127,6 +128,59 @@ async def _run_limit(
     return {"order_id": order_id, "status": "wait", "filled_price": None, "filled_volume": None, "fee": None}
 
 
+async def _run_limit_timeout(
+    order_id: str, live_strategy_id: str, position_id: str | None, market: str, side: str,
+    price: float, volume: float, expected_price: float, timeout_sec: float,
+    *, client: httpx.AsyncClient | None = None,
+) -> dict:
+    resp = await _create_order_with_retry(
+        market, side, "limit", order_id=order_id, price=str(price), volume=str(volume), client=client,
+    )
+    await asyncio.sleep(timeout_sec)
+    fill = await _fetch_fill(resp["uuid"], client=client)
+
+    if fill["state"] == "done":
+        db.update_order_filled(
+            order_id, resp["uuid"], fill["filled_price"], fill["executed_volume"], fill["fee"],
+            _slippage_pct(fill["filled_price"], expected_price), "done",
+        )
+        return {"order_id": order_id, "status": "done", "filled_price": fill["filled_price"],
+                "filled_volume": fill["executed_volume"], "fee": fill["fee"]}
+
+    await upbit_client.cancel_order(uuid=resp["uuid"], client=client)
+    first_volume = fill["executed_volume"]
+    first_funds = fill["filled_price"] * first_volume if first_volume else 0.0
+    first_fee = fill["fee"]
+    db.update_order_filled(order_id, resp["uuid"], fill["filled_price"], first_volume, first_fee, None, "cancel")
+
+    remaining_volume = fill["remaining_volume"]
+    market_order_id = db.insert_order(
+        live_strategy_id, position_id, market, side, "market", None, remaining_volume, expected_price,
+        replaces_order_id=order_id,
+    )
+    if side == "bid":
+        market_resp = await _create_order_with_retry(
+            market, "bid", "price", order_id=market_order_id,
+            price=str(round_to_tick(expected_price) * remaining_volume), client=client,
+        )
+    else:
+        market_resp = await _create_order_with_retry(
+            market, "ask", "market", order_id=market_order_id, volume=str(remaining_volume), client=client,
+        )
+    second_fill = await _fetch_fill(market_resp["uuid"], client=client)
+
+    total_volume = first_volume + second_fill["executed_volume"]
+    total_funds = first_funds + second_fill["filled_price"] * second_fill["executed_volume"]
+    total_fee = first_fee + second_fill["fee"]
+    avg_price = total_funds / total_volume
+    db.update_order_filled(
+        market_order_id, market_resp["uuid"], avg_price, total_volume, total_fee,
+        _slippage_pct(avg_price, expected_price), "done",
+    )
+    return {"order_id": market_order_id, "status": "done", "filled_price": avg_price,
+            "filled_volume": total_volume, "fee": total_fee}
+
+
 async def enter(
     strategy: dict, capital: float, expected_price: float,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
@@ -150,6 +204,12 @@ async def enter(
         result = await _run_market(order_id, market, "bid", capital, volume, expected_price, client=client)
     elif mode == "limit":
         result = await _run_limit(order_id, market, "bid", price, volume, client=client)
+    elif mode == "limit_timeout":
+        timeout_sec = risk_config.get("order_timeout_sec", 10)
+        result = await _run_limit_timeout(
+            order_id, strategy["id"], None, market, "bid", price, volume, expected_price,
+            timeout_sec, client=client,
+        )
     else:
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
 
@@ -183,6 +243,12 @@ async def exit(
         result = await _run_market(order_id, market, "ask", None, volume, expected_price, client=client)
     elif mode == "limit":
         result = await _run_limit(order_id, market, "ask", price, volume, client=client)
+    elif mode == "limit_timeout":
+        timeout_sec = risk_config.get("order_timeout_sec", 10)
+        result = await _run_limit_timeout(
+            order_id, strategy["id"], position["id"], market, "ask", price, volume, expected_price,
+            timeout_sec, client=client,
+        )
     else:
         raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
 
