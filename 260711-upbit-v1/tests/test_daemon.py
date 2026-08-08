@@ -398,8 +398,16 @@ async def test_task_set_manager_cancels_task_for_removed_strategy(monkeypatch, t
     real_sleep = asyncio.sleep
 
     async def fake_run_strategy_loop(sid):
+        # asyncio.sleep(3600)이 아니라 절대 set되지 않는 Event를 기다리게 한다.
+        # daemon.asyncio.sleep은 아래에서 scan 카운팅용으로 전역 monkeypatch되므로,
+        # 이 서브 태스크가 asyncio.sleep을 쓰면 매니저 루프의 sleep 호출과 같은
+        # 공유 카운터를 건드리게 되어 실제 .cancel() 호출 없이도 자기 자신의
+        # CancelledError를 유발할 수 있다(공유 mock의 부작용). Event().wait()는
+        # asyncio.sleep을 전혀 경유하지 않으므로, 이 태스크를 깨우는 유일한 방법은
+        # 진짜 task.cancel() 호출뿐이다.
+        never_set = asyncio.Event()
         try:
-            await asyncio.sleep(3600)
+            await never_set.wait()
         except asyncio.CancelledError:
             cancelled["count"] += 1
             raise
@@ -409,17 +417,28 @@ async def test_task_set_manager_cancels_task_for_removed_strategy(monkeypatch, t
     scan_count = {"n": 0}
 
     async def fake_sleep(seconds):
+        # 이제 이 mock은 매니저 루프 자신의 sleep(_TASK_REFRESH_INTERVAL_SEC) 호출만
+        # 카운팅한다(서브 태스크는 Event.wait()를 쓰므로 여기 안 걸림).
         scan_count["n"] += 1
         if scan_count["n"] == 1:
+            # scan 1: 전략을 로드해 태스크를 생성한 직후. 여기서 상태를 stopped로
+            # 바꾸고, 방금 생성된 태스크가 실제로 스케줄되어 never_set.wait()에서
+            # 대기 상태에 들어가도록 한 틱 양보한다(그래야 다음 scan에서 걸리는
+            # 진짜 .cancel() 호출이 의미 있는 대상을 취소하게 된다).
             dbm.update_live_strategy_status(strategy_id, "stopped")
-            await real_sleep(0)  # 태스크가 실제로 스케줄되어 sleep(3600)까지 진행되게 양보
+            await real_sleep(0)
         else:
+            # scan 2 진입 전: 매니저 루프가 이미 tasks[strategy_id].cancel()을
+            # 호출한 뒤 여기 도달한다. 매니저 루프 자체를 멈추기 위해 여기서
+            # CancelledError를 던진다.
             raise asyncio.CancelledError()
 
     monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
 
     with pytest.raises(asyncio.CancelledError):
         await daemon._task_set_manager_loop()
+    # 위에서 걸린 진짜 task.cancel() 호출이 never_set.wait() 내부까지 전파되어
+    # except CancelledError 블록이 실행되게 한 틱 더 양보한다.
     await real_sleep(0)
 
     assert cancelled["count"] == 1
