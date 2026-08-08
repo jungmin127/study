@@ -237,3 +237,19 @@ async def _reconcile_position(
     )
     db.update_live_strategy_status(strategy["id"], "paused")
     return {"balance_mismatch": True, "action": "unexplained", "paused": True}
+
+
+async def _run_reconcile_pipeline(strategy: dict, *, client: httpx.AsyncClient | None = None) -> dict:
+    """_detect_external_orders() → _reconcile_position() 순서로 실행한다. 업비트 API 실패는
+    여기서 흡수하고(설계 스펙 결정8) 매매를 막지 않는다 — reconciler는 감시자이지
+    트레이더가 아니다."""
+    try:
+        external_orders = await _detect_external_orders(strategy, client=client)
+        return await _reconcile_position(strategy, external_orders, client=client)
+    except (httpx.HTTPError, upbit_client.UpbitRateLimitError) as exc:
+        return {"error": str(exc)}
+
+
+async def check_manual_intervention(strategy: dict, *, client: httpx.AsyncClient | None = None) -> dict:
+    """러닝 중 데몬이 주기적으로(15~30초, 스케줄링은 daemon.py 몫) 호출한다."""
+    return await _run_reconcile_pipeline(strategy, client=client)

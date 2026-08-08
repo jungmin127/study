@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 
 import trading.db as db
@@ -391,3 +392,64 @@ async def test_reconcile_position_unexplained_open_uses_avg_buy_price(monkeypatc
     position = position_manager.get_open_position(strategy["id"])
     assert position["entry_price"] == 48_000_000.0
     assert position["entry_qty"] == pytest.approx(0.02)
+
+
+async def test_run_reconcile_pipeline_absorbs_api_errors(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+
+    async def failing_list_open_orders(*, market=None, states=None, client=None):
+        raise httpx.ConnectError("network down")
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", failing_list_open_orders)
+
+    result = await reconciler._run_reconcile_pipeline(strategy)
+
+    assert "error" in result
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "running"
+
+
+async def test_check_manual_intervention_runs_pipeline_directly(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0)]
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler.check_manual_intervention(strategy)
+
+    assert result == {"balance_mismatch": False, "action": "none", "paused": False}
+
+
+async def test_hydrate_state_runs_pipeline_when_baseline_already_set(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0)]
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler.hydrate_state(strategy)
+
+    assert result["baseline_captured"] is False
+    assert result["balance_mismatch"] is False
+    assert result["synced_wait_orders"] == 0
