@@ -276,6 +276,11 @@ async def _run_limit_timeout(
             raise  # 보호할 부분체결이 없으면 진짜 실패다
         return _finalize_first_leg(order_id, resp["uuid"], fill, expected_price)
 
+    # 잔량 주문이 체결 없이 취소/미체결로 확정된 경우. filled_price가 None이라 아래
+    # total_funds 계산이 TypeError로 터지므로, 실패했을 때와 똑같이 1차 체결만으로 확정한다.
+    if second_fill["executed_volume"] <= 0:
+        return _finalize_first_leg(order_id, resp["uuid"], fill, expected_price)
+
     # 단순 합은 0.30000000000000004 같은 8자리 초과 값이 되므로 내림한다. avg_price도
     # 내림된 수량으로 나눠, 실제 기록되는 filled_volume과 금액 정합성을 맞춘다.
     total_volume = _floor_volume(first_volume + second_fill["executed_volume"])

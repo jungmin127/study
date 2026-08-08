@@ -751,6 +751,44 @@ async def test_limit_timeout_keeps_first_leg_when_remainder_order_fails(monkeypa
     assert position["entry_qty"] == pytest.approx(0.004)
 
 
+async def test_limit_timeout_keeps_first_leg_when_remainder_settles_unfilled(monkeypatch, tmp_path):
+    """잔량 시장가 주문이 체결 없이 취소로 확정되면 second_fill["filled_price"]가 None이라
+    total_funds 계산에서 None * 0.0 TypeError가 난다(최종리뷰 Critical #1이 지목한 크래시).
+    이 경우도 1차 체결만으로 확정해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+    calls = {"create": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls["create"] += 1
+        return {"uuid": "uuid-limit" if calls["create"] == 1 else "uuid-market", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if uuid == "uuid-limit":
+            return {"state": "wait", "executed_volume": "0.004", "remaining_volume": "0.006",
+                    "paid_fee": "100.0", "trades": [{"funds": "200000.0"}]}
+        return {"state": "cancel", "executed_volume": "0", "remaining_volume": "0.006",
+                "paid_fee": "0", "trades": []}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert order["status"] == "done"
+    assert order["filled_volume"] == pytest.approx(0.004)
+    assert position_manager.get_open_position(strategy["id"]) is not None
+
+
 async def test_limit_timeout_propagates_remainder_failure_when_nothing_filled(
     monkeypatch, tmp_path,
 ):
