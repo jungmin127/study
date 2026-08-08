@@ -131,3 +131,88 @@ async def test_hydrate_state_captures_baseline_on_first_call(monkeypatch, tmp_pa
     assert result["synced_wait_orders"] == 0
     assert dbm.get_live_strategy(strategy["id"])["baseline_qty"] == 0.05
     assert dbm.get_live_strategy(strategy["id"])["status"] != "paused"
+
+
+async def test_detect_external_orders_finds_new_order_all_stop(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "ext-uuid-1"}]
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "side": "bid", "ord_type": "limit",
+                "executed_volume": "0", "remaining_volume": "1.0",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert len(found) == 1
+    assert found[0]["upbit_uuid"] == "ext-uuid-1"
+    assert found[0]["is_external"] == 1
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+
+
+async def test_detect_external_orders_acknowledge_and_continue_keeps_running(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(
+        dbm, baseline_qty=0.0, manual_intervention_policy="acknowledge_and_continue",
+    )
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "ext-uuid-2"}]
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "side": "bid", "ord_type": "limit",
+                "executed_volume": "0", "remaining_volume": "1.0",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert len(found) == 1
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "running"
+
+
+async def test_detect_external_orders_ignores_already_known_uuid(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+    dbm.insert_external_order(
+        strategy["id"], None, "KRW-BTC", "bid", "limit", "known-uuid",
+        100.0, 1.0, 0.0, "done",
+    )
+    calls = {"get_order": 0}
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "known-uuid"}]
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        calls["get_order"] += 1
+        return {"state": "done", "side": "bid", "ord_type": "limit",
+                "executed_volume": "1.0", "remaining_volume": "0",
+                "paid_fee": "0", "trades": [{"funds": "100.0"}]}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert found == []
+    assert calls["get_order"] == 0

@@ -9,6 +9,8 @@ trading/reconciler.py
 """
 from __future__ import annotations
 
+import json
+
 import httpx
 
 import trading.db as db
@@ -76,3 +78,53 @@ async def hydrate_state(strategy: dict, *, client: httpx.AsyncClient | None = No
 
     result = await _run_reconcile_pipeline(strategy, client=client)
     return {"synced_wait_orders": synced, "baseline_captured": False, **result}
+
+
+async def _detect_external_orders(
+    strategy: dict, *, client: httpx.AsyncClient | None = None,
+) -> list[dict]:
+    """그 마켓의 미체결+최근 종료 주문을 조회해 내부 DB에 없는 uuid만 골라 기록한다
+    (설계 스펙 결정7 준비 — 여기서 찾은 주문들을 _reconcile_position이 재사용)."""
+    market = strategy["market"]
+    open_orders = await upbit_client.list_open_orders(market=market, client=client)
+    closed_orders = await upbit_client.list_closed_orders(
+        market=market, states=["done", "cancel"], client=client,
+    )
+
+    risk_config = json.loads(strategy["risk_config_json"])
+    policy = risk_config.get("manual_intervention_policy", "all_stop")
+
+    found: list[dict] = []
+    for raw in open_orders + closed_orders:
+        upbit_uuid = raw["uuid"]
+        if db.get_order_by_upbit_uuid(upbit_uuid) is not None:
+            continue
+
+        detail = await upbit_client.get_order(uuid=upbit_uuid, client=client)
+        executed_volume = float(detail["executed_volume"])
+        filled_price = (
+            sum(float(t["funds"]) for t in detail["trades"]) / executed_volume
+            if executed_volume > 0 else None
+        )
+        status = "wait" if detail["state"] == "wait" else (
+            "done" if detail["state"] == "done" else "cancel"
+        )
+
+        order_id = db.insert_external_order(
+            strategy["id"], None, market, detail["side"], detail["ord_type"], upbit_uuid,
+            filled_price, executed_volume if executed_volume > 0 else None,
+            float(detail["paid_fee"]), status,
+        )
+        found.append(db.get_order_by_id(order_id))
+
+        action_taken = "all_stop" if policy == "all_stop" else "acknowledged_and_continued"
+        db.insert_manual_intervention_event(
+            market,
+            f"내부에 없는 외부주문 발견: uuid={upbit_uuid}, side={detail['side']}, "
+            f"state={detail['state']}",
+            action_taken,
+        )
+        if policy == "all_stop":
+            db.update_live_strategy_status(strategy["id"], "paused")
+
+    return found
