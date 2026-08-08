@@ -392,3 +392,111 @@ async def test_exit_market_capped_uses_lower_bound_price(monkeypatch, tmp_path):
     await order_executor.exit(strategy, position, 50_000_000.0)
 
     assert captured["price"] == str(order_executor.round_to_tick(50_000_000.0 * 0.995))
+
+
+import trading.risk_manager as risk_manager
+
+
+def _signal_result(**overrides):
+    base = {
+        "new_candle": True, "candle_time": "2026-08-08T10:00:00+00:00",
+        "buy_signal": False, "sell_signal": False,
+        "buy_signal_id": "buy-sig-1", "sell_signal_id": "sell-sig-1",
+        "latest_close": 50_000_000.0, "paused": False, "resumed": False,
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_handle_signal_result_does_nothing_when_paused(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+
+    result = await order_executor.handle_signal_result(
+        strategy["id"], _signal_result(buy_signal=True, paused=True), dry_run=True,
+    )
+
+    assert result == {"buy_action": None, "sell_action": None, "buy_order_id": None, "sell_order_id": None}
+    assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_handle_signal_result_enters_on_buy_signal(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+
+    result = await order_executor.handle_signal_result(
+        strategy["id"], _signal_result(buy_signal=True), dry_run=True,
+    )
+
+    assert result["buy_action"] == "entered"
+    assert result["buy_order_id"] is not None
+    assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+async def test_handle_signal_result_skips_buy_when_circuit_tripped(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    monkeypatch.setattr(risk_manager, "is_circuit_tripped_today", lambda sid: True)
+
+    result = await order_executor.handle_signal_result(
+        strategy["id"], _signal_result(buy_signal=True), dry_run=True,
+    )
+
+    assert result["buy_action"] == "skipped_circuit_breaker"
+    assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_handle_signal_result_exits_on_sell_signal_and_records_trade(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    recorded = {}
+    monkeypatch.setattr(
+        risk_manager, "record_trade_result",
+        lambda sid, pnl, capital_after: recorded.update(sid=sid, pnl=pnl, capital_after=capital_after),
+    )
+
+    result = await order_executor.handle_signal_result(
+        strategy["id"], _signal_result(sell_signal=True), dry_run=True,
+    )
+
+    assert result["sell_action"] == "exited"
+    assert position_manager.get_open_position(strategy["id"]) is None
+    assert recorded["sid"] == strategy["id"]
+
+
+async def test_handle_signal_result_marks_pending_for_plain_limit_mode(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit")
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-8", "state": "wait"}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+
+    result = await order_executor.handle_signal_result(strategy["id"], _signal_result(buy_signal=True))
+
+    assert result["buy_action"] == "pending"
+    assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_handle_signal_result_records_slippage_exceeded_on_fok_cancel(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="market_capped", max_slippage_pct=0.1)
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-9", "state": "cancel"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "cancel", "executed_volume": "0", "remaining_volume": "0.01",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.handle_signal_result(strategy["id"], _signal_result(buy_signal=True))
+
+    assert result["buy_action"] == "slippage_exceeded"
+    assert position_manager.get_open_position(strategy["id"]) is None

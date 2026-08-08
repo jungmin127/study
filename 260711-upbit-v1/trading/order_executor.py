@@ -17,6 +17,7 @@ import httpx
 
 import trading.db as db
 import trading.position_manager as position_manager
+import trading.risk_manager as risk_manager
 import trading.upbit_client as upbit_client
 
 # 업비트 원화마켓 주문가격단위(2026-08 기준, docs.upbit.com/kr/docs/krw-market-info).
@@ -293,3 +294,51 @@ async def exit(
     order = db.get_order_by_id(result["order_id"])
     order.update(close_result)
     return order
+
+
+async def handle_signal_result(
+    strategy_id: str, signal_result: dict, *, dry_run: bool = False,
+) -> dict:
+    result = {"buy_action": None, "sell_action": None, "buy_order_id": None, "sell_order_id": None}
+
+    if signal_result["paused"]:
+        return result
+
+    strategy = db.get_live_strategy(strategy_id)
+    risk_config = json.loads(strategy["risk_config_json"])
+    position = position_manager.get_open_position(strategy_id)
+    expected_price = signal_result["latest_close"]
+
+    if signal_result["buy_signal"] is True and position is None:
+        if risk_manager.is_circuit_tripped_today(strategy_id):
+            db.update_signal_result(signal_result["buy_signal_id"], None, "circuit_breaker_tripped")
+            result["buy_action"] = "skipped_circuit_breaker"
+        else:
+            capital = min(strategy["current_capital"], risk_config["max_position_per_market"])
+            order = await enter(strategy, capital, expected_price, dry_run=dry_run)
+            result["buy_order_id"] = order["id"]
+            if order["status"] == "done":
+                db.update_signal_result(signal_result["buy_signal_id"], order["id"], None)
+                result["buy_action"] = "entered"
+            elif order["status"] == "cancel":
+                db.update_signal_result(signal_result["buy_signal_id"], order["id"], "slippage_exceeded")
+                result["buy_action"] = "slippage_exceeded"
+            else:
+                db.update_signal_result(signal_result["buy_signal_id"], order["id"], None)
+                result["buy_action"] = "pending"
+
+    if signal_result["sell_signal"] is True and position is not None:
+        order = await exit(strategy, position, expected_price, dry_run=dry_run)
+        result["sell_order_id"] = order["id"]
+        if order["status"] == "done":
+            db.update_signal_result(signal_result["sell_signal_id"], order["id"], None)
+            result["sell_action"] = "exited"
+            risk_manager.record_trade_result(strategy_id, order["realized_pnl"], order["capital_after"])
+        elif order["status"] == "cancel":
+            db.update_signal_result(signal_result["sell_signal_id"], order["id"], "slippage_exceeded")
+            result["sell_action"] = "slippage_exceeded"
+        else:
+            db.update_signal_result(signal_result["sell_signal_id"], order["id"], None)
+            result["sell_action"] = "pending"
+
+    return result
