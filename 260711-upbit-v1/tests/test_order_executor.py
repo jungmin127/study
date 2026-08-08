@@ -183,7 +183,7 @@ async def test_enter_market_mode_places_price_order_and_records_fill(monkeypatch
     order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
 
     assert captured["ord_type"] == "price"  # 시장가 매수는 price 타입(설계 스펙 결정7)
-    assert captured["price"] == "500000.0"
+    assert captured["price"] == "500000"  # _fmt: str(500000.0)의 꼬리 '.0' 없이
     assert captured["volume"] is None
     assert order["status"] == "done"
     assert order["filled_price"] == pytest.approx(500000.0 / 0.01)
@@ -512,6 +512,104 @@ async def test_enter_market_returns_wait_when_order_never_settles(monkeypatch, t
     assert order["status"] == "wait"
     assert calls["get"] > 1
     assert position_manager.get_open_position(strategy["id"]) is None
+
+
+def test_fmt_avoids_scientific_notation_and_float_noise():
+    """bare str()은 작은 값에서 과학적 표기법(업비트가 거부)을, 부동소수점 오차에서는
+    불필요한 자리수를 만든다(최종리뷰 Important #5)."""
+    assert "e" not in order_executor._fmt(0.00006)
+    assert float(order_executor._fmt(0.00006)) == pytest.approx(0.00006)
+    assert "e" not in order_executor._fmt(6.66e-05)
+    assert float(order_executor._fmt(6.66e-05)) == pytest.approx(6.66e-05)
+    assert order_executor._fmt(0.1 + 0.2) == "0.3"
+    assert order_executor._fmt(50_000_000.0) == "50000000"  # 큰 정수도 지수표기/.0 없이
+    assert order_executor._fmt(0.00000001) == "0.00000001"  # 업비트 최소 단위(1e-8)
+
+
+async def test_exit_market_formats_small_volume_without_scientific_notation(monkeypatch, tmp_path):
+    """str(6.66e-05) == '6.66e-05' 라 업비트가 거부한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 6.66e-05)
+    position = position_manager.get_open_position(strategy["id"])
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(volume=volume)
+        return {"uuid": "uuid-sci", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.0000666", "remaining_volume": "0",
+                "paid_fee": "1.0", "trades": [{"funds": "3330.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await order_executor.exit(strategy, position, 50_000_000.0)
+
+    assert "e" not in captured["volume"]
+    assert float(captured["volume"]) == pytest.approx(6.66e-05)
+
+
+async def test_exit_floors_position_qty_to_eight_decimals(monkeypatch, tmp_path):
+    """entry_qty를 그대로 쓰면 8자리 초과 정밀도로 주문이 거부된다(최종리뷰 Important #6)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.1234567891)
+    position = position_manager.get_open_position(strategy["id"])
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured.update(volume=volume)
+        return {"uuid": "uuid-floor", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.12345678", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "6172839.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await order_executor.exit(strategy, position, 50_000_000.0)
+
+    assert captured["volume"] == "0.12345678"
+
+
+async def test_limit_timeout_floors_total_volume(monkeypatch, tmp_path):
+    """1차+2차 체결수량 단순 합은 0.30000000000000004 같은 값이 된다(최종리뷰 Important #6)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode="limit_timeout")
+    calls = {"create": 0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls["create"] += 1
+        return {"uuid": "uuid-limit" if calls["create"] == 1 else "uuid-market", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if uuid == "uuid-limit":
+            return {"state": "wait", "executed_volume": "0.1", "remaining_volume": "0.2",
+                    "paid_fee": "100.0", "trades": [{"funds": "5000000.0"}]}
+        return {"state": "done", "executed_volume": "0.2", "remaining_volume": "0",
+                "paid_fee": "200.0", "trades": [{"funds": "10000000.0"}]}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    assert order["filled_volume"] == 0.3  # 0.30000000000000004가 아니라 정확히 0.3
+    assert order["filled_price"] == pytest.approx(15_000_000.0 / 0.3)
 
 
 def _order_count(dbm):

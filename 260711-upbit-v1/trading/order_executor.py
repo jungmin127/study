@@ -66,6 +66,19 @@ def _floor_volume(volume: float) -> float:
     return math.floor(volume * 1e8) / 1e8
 
 
+def _fmt(value: float) -> str:
+    """API 파라미터용 안전한 문자열 변환. bare str()은 작은 값에서 과학적 표기법
+    (예: 6.66e-05)을 만들어 업비트가 거부하고, 부동소수점 오차로 불필요한 자리수도
+    남긴다(예: 0.1+0.2 == '0.30000000000000004').
+
+    Decimal(str(value)).normalize()는 후자를 못 고치므로(str()이 이미 오차를 문자열로
+    굳혀버림) 업비트 최소 단위인 8자리 고정소수점으로 포맷한 뒤 꼬리 0을 떼는 방식을 쓴다."""
+    text = f"{value:.8f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
 async def _create_order_with_retry(
     market: str, side: str, ord_type: str, *, order_id: str,
     volume: str | None = None, price: str | None = None, time_in_force: str | None = None,
@@ -139,11 +152,11 @@ async def _run_market(
 ) -> dict:
     if side == "bid":
         resp = await _create_order_with_retry(
-            market, "bid", "price", order_id=order_id, price=str(capital), client=client,
+            market, "bid", "price", order_id=order_id, price=_fmt(capital), client=client,
         )
     else:
         resp = await _create_order_with_retry(
-            market, "ask", "market", order_id=order_id, volume=str(volume), client=client,
+            market, "ask", "market", order_id=order_id, volume=_fmt(volume), client=client,
         )
     fill = await _await_settlement(resp["uuid"], client=client)
     # 폴링 타임아웃까지 확정되지 않았으면 wait으로 보고한다. 무조건 "done"으로 기록하면
@@ -166,7 +179,7 @@ async def _run_limit(
     *, client: httpx.AsyncClient | None = None,
 ) -> dict:
     resp = await _create_order_with_retry(
-        market, side, "limit", order_id=order_id, price=str(price), volume=str(volume), client=client,
+        market, side, "limit", order_id=order_id, price=_fmt(price), volume=_fmt(volume), client=client,
     )
     db.update_order_filled(order_id, resp["uuid"], None, None, None, None, "wait")
     return {"order_id": order_id, "status": "wait", "filled_price": None, "filled_volume": None, "fee": None}
@@ -178,7 +191,7 @@ async def _run_limit_timeout(
     *, client: httpx.AsyncClient | None = None,
 ) -> dict:
     resp = await _create_order_with_retry(
-        market, side, "limit", order_id=order_id, price=str(price), volume=str(volume), client=client,
+        market, side, "limit", order_id=order_id, price=_fmt(price), volume=_fmt(volume), client=client,
     )
     await asyncio.sleep(timeout_sec)
     fill = await _fetch_fill(resp["uuid"], client=client)
@@ -205,15 +218,17 @@ async def _run_limit_timeout(
     if side == "bid":
         market_resp = await _create_order_with_retry(
             market, "bid", "price", order_id=market_order_id,
-            price=str(round_to_tick(expected_price) * remaining_volume), client=client,
+            price=_fmt(round_to_tick(expected_price) * remaining_volume), client=client,
         )
     else:
         market_resp = await _create_order_with_retry(
-            market, "ask", "market", order_id=market_order_id, volume=str(remaining_volume), client=client,
+            market, "ask", "market", order_id=market_order_id, volume=_fmt(remaining_volume), client=client,
         )
     second_fill = await _await_settlement(market_resp["uuid"], client=client)
 
-    total_volume = first_volume + second_fill["executed_volume"]
+    # 단순 합은 0.30000000000000004 같은 8자리 초과 값이 되므로 내림한다. avg_price도
+    # 내림된 수량으로 나눠, 실제 기록되는 filled_volume과 금액 정합성을 맞춘다.
+    total_volume = _floor_volume(first_volume + second_fill["executed_volume"])
     total_funds = first_funds + second_fill["filled_price"] * second_fill["executed_volume"]
     total_fee = first_fee + second_fill["fee"]
     avg_price = total_funds / total_volume
@@ -238,7 +253,7 @@ async def _run_market_capped(
         volume = _floor_volume(capital / capped_price)
     resp = await _create_order_with_retry(
         market, side, "limit", order_id=order_id,
-        price=str(capped_price), volume=str(volume), time_in_force="fok", client=client,
+        price=_fmt(capped_price), volume=_fmt(volume), time_in_force="fok", client=client,
     )
     fill = await _await_settlement(resp["uuid"], client=client)
     if fill["state"] != "done" or fill["executed_volume"] == 0:
@@ -321,7 +336,7 @@ async def exit(
         _capped_price(expected_price, "ask", risk_config["max_slippage_pct"])
         if mode == "market_capped" else round_to_tick(expected_price)
     )
-    volume = position["entry_qty"]
+    volume = _floor_volume(position["entry_qty"])  # 8자리 초과 정밀도는 업비트가 거부한다
 
     order_id = db.insert_order(strategy["id"], position["id"], market, "ask", mode, price, volume, expected_price)
 
