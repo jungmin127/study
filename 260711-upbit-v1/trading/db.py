@@ -479,21 +479,21 @@ def insert_manual_intervention_event(market: str, description: str, action_taken
     return event_id
 
 
-def list_wait_orders(live_strategy_id: str, order_type: str | None = None) -> list[dict]:
+def list_wait_orders(
+    live_strategy_id: str, order_type: str | None = None, position_id: str | None = None,
+) -> list[dict]:
     conn = _connect()
     try:
         conn.row_factory = sqlite3.Row
+        query = "SELECT * FROM orders WHERE live_strategy_id = ? AND status = 'wait'"
+        params: list = [live_strategy_id]
         if order_type is not None:
-            rows = conn.execute(
-                "SELECT * FROM orders WHERE live_strategy_id = ? AND status = 'wait' "
-                "AND order_type = ?",
-                (live_strategy_id, order_type),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM orders WHERE live_strategy_id = ? AND status = 'wait'",
-                (live_strategy_id,),
-            ).fetchall()
+            query += " AND order_type = ?"
+            params.append(order_type)
+        if position_id is not None:
+            query += " AND position_id = ?"
+            params.append(position_id)
+        rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()

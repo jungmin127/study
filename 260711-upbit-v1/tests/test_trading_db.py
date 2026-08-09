@@ -479,6 +479,20 @@ def test_list_wait_orders_filters_by_status_and_optional_type(monkeypatch, tmp_p
     assert {o["id"] for o in limit_only} == {wait_limit_id}
 
 
+def test_list_wait_orders_filters_by_position_id(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_a = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    position_b = db.insert_position(strategy_id, "KRW-BTC", 51_000_000.0, 0.02)
+    order_a = db.insert_order(strategy_id, position_a, "KRW-BTC", "ask", "limit", 100.0, 1.0, 100.0)
+    order_b = db.insert_order(strategy_id, position_b, "KRW-BTC", "ask", "limit", 100.0, 1.0, 100.0)
+
+    result = db.list_wait_orders(strategy_id, position_id=position_a)
+
+    assert {o["id"] for o in result} == {order_a}
+    assert order_b not in {o["id"] for o in result}
+
+
 def test_adjust_position_qty_updates_open_position_only(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db)
