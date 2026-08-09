@@ -479,9 +479,15 @@ def _mark_stale_order_resolved(stale: dict, upbit_uuid: str, fill: dict) -> None
     )
 
 
+def _stale_proceeds(fill: dict) -> tuple[float, float, float]:
+    qty = fill["executed_volume"]
+    proceeds = fill["filled_price"] * qty if fill["filled_price"] is not None else 0.0
+    return qty, proceeds, fill["fee"]
+
+
 async def _resolve_stale_ask_order(
     stale: dict, *, client: httpx.AsyncClient | None = None,
-) -> float:
+) -> tuple[float, float, float]:
     """청산 전 사전 정리 대상인 ask status='wait' 행 하나를 거래소 실제 상태에 맞춰
     정리하고, "이미 팔려서 이번 청산에서 다시 팔면 안 되는 수량"을 반환한다.
 
@@ -506,7 +512,14 @@ async def _resolve_stale_ask_order(
     것이므로 예외를 삼키지 않고 올린다(5라운드는 여기서 무조건 "이미 정리됐다"고
     가정하고 진행했다 — I1). 네트워크 예외(httpx.TransportError/TimeoutException)와
     UpbitRateLimitError도 같은 이유로 잡지 않는다 — 전부 "거래소 상태를 확인하지 못했다"
-    이고, 그 상태로 두 번째 매도를 내는 것보다 이번 tick을 포기하는 편이 안전하다."""
+    이고, 그 상태로 두 번째 매도를 내는 것보다 이번 tick을 포기하는 편이 안전하다.
+
+    (⑤-4c 백로그 수정) 이 함수는 이제 수량뿐 아니라 대금/수수료도 함께 반환한다
+    (`(qty, proceeds, fee)`) — 호출자(exit_for_risk)가 그 값을
+    db.accumulate_stale_resolution()으로 즉시 영구 기록하고, 최종 청산 시 가중평균
+    원가에 반영해야 하기 때문이다(Important #1/#3/#4). identifier 조회가 4xx를 받는
+    고아 행은 이제 status='failed'로 terminal 마킹한다(Minor #6) — 안 그러면 다음
+    tick마다 같은 GET을 무한 재시도한다."""
     upbit_uuid = stale["upbit_uuid"]
     if upbit_uuid is None:
         try:
@@ -515,10 +528,11 @@ async def _resolve_stale_ask_order(
             if exc.response.status_code >= 500:
                 raise
             logger.info(
-                "잔여 매도 주문이 거래소에 접수된 적이 없다(취소 대상 아님): order_id=%s status=%s",
-                stale["id"], exc.response.status_code,
+                "잔여 매도 주문이 거래소에 접수된 적이 없다(취소 대상 아님, terminal 마킹): "
+                "order_id=%s status=%s", stale["id"], exc.response.status_code,
             )
-            return 0.0
+            db.update_order_filled(stale["id"], None, None, None, None, None, "failed")
+            return 0.0, 0.0, 0.0
         upbit_uuid = resp["uuid"]
         fill = _fill_from_order(resp)
     else:
@@ -528,7 +542,7 @@ async def _resolve_stale_ask_order(
         # 이미 거래소에서 확정된 주문 — 취소할 게 없다(무의미한 취소 요청으로 order 그룹
         # rate limit을 소모하지 않는다). 체결된 만큼만 "이미 팔림"으로 계산한다.
         _mark_stale_order_resolved(stale, upbit_uuid, fill)
-        return fill["executed_volume"]
+        return _stale_proceeds(fill)
 
     cancel_error: httpx.HTTPStatusError | None = None
     try:
@@ -540,7 +554,7 @@ async def _resolve_stale_ask_order(
     if cancel_error is not None and fill["state"] == "wait":
         raise cancel_error
     _mark_stale_order_resolved(stale, upbit_uuid, fill)
-    return fill["executed_volume"]
+    return _stale_proceeds(fill)
 
 
 async def exit_for_risk(
@@ -608,29 +622,64 @@ async def exit_for_risk(
     팔 게 없다 — 0/음수/먼지 주문은 업비트가 거부할 뿐이므로 아무 주문도 내지 않고
     "nothing_to_sell"로 조용히 끝낸다. positions/current_capital 부기를 여기서 흉내내지는
     않는다 — reconciler.check_manual_intervention()의 주기적 잔고 대조가 "내부 포지션과
-    실잔고 불일치"를 정확히 그 용도로 self-heal한다."""
-    resolved_volume = 0.0
+    실잔고 불일치"를 정확히 그 용도로 self-heal한다.
+
+    (⑤-4c 백로그 수정, 7~8라운드 대응) 6라운드까지는 "이번 tick에 처리한 만큼만" 계산해
+    exit()를 호출했다 — 그 정보가 이 함수 호출 하나의 지역 변수에만 머물러서, (a) 정리한
+    주문이 포지션 전량을 커버해도 아무 조치 없이 "nothing_to_sell"만 반환해 포지션이
+    방치되고 reconciler가 이걸 "설명 안 됨"으로 오분류해 전략을 자동 정지시켰다
+    (Important #2), (b) 잔여 주문이 여럿일 때 뒤쪽 처리 중 예외가 나면 앞쪽 처리분이
+    사라져 다음 tick이 과다매도를 시도했다(Important #3/#4), (c) 부분 정리 후 남은
+    수량만 파는 exit() 호출이 성공해도 close_position()이 DB의 원래 entry_qty 전체를
+    원가로 계산해 PnL이 왜곡됐다(Important #1), (d) 잔여 주문 조회가 전략 전체 기준이라
+    이전에 종료된 포지션의 잔여분이 섞였다(Important #5).
+
+    지금은: list_wait_orders를 이 포지션(position_id)으로 좁히고(Important #5),
+    지역 누적변수(total_resolved_qty/proceeds/fee)를 position의 기존 누적치로
+    초기화한 뒤 각 정리분을 db.accumulate_stale_resolution()으로 그 자리에서 영구
+    기록하는 동시에 지역 변수에도 더한다(Important #3 — 예외가 나도 이미 커밋된
+    앞쪽 처리분은 살아남는다; Important #4 — 다음 tick은 position의 누적치를 통해
+    이번 tick의 결과를 자동으로 이어받는다, ⑤-4c 결정8의 매 tick fresh 포지션 재조회
+    덕분). 정리만으로 포지션 전량(또는 최소주문금액 미만만 남기고)이 소진됐으면 새
+    주문을 내지 않고 그 자리에서 바로 position_manager.close_position()을 호출해
+    포지션을 종료한다(Important #2). 남은 수량이 있으면 exit()에 pre_resolved_*로
+    누적치를 넘겨 최종 체결분과 가중평균으로 합산하게 한다(Important #1)."""
+    total_resolved_qty = position["stale_resolved_qty"]
+    total_resolved_proceeds = position["stale_resolved_proceeds"]
+    total_resolved_fee = position["stale_resolved_fee"]
+
     if not dry_run:
-        # position_id로 거르지 않는다 — 이 전략에 열려있는 ask 주문은 어느 것이든 지금
-        # 팔려는 같은 코인 잔고를 두고 충돌하므로 전부 정리 대상이고, 체결량도 전부
-        # 합산한다. 혹시 이전 포지션이 남긴 체결까지 합산돼 과다 차감되더라도 방향이
-        # 안전한 쪽이다("덜 팔아 먼지가 남음"은 reconciler가 self-heal하지만, "더 팔려다
-        # insufficient_funds_ask로 거부됨"은 손절 자체가 실패한다).
-        for stale in db.list_wait_orders(strategy["id"]):
+        # position_id로 좁힌다(Important #5) — 이전에 종료된 다른 포지션이 남긴 잔여
+        # 주문이 이번 계산에 섞이면 안 된다. 이 포지션에 걸려있는 ask 주문은 지금
+        # 팔려는 같은 코인 잔고를 두고 충돌하므로 전부 정리 대상이다.
+        for stale in db.list_wait_orders(strategy["id"], position_id=position["id"]):
             if stale["side"] != "ask":
                 continue
-            resolved_volume += await _resolve_stale_ask_order(stale, client=client)
+            qty, proceeds, fee = await _resolve_stale_ask_order(stale, client=client)
+            if qty > 0:
+                # 즉시 영구 기록한다(Important #3) — 이 for문의 다음 반복이 예외를
+                # 던져도 이미 커밋된 이 분량은 살아남고, 다음 tick은 fresh position을
+                # 통해 이 값을 자동으로 이어받는다(Important #4).
+                db.accumulate_stale_resolution(position["id"], qty, proceeds, fee)
+            total_resolved_qty += qty
+            total_resolved_proceeds += proceeds
+            total_resolved_fee += fee
 
-    if resolved_volume > 0:
-        sell_volume = _floor_volume(position["entry_qty"] - resolved_volume)
-        if sell_volume <= 0 or sell_volume * expected_price < _MIN_ORDER_AMOUNT_KRW:
-            logger.warning(
-                "잔여 매도 주문이 이미 체결돼 청산할 수량이 남지 않았다(주문 생략, 포지션 "
-                "부기는 reconciler가 맞춘다): strategy_id=%s entry_qty=%s 기체결=%s",
-                strategy["id"], position["entry_qty"], resolved_volume,
-            )
-            return {"action": "nothing_to_sell", "order_id": None}
-        position = {**position, "entry_qty": sell_volume}
+    sellable_qty = _floor_volume(position["entry_qty"] - total_resolved_qty)
+    if sellable_qty <= 0 or sellable_qty * expected_price < _MIN_ORDER_AMOUNT_KRW:
+        # 잔여 주문 정리만으로 포지션이 사실상 전부 소진됐다(Important #2) — 새 주문 없이
+        # 그 자리에서 바로 종료한다. 방치하면 reconciler가 이 포지션을 "설명 안 됨"으로
+        # 오분류해 전략을 자동 정지시킨다.
+        blended_price = (
+            total_resolved_proceeds / total_resolved_qty if total_resolved_qty else expected_price
+        )
+        close_result = position_manager.close_position(
+            position["id"], blended_price, total_resolved_qty, total_resolved_fee, reason,
+        )
+        risk_manager.record_trade_result(
+            strategy["id"], close_result["realized_pnl"], close_result["capital_after"],
+        )
+        return {"action": "exited", "order_id": None}
 
     forced_risk_config = json.loads(strategy["risk_config_json"])
     forced_risk_config["order_execution_mode"] = "market"
@@ -638,9 +687,12 @@ async def exit_for_risk(
     # (_validate_mode 참고 — market_capped만 요구) — 그 필드를 한 번도 설정한 적 없는
     # 전략을 강제로 market에 태워도 안전하다.
     forced_strategy = {**strategy, "risk_config_json": json.dumps(forced_risk_config)}
+    sell_position = {**position, "entry_qty": sellable_qty}
 
     order = await exit(
-        forced_strategy, position, expected_price, client=client, dry_run=dry_run, close_reason=reason,
+        forced_strategy, sell_position, expected_price, client=client, dry_run=dry_run,
+        close_reason=reason, pre_resolved_qty=total_resolved_qty,
+        pre_resolved_proceeds=total_resolved_proceeds, pre_resolved_fee=total_resolved_fee,
     )
     if order["status"] == "done":
         risk_manager.record_trade_result(strategy["id"], order["realized_pnl"], order["capital_after"])
