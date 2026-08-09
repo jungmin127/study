@@ -1108,6 +1108,46 @@ async def test_handle_signal_result_exits_on_sell_signal_and_records_trade(monke
     assert recorded["sid"] == strategy["id"]
 
 
+async def test_handle_signal_result_blends_prior_stale_resolution_into_sell(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 Important #3 — candle 매도 경로(handle_signal_result)는
+    exit_for_risk()가 남긴 stale_resolved_* 누적치(예: 직전 tick이 "pending"으로 끝나
+    포지션이 아직 열려 있는 상태)를 무시한 채 entry_qty 전량을 팔려 했다. 이미 판
+    수량까지 다시 팔려 하면 과다매도로 거부되거나, 팔린다 해도 그 정리분이 최종 PnL에서
+    누락된다. exit_for_risk()가 이미 하는 것과 동일하게 stale_resolved_*를 exit()의
+    pre_resolved_*로 넘겨 가중평균으로 합산해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    dbm.accumulate_stale_resolution(position["id"], 0.004, 200_000.0, 50.0)
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured["volume"] = volume
+        return {"uuid": "uuid-candle-sell", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.006", "remaining_volume": "0",
+                "paid_fee": "30.0", "trades": [{"funds": "312000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.handle_signal_result(
+        strategy["id"], _signal_result(sell_signal=True),
+    )
+
+    assert captured["volume"] == "0.006"  # 0.01 - 이전 tick 누적분(0.004), entry_qty 전량 아님
+    assert result["sell_action"] == "exited"
+    position_row = dbm.get_position(position["id"])
+    assert position_row["status"] == "closed"
+    # total_qty=0.01, total_proceeds=200,000+312,000=512,000, blended_price=51,200,000,
+    # total_fee=50+30=80, realized_pnl=512,000-490,000-80=21,920.0
+    assert position_row["realized_pnl"] == pytest.approx(21_920.0)
+    assert position_row["exit_qty"] == pytest.approx(0.01)
+
+
 async def test_handle_signal_result_marks_pending_for_plain_limit_mode(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm, order_execution_mode="limit")

@@ -785,17 +785,41 @@ async def handle_signal_result(
                 result["buy_action"] = "pending"
 
     if signal_result["sell_signal"] is True and position is not None:
-        order = await exit(strategy, position, expected_price, dry_run=dry_run)
-        result["sell_order_id"] = order["id"]
-        if order["status"] == "done":
-            db.update_signal_result(signal_result["sell_signal_id"], order["id"], None)
-            result["sell_action"] = "exited"
-            risk_manager.record_trade_result(strategy_id, order["realized_pnl"], order["capital_after"])
-        elif order["status"] == "cancel":
-            db.update_signal_result(signal_result["sell_signal_id"], order["id"], "slippage_exceeded")
-            result["sell_action"] = "slippage_exceeded"
+        # 최종 브랜치 리뷰 Important #3 — exit_for_risk()가 이미 이 포지션의
+        # stale_resolved_*에 잔여주문 정리분을 누적해뒀을 수 있다(예: 직전 tick이
+        # "pending"으로 끝나 포지션이 아직 열려 있는 상태). 이 candle 경로가 그 사실을
+        # 모른 채 entry_qty 전량을 팔려 하면 과다매도(거부)되거나, 팔린다 해도 PnL에서
+        # 그 정리분이 누락된다 — exit_for_risk()가 이미 하는 계산을 여기도 그대로
+        # 적용한다.
+        sellable_qty = _floor_volume(position["entry_qty"] - position["stale_resolved_qty"])
+        if sellable_qty <= 0:
+            # exit_for_risk()가 이미 이 포지션을 전량 소진 처리했어야 하는 방어적
+            # 경계 케이스다(이 함수는 daemon의 전략별 lock을 잡지 않으므로, concurrent
+            # risk-exit tick의 close보다 살짝 먼저 읽은 stale position dict를 볼 수
+            # 있다 — 흔하지 않지만 실주문을 내는 것보다 조용히 건너뛰는 편이 안전하다).
+            logger.warning(
+                "포지션의 잔여주문 정리분이 이미 전량을 커버해 캔들 매도를 건너뛴다: "
+                "strategy_id=%s entry_qty=%s stale_resolved_qty=%s",
+                strategy_id, position["entry_qty"], position["stale_resolved_qty"],
+            )
         else:
-            db.update_signal_result(signal_result["sell_signal_id"], order["id"], None)
-            result["sell_action"] = "pending"
+            sell_position = {**position, "entry_qty": sellable_qty}
+            order = await exit(
+                strategy, sell_position, expected_price, dry_run=dry_run,
+                pre_resolved_qty=position["stale_resolved_qty"],
+                pre_resolved_proceeds=position["stale_resolved_proceeds"],
+                pre_resolved_fee=position["stale_resolved_fee"],
+            )
+            result["sell_order_id"] = order["id"]
+            if order["status"] == "done":
+                db.update_signal_result(signal_result["sell_signal_id"], order["id"], None)
+                result["sell_action"] = "exited"
+                risk_manager.record_trade_result(strategy_id, order["realized_pnl"], order["capital_after"])
+            elif order["status"] == "cancel":
+                db.update_signal_result(signal_result["sell_signal_id"], order["id"], "slippage_exceeded")
+                result["sell_action"] = "slippage_exceeded"
+            else:
+                db.update_signal_result(signal_result["sell_signal_id"], order["id"], None)
+                result["sell_action"] = "pending"
 
     return result
