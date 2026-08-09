@@ -35,10 +35,11 @@ _NTP_CHECK_INTERVAL_SEC = 600
 _NTP_DRIFT_THRESHOLD_SEC = 0.5
 _MIN_POLL_INTERVAL_SEC = 5.0
 _MAX_POLL_INTERVAL_SEC = 60.0
-# exit_for_risk()가 "slippage_exceeded"(FOK 취소, 대기 주문을 남기지 않음)를 반환하면
-# list_wait_orders() 가드는 무력하다 — 다음 tick도 여전히 같은 breach라서 즉시 재시도돼
-# 거래소에 tick 주기(초당 여러 번)로 스팸성 주문을 계속 낸다. 이 쿨다운으로 재시도
-# 간격을 최소 이만큼 벌린다(최종 브랜치 리뷰 Critical 1).
+# exit_for_risk()가 "slippage_exceeded"(FOK 취소, 대기 주문을 남기지 않음)를 반환하거나
+# 그냥 "exited"로 성공해도, 다음 tick에도 가격이 같은 임계치 근방이면 즉시 재시도돼
+# 거래소에 tick 주기(초당 여러 번)로 취소+재주문 스팸을 계속 낸다(5라운드부터 트리거
+# 자체를 막는 가드가 없어 이 쿨다운이 그 재시도 빈도를 제한하는 유일한 장치다). 이
+# 쿨다운으로 재시도 간격을 최소 이만큼 벌린다(최종 브랜치 리뷰 Critical 1).
 _RISK_EXIT_RETRY_COOLDOWN_SEC = 30
 
 
@@ -126,47 +127,36 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
     평가(결정1). 포지션 조회(비신선)/임계치 판정/쿨다운 사전필터는 lock 밖에서 수행한다
     — 매 tick 락을 잡으면 아무 것도 안 걸릴 때조차 _run_strategy_loop의 주문실행 구간과
     불필요하게 경합한다(Important 2). 하지만 "트리거하기로 결정"한 뒤에는(결정4) lock을
-    잡은 안쪽에서 그 결정이 의존하는 상태(전략 status/진행중 청산 주문 여부/포지션)를
-    전부 다시 fresh하게 읽는다 — 락을 기다리는 동안 _run_strategy_loop가 이 전략을
-    paused로 돌리거나(reconciler) 새 매도주문을 낼 수 있어, 밖에서 읽은 스냅샷은 락을
-    얻은 시점엔 이미 stale할 수 있다(재검토 Important 1 — pause 우회/중복주문 우회 둘 다
-    실제로 재현됨. 예전엔 status 재조회와 list_wait_orders 조회를 락 밖에서 했었다).
-    가드는 다음 둘을 lock 안에서 통과해야만 exit_for_risk()를 호출한다: ① fresh_strategy
-    의 status가 "running"이 아니면 건너뛴다 — paused는 데몬이 자신의 포지션 기록을
-    신뢰할 수 없다고 판단한 상태라 그 위에서 실주문 청산을 내는 게 더 위험하다(Important
-    3, 사용자 결정). ② list_wait_orders() 중 side=="ask"이고 order_timeout_sec+60초
-    이내로 최근에 생성된 행이 있으면(이미 진행 중인/곧 자연 해소될 청산 시도) 건너뛴다
-    (reconciler._detect_external_orders가 동일 문제를 동일하게 푼 전례 — is_recent +
-    order_timeout_sec+60 윈도 — 를 그대로 재사용).
+    잡은 안쪽에서 그 결정이 의존하는 상태(전략 status/포지션)를 전부 다시 fresh하게
+    읽는다 — 락을 기다리는 동안 _run_strategy_loop가 이 전략을 paused로 돌릴 수 있어
+    (reconciler), 밖에서 읽은 스냅샷은 락을 얻은 시점엔 이미 stale할 수 있다(재검토
+    Important 1 — pause 우회가 실제로 재현됨. 예전엔 status 재조회를 락 밖에서 했었다).
+    lock 안에서 통과해야만 exit_for_risk()를 호출하는 가드는 이제 하나뿐이다 —
+    fresh_strategy의 status가 "running"이 아니면 건너뛴다. paused는 데몬이 자신의
+    포지션 기록을 신뢰할 수 없다고 판단한 상태라 그 위에서 실주문 청산을 내는 게 더
+    위험하다(Important 3, 사용자 결정).
 
-    4라운드 구조적 수정(exit_for_risk()가 항상 market 모드로 강제되도록 바뀜, 사용자
-    결정 — "슬리피지는 감수하겠습니다")으로 이 가드는 단순화됐다. 이전엔(1~3라운드)
-    order_type=='limit'+upbit_uuid가 실제 값인 행을 나이와 무관하게 항상 막는 별도
-    clause가 있었다 — ticker 청산 자체가 limit 모드일 수 있어, order_execution_mode=
-    'limit'(타임아웃 없음)이 만든 청산 주문이 거래소에 무기한 열려 있을 수 있었기
-    때문이다(3라운드 재검토에서 직접 재현: 동일 breach에 서로 다른 upbit_uuid를 가진 ask
-    주문 2건이 나감). 그 clause를 지금도 남겨두면 위험이 사라지지 않고 자리만 옮긴다 —
-    exit_for_risk()가 만드는 행은 이제 항상 order_type='market'이라 그 clause에 절대
-    안 걸리지만, _run_strategy_loop의 candle 트리거 매도(order_executor.exit(), 여전히
-    전략에 설정된 order_execution_mode를 그대로 쓴다)가 order_execution_mode='limit'인
-    채로 만든 진짜로 안 채워지는 매도 주문에는 여전히 걸린다 — 나이 필터 없이 그 조합을
-    영구히 막으면 candle 경로를 거쳐 "이 ticker 안전망이 영구히 멈추는" 동일한 버그를
-    다른 경로로 재현하게 된다(4라운드 재검토 과제로 조사 — 이 상호작용이 실제 위험이라고
-    판단해 age-immune clause를 제거했다). 이제 order_type과 무관하게 ②-1(나이 필터)
-    하나만 적용한다 — order_timeout_sec+60초가 지나면 candle의 limit 매도가 아직도
-    거래소에 열려 있어도 가드는 풀린다. 이 상태에서 exit_for_risk()가 강제로 market
-    매도를 시도하면, candle 주문이 이미 그 물량을 거래소에 잠가둔 상태라면 Upbit가 잔고
-    부족으로 주문 자체를 거부한다(그 실패는 그대로 예외로 로그만 남고 다음 tick에 쿨다운
-    후 재시도된다 — 진짜 중복 체결이 나는 게 아니다) — 반대로 candle 주문이 그 사이
-    취소/체결됐다면 이 market 매도가 정상적으로 안전망 역할을 한다. 즉 나이 필터를 넘긴
-    뒤에는 "거래소 잔고 잠금"이 사실상의 2차 방어선이 되고, 우리 코드는 무기한 차단
-    대신 유한 시간 뒤 재시도 쪽을 택한다 — 이 브랜치의 반복된 실패 패턴(가드를 조이면
-    영구정지, 풀면 중복주문)에서 "영구 정지"가 훨씬 더 나쁘다는 사용자 결정과 일치한다.
-    쿨다운(_RISK_EXIT_RETRY_COOLDOWN_SEC)은
-    exit_for_risk()가 slippage_exceeded로 끝나 대기 주문을 남기지 않는 경우(가드②가
-    무력한 경우) 매 tick 재시도로 같은 breach에 실주문이 반복 발사되는 걸 막는다(최종
-    브랜치 리뷰 Critical 1) — 순수 로컬 태스크 상태(공유되지 않음)라 lock 밖에서
-    사전필터로 먼저 걸러도 stale-state 문제가 없다. exit_for_risk()가 실제로
+    5라운드 구조적 수정 — 이전엔(1~4라운드) 여기 두 번째 가드로 list_wait_orders() 중
+    side=="ask"이고 order_timeout_sec+60초 이내로 최근에 생성된 행이 있으면 트리거
+    자체를 건너뛰었다(reconciler._detect_external_orders와 동일한 is_recent + 나이창
+    패턴 재사용). 그런데 그 나이창이 지나도 candle 트리거가 남긴 진짜 미체결
+    order_execution_mode='limit' 매도가 거래소에 여전히 열려있을 수 있어, 그 상태에서
+    exit_for_risk()가 강제로 market 매도를 내면 두 주문이 같은 코인 잔고를 두고
+    충돌한다 — 지금까지는 "Upbit가 잔고 부족으로 뒤의 주문을 거부할 것"이라는 검증되지
+    않은 가정에 기대 왔다(사용자가 지적한 잔여 위험, 4라운드 문서가 "2차 방어선"이라
+    불렀던 부분). 이 라운드부터 exit_for_risk() 자신이 exit() 호출 전에 남아있는 ask
+    wait 행을 upbit_client.cancel_order()로 먼저 정리해 그 충돌 가능성을 구조적으로
+    없앤다(order_executor.py의 exit_for_risk() docstring 5라운드 문단 참고) — 그래서
+    이 루프 쪽의 나이 필터 가드는 더 이상 정합성을 위해 필요하지 않다. 트리거하기로
+    결정했으면 그냥 exit_for_risk()를 부르고, 충돌 정리는 그 함수에 맡긴다 — 최악의
+    경우도 "취소 + 재주문 한 사이클"일 뿐 중복/충돌 주문이 아니다. 이 가드를 지우고도
+    쿨다운(_RISK_EXIT_RETRY_COOLDOWN_SEC)은 그대로 남긴다 — 이건 정합성 가드가 아니라
+    처리량 제어다. 손절/익절 임계치 바로 위에서 가격이 tick마다(초당 여러 번) 오르내리면
+    쿨다운 없이는 매 tick 취소+재주문이 나가 수수료/슬리피지가 무의미하게 반복
+    소모된다(exit_for_risk()가 slippage_exceeded로 끝나 대기 주문을 남기지 않는 경우엔
+    특히 이 반복이 막을 길이 없었다 — 최종 브랜치 리뷰 Critical 1) — 순수 로컬 태스크
+    상태(공유되지 않음)라 lock 밖에서 사전필터로 먼저 걸러도 stale-state 문제가 없다.
+    exit_for_risk()가 실제로
     성공(action=="exited")하면 쿨다운을 다시 -inf로 리셋한다 — 그러지 않으면 포지션을
     완전히 닫은 뒤 곧바로 재진입한 새 포지션의 정당한 손절/익절까지 남은 쿨다운 창
     안에서 억눌린다(번들 수정). "트리거하기로 결정"한 시점의 position_return_pct/
@@ -234,18 +224,19 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                     if fresh_strategy["status"] != "running":
                         continue
                     risk_config = json.loads(fresh_strategy["risk_config_json"])
-                    # 가드 ② — 진행 중인/곧 자연 해소될 청산 시도(side=='ask' + 최근 wait
-                    # 주문)가 있으면 건너뛴다. 4라운드부터 나이 필터(②-1) 하나만 적용한다
-                    # — order_type=='limit'+upbit_uuid를 나이와 무관하게 영구히 막던
-                    # 옛 clause(②-2)는 exit_for_risk()가 항상 market을 강제하는 지금은
-                    # candle 경로의 진짜로 안 채워지는 limit 매도에만 걸려 이 안전망을
-                    # 영구정지시킬 수 있어 제거했다(위 함수 docstring 4라운드 문단 참고).
-                    in_flight_window_sec = float(risk_config.get("order_timeout_sec", 10)) + 60
-                    if any(
-                        o["side"] == "ask" and reconciler.is_recent(o["created_at"], in_flight_window_sec)
-                        for o in db.list_wait_orders(strategy_id)
-                    ):
-                        continue
+                    # 5라운드 — 진행 중인 청산 주문(side=='ask' wait 행) 유무로 트리거
+                    # 자체를 건너뛰던 옛 가드 ②(list_wait_orders + is_recent 나이 필터)를
+                    # 제거했다. exit_for_risk()가 이제 그 우려를 스스로 해소한다 —
+                    # exit() 호출 전에 자기 손으로 남아있는 ask wait 행을 거래소에서
+                    # cancel_order()로 먼저 지운다(order_executor.py docstring 5라운드
+                    # 문단 참고). 즉 "먼저 확인하고 막을지 말지 판단"이 아니라 "일단
+                    # 트리거하고, 부르는 쪽(exit_for_risk)이 충돌을 능동적으로 치운다"로
+                    # 책임이 옮겨갔다 — 이 루프가 다시 list_wait_orders를 조회해 막는 건
+                    # 이제 이중 방어가 아니라 그냥 불필요한 조회다(가장 나쁜 경우도 취소
+                    # +재주문 한 사이클일 뿐 중복/충돌 주문이 아니다). 쿨다운은 그대로
+                    # 남긴다 — 손절/익절 임계치 바로 위에서 가격이 tick마다 오르내리면
+                    # 매 tick 취소+재주문이 나가 수수료/슬리피지가 반복 소모되므로, 그
+                    # 무의미한 재시도 spam을 막는 역할은 여전히 필요하다.
                     fresh_position = position_manager.get_open_position(strategy_id)
                     if fresh_position is None:
                         continue
@@ -269,7 +260,7 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                     # 시도 직전에 갱신한다 — exit_for_risk()가 예외를 던지거나
                     # slippage_exceeded로 끝나도 다음 tick에 즉시 재시도하지 않고 쿨다운
                     # 상한을 지키게 하기 위함이다(_run_strategy_loop의 last_reconcile과
-                    # 동일 패턴). 가드 ①·②에 막혀 실제 시도조차 못 한 tick은 쿨다운을
+                    # 동일 패턴). 가드 ①에 막혀 실제 시도조차 못 한 tick은 쿨다운을
                     # 소모하지 않는다 — 상태가 정상으로 돌아오자마자 곧바로 재시도할 수
                     # 있어야 한다.
                     last_risk_exit_attempt = now

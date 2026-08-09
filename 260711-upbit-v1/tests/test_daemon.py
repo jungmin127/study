@@ -822,15 +822,13 @@ async def test_run_risk_exit_loop_logs_and_continues_on_exception(monkeypatch, t
     assert processed["n"] == 2  # 첫 tick 실패 후에도 두 번째 tick을 계속 처리
 
 
-async def test_run_risk_exit_loop_stops_retrying_once_wait_order_exists(monkeypatch, tmp_path):
-    """C1 가드 ① — exit_for_risk()가 "pending"(리밋 주문이 아직 열려있음)을 반환하면
-    포지션은 여전히 breach 상태로 남아 다음 tick도 그대로 같은 트리거 조건을 만족한다.
-    list_wait_orders()로 진행 중인 청산 시도를 감지해 두 번째 이후 tick은 실주문을
-    내지 않고 건너뛰어야 한다. 쿨다운 가드가 개입해 이 테스트를 오염시키지 않도록
-    time.monotonic()을 매 호출 충분히 벌려 쿨다운은 항상 통과시킨다 — 이 테스트는
-    순수하게 list_wait_orders 가드만 검증한다. fake_list_wait_orders가 반환하는 행은
-    재검토 Important 2 가드(side=='ask' + is_recent)를 통과해야 하므로 side와 최근
-    created_at을 명시한다."""
+async def test_run_risk_exit_loop_keeps_triggering_despite_old_wait_order(monkeypatch, tmp_path):
+    """5라운드 — 예전엔(1~4라운드) list_wait_orders()가 최근 ask wait 행을 발견하면
+    트리거 자체를 건너뛰었다. exit_for_risk()가 이제 그 충돌을 스스로 해소하므로(cancel
+    후 재주문), 이 루프는 더 이상 wait 행의 존재만으로 트리거를 건너뛰면 안 된다 —
+    쿨다운만 통과하면 매 tick 그대로 exit_for_risk()를 호출해야 한다. fake_list_wait_orders
+    가 매번 (옛 가드라면 걸렸을) 최근 ask wait 행을 반환해도 exit_calls가 tick 수만큼
+    쌓여야 한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
         dbm, status="running", market="KRW-BTC",
@@ -841,16 +839,13 @@ async def test_run_risk_exit_loop_stops_retrying_once_wait_order_exists(monkeypa
     position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
     exit_calls = {"n": 0}
     clock = {"value": 0.0}
-    # 쿨다운 가드가 개입해 이 테스트를 오염시키지 않도록 daemon.time.monotonic()을
-    # 매 tick 전에 넉넉히 앞당긴다 — 이 테스트는 순수하게 list_wait_orders 가드만
-    # 검증한다. iter([...]) 같은 "소비하면 고갈되는" 값은 쓰지 않는다 — daemon.time은
-    # 프로세스 전역 time 모듈과 동일 객체라서, 이 이벤트 루프 자신의 내부 스케줄링도
-    # 같은 함수를 거치므로 고정 개수 iterator는 daemon 코드가 부르기도 전에 고갈된다
-    # (직접 재현됨).
+    # 쿨다운이 개입해 이 테스트를 오염시키지 않도록 daemon.time.monotonic()을 매 tick
+    # 전에 넉넉히(쿨다운보다 길게) 앞당긴다 — 이 테스트가 검증하려는 건 순수하게
+    # "wait 행 존재가 더 이상 트리거를 막지 않는다"는 것뿐이다.
     monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["value"])
 
     async def fake_stream_ticker(markets):
-        for _ in range(5):
+        for _ in range(3):
             clock["value"] += 100.0
             yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
 
@@ -859,10 +854,7 @@ async def test_run_risk_exit_loop_stops_retrying_once_wait_order_exists(monkeypa
         return {"action": "pending", "order_id": "o1"}
 
     def fake_list_wait_orders(live_strategy_id, order_type=None):
-        # 첫 시도 전에는 대기 주문이 없다가, 그 이후엔 pending 리밋 주문이 계속
-        # 남아있는 것처럼 흉내낸다. side='ask' + 최근 created_at이어야 가드에 걸린다.
-        if exit_calls["n"] == 0:
-            return []
+        # 옛 가드였다면 이 행이 매 tick 트리거를 막았을 것이다(side='ask' + 방금 생성됨).
         created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         return [{"id": "o1", "status": "wait", "side": "ask", "created_at": created_at}]
 
@@ -872,7 +864,7 @@ async def test_run_risk_exit_loop_stops_retrying_once_wait_order_exists(monkeypa
 
     await daemon._run_risk_exit_loop(strategy_id)
 
-    assert exit_calls["n"] == 1
+    assert exit_calls["n"] == 3
 
 
 async def test_run_risk_exit_loop_cooldown_blocks_retry_after_slippage_exceeded(monkeypatch, tmp_path):
@@ -1072,14 +1064,18 @@ async def test_run_risk_exit_loop_closes_pause_bypass_that_happens_during_lock_w
     assert exit_calls["n"] == 0
 
 
-async def test_run_risk_exit_loop_closes_duplicate_order_bypass_that_happens_during_lock_wait(
+async def test_run_risk_exit_loop_still_triggers_when_signal_order_appears_during_lock_wait(
     monkeypatch, tmp_path,
 ):
-    """재검토 Important 1, 재현된 버그 2 — 예전엔 list_wait_orders() 조회도 lock 밖에서
-    했기 때문에, _run_risk_exit_loop가 lock을 기다리는 동안 _run_strategy_loop가 신호
-    기반 매도주문을 내도(이제 막 status='wait' side='ask' 행이 생겼어도) 이미 읽어둔
-    (비어있던) 스냅샷으로 가드①을 통과해 중복 청산 주문을 냈다. 이 테스트는 실제
-    asyncio.Lock 경합 + 실제 db.insert_order()로 그 시나리오를 재현한다."""
+    """5라운드 — 1~4라운드에선 이 시나리오(락 대기 중 _run_strategy_loop가 신호 기반
+    매도주문을 냄)가 재현된 버그(재검토 Important 1, 버그 2)였다: 예전에 list_wait_orders
+    조회를 lock 밖에서 했을 때는 stale(비어있던) 스냅샷으로 가드를 통과해 중복 청산
+    주문을 냈고, 그 버그를 고친 뒤엔(락 안에서 재조회) 정당하게 가드가 걸려 트리거를
+    건너뛰는 것이 "고쳐진" 동작이었다. 이제 그 가드 자체가 없다 — exit_for_risk()가
+    충돌을 스스로 해소하므로, 락 대기 중 생긴 신호 기반 ask wait 행은 더 이상 트리거를
+    막을 이유가 아니다. 이 테스트는 실제 asyncio.Lock 경합 + 실제 db.insert_order()로
+    그 시나리오를 재현하되, exit_for_risk()가 정상적으로 호출되는지(더 이상 건너뛰지
+    않는지) 확인한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
         dbm, status="running", market="KRW-BTC",
@@ -1116,7 +1112,7 @@ async def test_run_risk_exit_loop_closes_duplicate_order_bypass_that_happens_dur
 
     await loop_task
 
-    assert exit_calls["n"] == 0
+    assert exit_calls["n"] == 1
 
 
 async def test_run_risk_exit_loop_cooldown_resets_after_successful_exit(monkeypatch, tmp_path):
@@ -1160,24 +1156,20 @@ async def test_run_risk_exit_loop_cooldown_resets_after_successful_exit(monkeypa
     assert exit_calls["n"] == 2  # 리셋이 없었다면 1에서 멈췄어야 한다
 
 
-async def test_run_risk_exit_loop_in_flight_guard_recognizes_real_order_executor_wait_row(
+async def test_run_risk_exit_loop_real_order_executor_retries_every_tick_and_cancels_stale_row(
     monkeypatch, tmp_path,
 ):
-    """재검토 요구사항 — 기존 가드 테스트들은 exit_for_risk()와 db.list_wait_orders() 둘
-    다 mock해서, 진짜 order_executor.exit_for_risk() 호출이 실제로 status='wait' 행을 써서
-    가드가 그걸 인식하는지 아무 것도 증명하지 못한다. 여기서는 upbit_client.create_order/
-    get_order만 monkeypatch하고 나머지는 전부 진짜 경로(exit_for_risk -> exit ->
-    _run_market -> db.insert_order/update_order_filled)를 태운다.
-    upbit_client.create_order가 전체 tick에서 정확히 1번만 불려야 한다.
-
-    strategy는 일부러 order_execution_mode='limit'으로 설정한다 — exit_for_risk()가
-    이를 무시하고 market을 강제하는지(4라운드 구조적 수정)도 이 테스트가 같이 증명한다
-    (fake_create_order의 ord_type 단언). 가드②는 이제 나이 필터(is_recent) 하나뿐이라
-    order_type을 보지 않으므로, 만들어진 wait 행의 order_type이 'limit'이 아니라
-    'market'이어도(강제됐으니 실제로 그렇다) 여전히 다음 tick들을 막아야 한다 — daemon.
-    time.monotonic()을 크게 앞당겨도(쿨다운은 통과) is_recent()는 실제 벽시계(created_at)
-    를 보므로 세 tick이 실제 시간으로 밀리초 안에 흘러가는 이 테스트에서는 항상 "최근"
-    으로 판정된다."""
+    """5라운드 — 예전엔(1~4라운드) 이 실통합 테스트가 "가드②가 진짜 status='wait' 행을
+    인식해 두 번째 이후 tick을 막는다"를 증명했다(upbit_client.create_order/get_order만
+    mock하고 나머지는 exit_for_risk -> exit -> _run_market -> db.insert_order/
+    update_order_filled까지 전부 진짜 경로). 그 가드가 사라졌으니 이제 반대를
+    증명해야 한다 — 매 tick 쿨다운만 통과하면 진짜 order_executor.exit_for_risk()가
+    다시 호출되고(create_order가 tick 수만큼 불림), 직전 tick이 남긴 wait 행은
+    exit_for_risk() 자신의 5라운드 사전 취소 단계가 진짜 db.list_wait_orders()로
+    찾아내 upbit_client.cancel_order()를 부른다(1라운드 exit_for_risk() 자신의 로직도
+    mock하지 않은 진짜 경로다). tick1: 아직 남은 행이 없어 취소 0회. tick2: tick1이
+    남긴 행 1개를 취소. tick3: tick1+tick2가 남긴 행 2개를 취소(이 함수는 취소 후
+    DB 행 status를 바꾸지 않으므로 매 tick 정리 대상이 누적된다) — 합계 0+1+2=3회."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
         dbm, status="running", market="KRW-BTC",
@@ -1188,9 +1180,9 @@ async def test_run_risk_exit_loop_in_flight_guard_recognizes_real_order_executor
     )
     position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
     create_order_calls = {"n": 0}
+    cancel_calls = {"n": 0}
     clock = {"value": 0.0}
-    # 쿨다운 가드가 이 테스트를 오염시키지 않도록 매 tick 전에 넉넉히 앞당긴다 — 이
-    # 테스트는 순수하게 in-flight(wait 주문) 가드만 검증한다.
+    # 쿨다운이 개입해 이 테스트를 오염시키지 않도록 매 tick 전에 넉넉히 앞당긴다.
     monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["value"])
 
     async def fake_stream_ticker(markets):
@@ -1208,142 +1200,24 @@ async def test_run_risk_exit_loop_in_flight_guard_recognizes_real_order_executor
         return {"state": "wait", "executed_volume": "0", "remaining_volume": "0.01",
                 "paid_fee": "0", "trades": []}
 
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        cancel_calls["n"] += 1
+        return {"uuid": uuid, "state": "cancel"}
+
     async def fake_sleep_in_order_executor(seconds):
         pass  # _run_market의 3초 정산 폴링을 실제로 기다리지 않는다.
 
     monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
     monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
     monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
     monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep_in_order_executor)
     monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
 
     await daemon._run_risk_exit_loop(strategy_id)
 
-    assert create_order_calls["n"] == 1
-
-
-@pytest.mark.parametrize("side,age_sec,should_fire", [
-    ("ask", 1, False),      # 최근 ask -> 막는다 (기존 커버리지, 회귀 확인용으로 재확인)
-    ("ask", 5000, True),    # 오래된 ask -> 발사한다 (신규)
-    ("bid", 1, True),       # 최근 bid -> 발사한다 (신규 — 가드는 side=='ask'만 본다)
-    ("ask", 65, False),     # order_timeout_sec=10 기준 나이창(70초) 안쪽 경계 -> 막는다 (신규)
-    ("ask", 75, True),      # 나이창 바깥 -> 발사한다 (신규)
-])
-async def test_run_risk_exit_loop_in_flight_guard_age_side_filter(
-    monkeypatch, tmp_path, side, age_sec, should_fire,
-):
-    """3라운드 M1 — 기존 커버리지(test_run_risk_exit_loop_stops_retrying_once_wait_order_exists
-    등)는 가드가 '최근 ask 행을 인식해 막는다'(positive case)만 증명했다. 나이/side 필터가
-    반대 방향(막으면 안 되는 경우들)도 올바르게 통과시키는지 실제 DB 행 + is_recent 실제
-    계산으로 검증한다. 4라운드부터 가드②는 이 나이/side 필터가 전부다(order_type=='limit'
-    +upbit_uuid를 나이와 무관하게 막던 옛 clause는 제거됨 — 별도
-    test_run_risk_exit_loop_in_flight_guard_ages_out_even_for_limit_uuid에서 검증).
-    wait 행은 order_type='market'으로 만들어 순수하게 나이/side 필터만 노출한다.
-    created_at 백데이팅은 test_reconciler.py의
-    test_detect_external_orders_ignores_stale_in_flight_order와 동일하게 직접
-    UPDATE orders SET created_at = ... 로 한다."""
-    dbm = _fresh_db(monkeypatch, tmp_path)
-    strategy_id = insert_live_strategy(
-        dbm, status="running", market="KRW-BTC",
-        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
-            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
-        ]}),
-        risk_config_json=json.dumps({"order_execution_mode": "market", "order_timeout_sec": 10}),
-    )
-    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
-
-    order_id = dbm.insert_order(strategy_id, None, "KRW-BTC", side, "market", None, 0.01, 47_000_000.0)
-    dbm.update_order_filled(order_id, "existing-uuid", None, None, None, None, "wait")
-    conn = dbm._connect()
-    try:
-        conn.execute(
-            "UPDATE orders SET created_at = datetime('now', ?) WHERE id = ?",
-            (f"-{age_sec} seconds", order_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    exit_calls = {"n": 0}
-
-    async def fake_stream_ticker(markets):
-        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}  # -6%, 손절선 뚫림
-
-    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
-        exit_calls["n"] += 1
-        return {"action": "exited", "order_id": "o1"}
-
-    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
-    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
-    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
-
-    await daemon._run_risk_exit_loop(strategy_id)
-
-    assert (exit_calls["n"] == 1) == should_fire
-
-
-@pytest.mark.parametrize("order_type,upbit_uuid", [
-    ("limit", "existing-uuid"),  # candle 경로의, 정말로 거래소에 아직 열려 있을 수 있는 매도
-    ("market", "existing-uuid"),
-    ("limit", None),
-])
-async def test_run_risk_exit_loop_in_flight_guard_ages_out_even_for_limit_uuid(
-    monkeypatch, tmp_path, order_type, upbit_uuid,
-):
-    """4라운드 구조적 수정 — 1~3라운드는 order_type=='limit'+upbit_uuid가 실제 값인 ask
-    wait 행을 나이와 무관하게 영구히 막는 clause를 뒀다(당시엔 ticker 청산 자체가 limit
-    모드일 수 있어 정당했다). exit_for_risk()가 이제 항상 market을 강제하므로 그 clause는
-    더 이상 ticker 자신의 주문을 보호하지 않는다 — 대신 candle 트리거 매도
-    (order_executor.exit(), 여전히 전략에 설정된 order_execution_mode를 그대로 쓴다)가
-    order_execution_mode='limit'인 채로 만든, 진짜로 영원히 안 채워질 수도 있는 매도
-    주문에 계속 걸려서 이 ticker 안전망을 영구히 멈추는 동일한 버그를 candle 경로를 통해
-    재현할 위험이 있었다(4라운드 재검토 과제 — 이 상호작용을 조사해 age-immune clause를
-    제거하기로 결정). 그래서 order_type/upbit_uuid와 무관하게 나이 필터(order_timeout_sec
-    +60초, 여기선 5000초 경과)만 적용된다 — 세 조합 모두 나이창을 넘겼으니 반드시
-    발사돼야 한다(더 이상 order_type=='limit'+uuid 조합이라고 예외를 두지 않는다).
-    나이창을 넘긴 뒤 실제로 거래소에 아직 열려 있는 candle 주문과 물량이 겹치면, 강제된
-    market 매도는 Upbit의 잔고 잠금 때문에 거부되고 다음 tick에 쿨다운 후 재시도된다 —
-    이 가드는 그 실패까지 막을 필요가 없다(무기한 차단보다 유한 시간 뒤 재시도가 이
-    브랜치의 사용자 결정과 일치)."""
-    dbm = _fresh_db(monkeypatch, tmp_path)
-    strategy_id = insert_live_strategy(
-        dbm, status="running", market="KRW-BTC",
-        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
-            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
-        ]}),
-        risk_config_json=json.dumps({"order_execution_mode": "limit", "order_timeout_sec": 10}),
-    )
-    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
-
-    order_id = dbm.insert_order(strategy_id, None, "KRW-BTC", "ask", order_type, None, 0.01, 47_000_000.0)
-    if upbit_uuid is not None:
-        dbm.update_order_filled(order_id, upbit_uuid, None, None, None, None, "wait")
-    conn = dbm._connect()
-    try:
-        conn.execute(
-            "UPDATE orders SET created_at = datetime('now', '-5000 seconds') WHERE id = ?",
-            (order_id,),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    exit_calls = {"n": 0}
-
-    async def fake_stream_ticker(markets):
-        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}  # -6%, 손절선 뚫림
-
-    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
-        exit_calls["n"] += 1
-        return {"action": "exited", "order_id": "o1"}
-
-    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
-    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
-    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
-
-    await daemon._run_risk_exit_loop(strategy_id)
-
-    assert exit_calls["n"] == 1
+    assert create_order_calls["n"] == 3  # 옛 가드였다면 1에서 멈췄어야 한다
+    assert cancel_calls["n"] == 3  # 0(tick1) + 1(tick2) + 2(tick3)
 
 
 async def test_task_set_manager_creates_risk_exit_task_for_new_strategy(monkeypatch, tmp_path):

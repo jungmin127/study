@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 
 import httpx
@@ -19,6 +20,8 @@ import trading.db as db
 import trading.position_manager as position_manager
 import trading.risk_manager as risk_manager
 import trading.upbit_client as upbit_client
+
+logger = logging.getLogger(__name__)
 
 # 업비트 원화마켓 주문가격단위(2026-08 기준, docs.upbit.com/kr/docs/krw-market-info).
 # orders/chance 응답의 price_unit은 deprecated라 쓰지 않는다(설계 스펙 결정1) — 업비트가
@@ -452,7 +455,45 @@ async def exit_for_risk(
     조이면 정당한 재시도가 막히고, 풀면 중복 실주문이 나갔다). market 주문은
     _await_settlement()의 폴링 타임아웃(수 초) 안에 반드시 체결/실패로 확정되므로, 이
     함수만은 그 불확실성 자체를 구조적으로 제거한다 — 대신 슬리피지를 감수한다. 호출자의
-    strategy dict는 변형하지 않는다(shallow copy 위에서 risk_config_json만 재작성)."""
+    strategy dict는 변형하지 않는다(shallow copy 위에서 risk_config_json만 재작성).
+
+    5라운드 추가 — daemon.py의 _run_risk_exit_loop는 이전엔 order_timeout_sec+60초
+    나이 필터(list_wait_orders + is_recent)로 "아직 진행 중일 수도 있는 청산 주문"이
+    있으면 트리거 자체를 건너뛰었다. 그 나이창이 지나면 이 함수가 강제로 market 매도를
+    내는데, candle 트리거가 남긴 진짜 미체결 매도(order_execution_mode='limit', 타임아웃
+    없음)가 그 시점까지도 거래소에 열려 있으면 두 주문이 같은 코인 잔고를 두고 충돌한다.
+    지금까지는 "Upbit가 잔고 부족으로 뒤의 주문을 거부할 것"이라는 검증되지 않은 가정에
+    기대 왔다(사용자가 지적한 잔여 위험). 이 라운드부터는 그 가정에 기대지 않고, exit()
+    호출 전에 이 함수가 직접 그 충돌 가능성을 없앤다: db.list_wait_orders()로 이 전략의
+    미체결 주문을 조회해 side=='ask'인 행만 골라(매수 wait 행은 원화를 묶어둘 뿐 지금
+    팔려는 코인 잔고와 무관하므로 건드리지 않는다) upbit_uuid가 있는 행마다
+    upbit_client.cancel_order()를 호출해 거래소에서 먼저 취소한다(upbit_uuid가 None인
+    행은 거래소에 아무 것도 걸려있지 않은 내부 부기용 고아 행이라 취소할 대상이 없다 —
+    건너뛴다). 취소 하나하나를 독립된 try/except로 감싼다 — 우리가 DB를 읽은 시점과
+    실제 취소 사이에 그 주문이 이미 체결되거나 취소돼 있으면 Upbit가 취소 요청 자체를
+    거부하는데(_run_limit_timeout이 동일 경쟁조건을 이미 겪은 전례 — httpx.HTTPStatusError
+    로 나타난다), 그건 "취소할 필요가 이미 없어졌다"는 뜻이지 실패가 아니므로 로그만
+    남기고 다음 대상으로(또는 곧바로 exit() 호출로) 넘어간다 — 이 사전 정리 단계의
+    실패가 뒤따르는 실제 청산 시도를 절대 막으면 안 된다. dry_run 모드에서는 이 사전
+    취소 자체를 건너뛴다 — dry_run은 실거래소에 어떤 부수효과도 내지 않아야 하는데,
+    list_wait_orders()가 (과거 실거래에서 남은) 진짜 대기 행을 찾아내면 cancel_order()가
+    실제 DELETE 요청을 내보내 그 계약을 깬다."""
+    if not dry_run:
+        for stale in db.list_wait_orders(strategy["id"]):
+            if stale["side"] != "ask" or stale["upbit_uuid"] is None:
+                continue
+            try:
+                await upbit_client.cancel_order(uuid=stale["upbit_uuid"], client=client)
+            except (
+                httpx.HTTPStatusError, httpx.TransportError, httpx.TimeoutException,
+                upbit_client.UpbitRateLimitError,
+            ) as exc:
+                logger.warning(
+                    "청산 전 잔여 매도 주문 취소 실패(이미 체결/취소됐을 수 있음, 무시하고 "
+                    "계속): order_id=%s upbit_uuid=%s error=%s",
+                    stale["id"], stale["upbit_uuid"], exc,
+                )
+
     forced_risk_config = json.loads(strategy["risk_config_json"])
     forced_risk_config["order_execution_mode"] = "market"
     # market 모드는 max_slippage_pct 등 다른 risk_config 필드를 요구하지 않는다

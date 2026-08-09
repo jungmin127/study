@@ -1304,3 +1304,157 @@ async def test_exit_for_risk_always_uses_market_regardless_of_configured_mode(
     assert captured["ord_type"] == "market"
     assert captured["time_in_force"] is None  # market_capped였다면 "fok"가 찍혔을 값
     assert result["action"] == "exited"
+
+
+async def test_exit_for_risk_cancels_stale_ask_wait_order_before_placing_market_exit(monkeypatch, tmp_path):
+    """5라운드 핵심 수정 — exit_for_risk()는 market 청산 주문을 내기 전에, 같은 전략의
+    남아있는 ask wait 행(실제 upbit_uuid가 있는)을 먼저 취소해야 한다. 순서 자체가
+    중요하므로(취소가 먼저, 시장가 주문이 나중) 두 fake가 공유하는 call_order 리스트로
+    호출 순서를 직접 검증한다 — 둘 다 호출됐다는 것만으로는 부족하다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    stale_order_id = dbm.insert_order(
+        strategy["id"], None, "KRW-BTC", "ask", "limit", 51_000_000.0, 0.01, 51_000_000.0,
+    )
+    dbm.update_order_filled(stale_order_id, "stale-ask-uuid", None, None, None, None, "wait")
+
+    call_order = []
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        call_order.append(("cancel", uuid))
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        call_order.append(("create", ord_type))
+        return {"uuid": "uuid-exit", "state": "done", "executed_volume": "0.01",
+                "remaining_volume": "0", "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert call_order == [("cancel", "stale-ask-uuid"), ("create", "market")]
+    assert result["action"] == "exited"
+
+
+async def test_exit_for_risk_skips_cancel_for_wait_order_without_upbit_uuid(monkeypatch, tmp_path):
+    """upbit_uuid가 None인 wait 행은 거래소에 아무 것도 걸려있지 않은 내부 부기용 고아
+    행이다 — 취소할 대상이 없으므로 cancel_order를 호출하지 않고 건너뛰어야 하고,
+    청산 자체는 정상적으로 진행돼야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    # upbit_uuid를 채우지 않은 채 그대로 둔다 — insert_order() 직후 상태와 동일(status='wait',
+    # upbit_uuid=NULL).
+    dbm.insert_order(strategy["id"], None, "KRW-BTC", "ask", "limit", 51_000_000.0, 0.01, 51_000_000.0)
+
+    cancel_calls = {"n": 0}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        cancel_calls["n"] += 1
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-exit", "state": "done", "executed_volume": "0.01",
+                "remaining_volume": "0", "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert cancel_calls["n"] == 0
+    assert result["action"] == "exited"
+
+
+async def test_exit_for_risk_proceeds_when_stale_cancel_fails(monkeypatch, tmp_path):
+    """취소 시점엔 이미 그 주문이 체결/취소돼 있을 수 있다 — Upbit는 이럴 때 취소
+    요청 자체를 거부한다(httpx.HTTPStatusError로 나타남, _run_limit_timeout이 이미
+    겪은 것과 동일한 경쟁조건). 이 실패가 뒤따르는 실제 청산 시도를 막으면 안 된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    stale_order_id = dbm.insert_order(
+        strategy["id"], None, "KRW-BTC", "ask", "limit", 51_000_000.0, 0.01, 51_000_000.0,
+    )
+    dbm.update_order_filled(stale_order_id, "already-resolved-uuid", None, None, None, None, "wait")
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        request = httpx.Request("DELETE", "https://api.upbit.com/v1/order")
+        response = httpx.Response(400, request=request, json={"error": {"message": "order not found"}})
+        raise httpx.HTTPStatusError("order not found", request=request, response=response)
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-exit", "state": "done", "executed_volume": "0.01",
+                "remaining_volume": "0", "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert result["action"] == "exited"
+
+
+async def test_exit_for_risk_does_not_cancel_bid_side_wait_orders(monkeypatch, tmp_path):
+    """매수(bid) wait 행은 원화를 묶어둘 뿐 지금 팔려는 코인 잔고와 무관하다 — 청산 전
+    사전 취소 대상이 아니다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    bid_order_id = dbm.insert_order(
+        strategy["id"], None, "KRW-BTC", "bid", "limit", 49_000_000.0, 0.01, 49_000_000.0,
+    )
+    dbm.update_order_filled(bid_order_id, "bid-uuid", None, None, None, None, "wait")
+
+    cancel_calls = {"n": 0}
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        cancel_calls["n"] += 1
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-exit", "state": "done", "executed_volume": "0.01",
+                "remaining_volume": "0", "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert cancel_calls["n"] == 0
+    assert result["action"] == "exited"
