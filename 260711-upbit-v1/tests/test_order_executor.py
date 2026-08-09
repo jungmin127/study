@@ -2133,3 +2133,39 @@ async def test_exit_does_not_mark_order_failed_when_settlement_poll_raises_netwo
     assert len(orders) == 1  # 여전히 status='wait'로 남아있다 — terminal 마킹되지 않았다
     assert orders[0]["status"] == "wait"
     assert orders[0]["upbit_uuid"] is None  # settlement가 끝나기 전이라 아직 기록 전이다
+
+
+async def test_handle_signal_result_accumulates_partial_fill_when_sell_market_order_is_cancelled(
+    monkeypatch, tmp_path,
+):
+    """최종 브랜치 리뷰 발견 — handle_signal_result()의 매도 경로도
+    exit_for_risk()와 동일하게, candle 경로의 매도 시장가가 부분체결 후 cancel로
+    확정되면 그 체결분을 db.accumulate_stale_resolution()으로 영구 기록해야 한다.
+    그렇지 않으면 이미 판 이 수량을 다음 tick의 exit_for_risk()가 다시 팔려 하거나(과다매도),
+    최종 close_position()의 원가 계산에서 이 체결분이 누락돼 PnL이 왜곡된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-sell-partial-cancel", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "cancel", "executed_volume": "0.003", "remaining_volume": "0.007",
+                "paid_fee": "15.0", "trades": [{"funds": "150000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.handle_signal_result(
+        strategy["id"], _signal_result(sell_signal=True),
+    )
+
+    assert result["sell_action"] == "slippage_exceeded"
+    position_row = dbm.get_position(position["id"])
+    assert position_row["stale_resolved_qty"] == pytest.approx(0.003)
+    assert position_row["stale_resolved_proceeds"] == pytest.approx(150_000.0)
+    assert position_row["stale_resolved_fee"] == pytest.approx(15.0)
+    assert position_manager.get_open_position(strategy["id"]) is not None  # 포지션은 아직 열려 있다

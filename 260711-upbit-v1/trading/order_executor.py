@@ -816,6 +816,11 @@ async def handle_signal_result(
                 result["sell_action"] = "exited"
                 risk_manager.record_trade_result(strategy_id, order["realized_pnl"], order["capital_after"])
             elif order["status"] == "cancel":
+                if order["filled_volume"]:
+                    db.accumulate_stale_resolution(
+                        position["id"], order["filled_volume"],
+                        order["filled_price"] * order["filled_volume"], order["fee"] or 0.0,
+                    )
                 db.update_signal_result(signal_result["sell_signal_id"], order["id"], "slippage_exceeded")
                 result["sell_action"] = "slippage_exceeded"
             else:
