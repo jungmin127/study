@@ -1169,6 +1169,32 @@ async def test_exit_records_custom_close_reason(monkeypatch, tmp_path):
     assert dbm.get_position(position["id"])["close_reason"] == "stop_loss_pct"
 
 
+async def test_exit_blends_pre_resolved_amounts_into_realized_pnl(monkeypatch, tmp_path):
+    """exit()에 pre_resolved_*를 넘기면, 이번 체결분(dry_run이라 expected_price*entry_qty)과
+    합산한 가중평균가로 close_position()이 호출돼야 한다(⑤-4c 백로그 Important #1)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    # 잔여 주문 정리로 이미 0.004를 20만원에(수수료 50원) 판 것으로 가정하고, 이번
+    # exit()는 나머지 0.006을 5,200만원에 판다(dry_run이라 filled_price==expected_price).
+    sell_position = {**position, "entry_qty": 0.006}
+
+    order = await order_executor.exit(
+        strategy, sell_position, 52_000_000.0, dry_run=True,
+        pre_resolved_qty=0.004, pre_resolved_proceeds=200_000.0, pre_resolved_fee=50.0,
+    )
+
+    # total_qty=0.01, total_proceeds=52,000,000*0.006+200,000=512,000,
+    # blended_price=51,200,000, total_fee=0(dry_run)+50=50
+    # realized_pnl = 51,200,000*0.01 - 49,000,000*0.01 - 50 = 21,950.0
+    assert order["realized_pnl"] == pytest.approx(21_950.0)
+    position_row = dbm.get_position(position["id"])
+    assert position_row["exit_qty"] == pytest.approx(0.01)
+    assert position_row["exit_price"] == pytest.approx(51_200_000.0)
+    assert position_row["status"] == "closed"
+
+
 async def test_exit_for_risk_records_trade_result_and_close_reason_on_success(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)

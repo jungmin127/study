@@ -393,6 +393,7 @@ async def exit(
     strategy: dict, position: dict, expected_price: float,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
     close_reason: str = "signal",
+    pre_resolved_qty: float = 0.0, pre_resolved_proceeds: float = 0.0, pre_resolved_fee: float = 0.0,
 ) -> dict:
     if position is None:
         raise ValueError("오픈 포지션이 없습니다")
@@ -435,8 +436,18 @@ async def exit(
     if result["status"] != "done":
         return db.get_order_by_id(result["order_id"])
 
+    # ⑤-4c 백로그 수정(Important #1) — 잔여 주문 정리로 이미 확보한 체결분(pre_resolved_*,
+    # 기본값 0이라 일반 캔들경로는 영향 없음)을 이번 체결분과 가중평균으로 합산해서
+    # close_position()에 넘긴다. 그러지 않으면 exit_qty만 이번 체결분이고 원가는
+    # close_position()이 DB에서 다시 읽는 포지션 전체 entry_qty라 "부분 매도금액 - 전체
+    # 원가"로 PnL이 왜곡된다.
+    total_qty = result["filled_volume"] + pre_resolved_qty
+    total_proceeds = result["filled_price"] * result["filled_volume"] + pre_resolved_proceeds
+    blended_price = total_proceeds / total_qty if total_qty else result["filled_price"]
+    total_fee = result["fee"] + pre_resolved_fee
+
     close_result = position_manager.close_position(
-        position["id"], result["filled_price"], result["filled_volume"], result["fee"], close_reason,
+        position["id"], blended_price, total_qty, total_fee, close_reason,
     )
     order = db.get_order_by_id(result["order_id"])
     order.update(close_result)
