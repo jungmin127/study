@@ -441,9 +441,27 @@ async def exit_for_risk(
     """ticker 트리거 손절/익절 전용 진입점(⑤-4c). handle_signal_result()와 달리
     signals 테이블과 무관하다 — candle 사이클 밖에서 발생하는 이벤트라 대응되는 signal
     row가 없다. 성공 시 record_trade_result()까지 호출(handle_signal_result의 매도
-    성공 분기와 동일한 부기 의무 — daemon.py의 check_circuit_breaker() 호출 전제)."""
+    성공 분기와 동일한 부기 의무 — daemon.py의 check_circuit_breaker() 호출 전제).
+
+    불변조건(4라운드 구조적 수정, 사용자 결정 — "슬리피지는 감수하겠습니다"): strategy에
+    설정된 order_execution_mode가 무엇이든 항상 무시하고 market으로 강제한다. 1~3라운드는
+    "이미 진행 중인 청산 주문이 있으면 막는다"는 가드를 order_type/나이/upbit_uuid로 점점
+    정교하게 다듬으며 반복적으로 실패했다 — order_execution_mode='limit'(타임아웃 없음)
+    에서는 청산 주문이 거래소에 무기한 열려 있을 수 있어, 그 행이 "정상적으로 진행 중"인지
+    "영원히 안 채워질 것"인지 DB 행만 보고는 원천적으로 구별할 수 없기 때문이다(가드를
+    조이면 정당한 재시도가 막히고, 풀면 중복 실주문이 나갔다). market 주문은
+    _await_settlement()의 폴링 타임아웃(수 초) 안에 반드시 체결/실패로 확정되므로, 이
+    함수만은 그 불확실성 자체를 구조적으로 제거한다 — 대신 슬리피지를 감수한다. 호출자의
+    strategy dict는 변형하지 않는다(shallow copy 위에서 risk_config_json만 재작성)."""
+    forced_risk_config = json.loads(strategy["risk_config_json"])
+    forced_risk_config["order_execution_mode"] = "market"
+    # market 모드는 max_slippage_pct 등 다른 risk_config 필드를 요구하지 않는다
+    # (_validate_mode 참고 — market_capped만 요구) — 그 필드를 한 번도 설정한 적 없는
+    # 전략을 강제로 market에 태워도 안전하다.
+    forced_strategy = {**strategy, "risk_config_json": json.dumps(forced_risk_config)}
+
     order = await exit(
-        strategy, position, expected_price, client=client, dry_run=dry_run, close_reason=reason,
+        forced_strategy, position, expected_price, client=client, dry_run=dry_run, close_reason=reason,
     )
     if order["status"] == "done":
         risk_manager.record_trade_result(strategy["id"], order["realized_pnl"], order["capital_after"])
