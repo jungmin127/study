@@ -691,12 +691,24 @@ async def exit_for_risk(
 
     sellable_qty = _floor_volume(position["entry_qty"] - total_resolved_qty)
     if sellable_qty <= 0 or sellable_qty * expected_price < _MIN_ORDER_AMOUNT_KRW:
+        if total_resolved_qty <= 0:
+            # 최종 브랜치 리뷰 Important #1 — 잔여 주문 정리로 확보한 게 하나도 없는데
+            # 포지션 자체가 최소주문금액 미만이다(예: reconciler의 수동개입 처리로
+            # 포지션이 먼지 수준까지 줄어든 경우). 실제로 판 게 없으니
+            # close_position()을 0/0으로 호출하면 안 된다 — "전체 원가 - 0"으로 100%
+            # 손실을 조작해서 기록하고 current_capital을 0으로 리셋해 전략을 영구히
+            # 브릭시킨다. 포지션은 open으로 남겨두고 조용히 넘어간다 — reconciler가
+            # 다음 주기에 처리한다.
+            logger.warning(
+                "포지션이 최소주문금액 미만이라 매도할 수 없다(잔여주문 정리분 없음, "
+                "포지션은 그대로 둠): strategy_id=%s entry_qty=%s expected_price=%s",
+                strategy["id"], position["entry_qty"], expected_price,
+            )
+            return {"action": "dust_below_minimum", "order_id": None}
         # 잔여 주문 정리만으로 포지션이 사실상 전부 소진됐다(Important #2) — 새 주문 없이
         # 그 자리에서 바로 종료한다. 방치하면 reconciler가 이 포지션을 "설명 안 됨"으로
         # 오분류해 전략을 자동 정지시킨다.
-        blended_price = (
-            total_resolved_proceeds / total_resolved_qty if total_resolved_qty else expected_price
-        )
+        blended_price = total_resolved_proceeds / total_resolved_qty
         close_result = position_manager.close_position(
             position["id"], blended_price, total_resolved_qty, total_resolved_fee, reason,
         )

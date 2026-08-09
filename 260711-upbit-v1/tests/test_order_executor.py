@@ -1195,6 +1195,37 @@ async def test_exit_blends_pre_resolved_amounts_into_realized_pnl(monkeypatch, t
     assert position_row["status"] == "closed"
 
 
+async def test_exit_for_risk_leaves_position_open_when_dust_below_minimum_with_nothing_resolved(
+    monkeypatch, tmp_path,
+):
+    """최종 브랜치 리뷰 Important #1 — 잔여주문 정리로 확보한 게 하나도 없는데(dry_run이라
+    사전 정리 자체가 없고 stale_resolved_qty도 0) 포지션 자체가 최소주문금액 미만이면,
+    이전 코드는 total_resolved_qty=0인 채로 close_position()을 호출해 "전체 원가 - 0"의
+    100% 손실을 조작하고 current_capital을 0으로 리셋했다(포지션이 영구히 브릭됨). 실제로
+    판 게 없으니 포지션은 open으로 남기고 새 action(dust_below_minimum)만 반환해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 50_000_000.0, 0.00001)  # 500원 상당
+    position = position_manager.get_open_position(strategy["id"])
+    capital_before = dbm.get_live_strategy(strategy["id"])["current_capital"]
+    recorded = {"count": 0}
+    monkeypatch.setattr(
+        risk_manager, "record_trade_result",
+        lambda *a: recorded.__setitem__("count", recorded["count"] + 1),
+    )
+
+    result = await order_executor.exit_for_risk(
+        strategy, position, 50_000_000.0, "stop_loss_pct", dry_run=True,
+    )
+
+    assert result["action"] == "dust_below_minimum"
+    assert result["order_id"] is None
+    assert position_manager.get_open_position(strategy["id"]) is not None  # 포지션은 open으로 남는다
+    capital_after = dbm.get_live_strategy(strategy["id"])["current_capital"]
+    assert capital_after == pytest.approx(capital_before)  # current_capital이 0으로 리셋되지 않는다
+    assert recorded["count"] == 0  # 실제로 판 게 없으니 부기(record_trade_result)도 안 한다
+
+
 async def test_exit_for_risk_records_trade_result_and_close_reason_on_success(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)
