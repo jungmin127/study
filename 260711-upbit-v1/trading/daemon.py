@@ -134,26 +134,53 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
     가드는 다음 둘을 lock 안에서 통과해야만 exit_for_risk()를 호출한다: ① fresh_strategy
     의 status가 "running"이 아니면 건너뛴다 — paused는 데몬이 자신의 포지션 기록을
     신뢰할 수 없다고 판단한 상태라 그 위에서 실주문 청산을 내는 게 더 위험하다(Important
-    3, 사용자 결정). ② list_wait_orders() 중 side=="ask"이고 order_timeout_sec+60초
-    이내로 최근인 행이 있으면(이미 진행 중인 청산 시도) 건너뛴다 — 무기한 신뢰하면
-    안 된다: 이 코드베이스엔 이미 영구적으로 'wait'로 남는 행(들)이 있다
-    (_run_limit_timeout의 잔량전환 고아 행, market 모드 청산의 3초 정산타임아웃 미확정
-    행, acknowledge_and_continue 정책 아래 reconciler가 심어둔 외부주문 행) — 나이/side
-    제한 없이 이 가드를 두면 그런 전략의 실시간 손절/익절이 영구히 멈춘다(재검토
-    Important 2). reconciler._detect_external_orders가 동일 문제를 동일하게 푼 전례
-    (is_recent + order_timeout_sec+60 윈도)를 그대로 재사용한다. 쿨다운
-    (_RISK_EXIT_RETRY_COOLDOWN_SEC)은 exit_for_risk()가 slippage_exceeded로 끝나
-    대기 주문을 남기지 않는 경우(가드②가 무력한 경우) 매 tick 재시도로 같은 breach에
-    실주문이 반복 발사되는 걸 막는다(최종 브랜치 리뷰 Critical 1) — 순수 로컬 태스크
-    상태(공유되지 않음)라 lock 밖에서 사전필터로 먼저 걸러도 stale-state 문제가 없다.
-    exit_for_risk()가 실제로 성공(action=="exited")하면 쿨다운을 다시 -inf로 리셋한다
-    — 그러지 않으면 포지션을 완전히 닫은 뒤 곧바로 재진입한 새 포지션의 정당한
-    손절/익절까지 남은 쿨다운 창 안에서 억눌린다(번들 수정). 청산 성공 시에만
-    check_circuit_breaker()까지 호출(결정7 재사용). tick 처리 예외는 로그만 남기고
-    다음 tick에 계속(⑤-4b 결정8과 동일 원칙) — 이와 별개로 stream_ticker() 자체가
-    async for 문에서 예외를 던지는 경우(예: 핸드셰이크 TimeoutError)는 그 안쪽
-    try/except가 잡지 못해 태스크 전체가 로그 없이 죽으므로, async for 전체를 감싸는
-    바깥 try/except를 하나 더 둔다(Important 5)."""
+    3, 사용자 결정). ② list_wait_orders() 중 side=="ask"이고 다음 둘 중 하나에 해당하는
+    행이 있으면(이미 진행 중인/자연 해소될 청산 시도) 건너뛴다 — 무기한 신뢰하면 안
+    된다: 이 코드베이스엔 이미 영구적으로 'wait'로 남는 행(들)이 있다
+    (_run_limit_timeout의 잔량전환 고아 행 — order_type='market'+upbit_uuid IS NULL,
+    market 모드 청산의 3초 정산타임아웃 미확정 행 — order_type='market', 나이 제한 없이
+    이 가드를 두면 그런 전략의 실시간 손절/익절이 영구히 멈춘다(재검토 Important 2).
+    ②-1: order_timeout_sec+60초 이내로 최근인 행(reconciler._detect_external_orders가
+    동일 문제를 동일하게 푼 전례 — is_recent + order_timeout_sec+60 윈도 — 를 그대로
+    재사용). ②-2(3라운드 재검토 Important 1 픽스): order_type=='limit'이고 upbit_uuid가
+    실제 값인 행은 나이와 무관하게 항상 막는다 — order_execution_mode='limit'은
+    타임아웃/전환 없이 거래소에서 진짜로 열려 있는 지정가 주문을 status='wait'인 채
+    의도적으로 남겨두는 모드라(order_executor._run_limit), ②-1의 나이 상한(기본 70초)을
+    그냥 넘긴 채 여전히 살아있는 정상 주문이 흔하다 — 그 경우 나이 필터만 있으면 아직
+    거래소에 떠 있는 주문 위에 또 실주문을 낸다(3라운드 재검토에서 직접 재현: 동일
+    breach에 대해 서로 다른 upbit_uuid를 가진 ask 주문 2건이 나감). 이 조합
+    (order_type='limit' + upbit_uuid IS NOT NULL)은 reconciler.sync_pending_limit_orders
+    가 정확히 같은 조건으로 골라(list_wait_orders(order_type="limit") 필터, uuid 없는
+    행은 스킵) 자체 20초 주기로 결국 정리하도록 보장돼 있으므로 "영구 wait 행"이
+    아니다 — _run_limit_timeout 고아 행(order_type='market')·market 모드 미확정 행
+    (order_type='market') 둘 다 order_type이 'limit'이 아니라 이 조합을 만들 수 없어
+    안전하다. acknowledge_and_continue 정책 아래 reconciler가 심어둔 외부주문 행은
+    실제 거래소 주문 타입을 그대로 옮겨적으므로(insert_external_order) 이론상
+    order_type='limit'+실제 uuid 조합을 만들 수 있지만, list_wait_orders(order_type=
+    "limit")는 is_external 여부로 걸러내지 않으므로 그 행도 sync_pending_limit_orders의
+    같은 20초 스윕에 똑같이 걸려 자연 해소된다 — 그러므로 이 조합에 한해서는 외부/내부
+    출처를 가리지 않고 항상 안전하다. 쿨다운(_RISK_EXIT_RETRY_COOLDOWN_SEC)은
+    exit_for_risk()가 slippage_exceeded로 끝나 대기 주문을 남기지 않는 경우(가드②가
+    무력한 경우) 매 tick 재시도로 같은 breach에 실주문이 반복 발사되는 걸 막는다(최종
+    브랜치 리뷰 Critical 1) — 순수 로컬 태스크 상태(공유되지 않음)라 lock 밖에서
+    사전필터로 먼저 걸러도 stale-state 문제가 없다. exit_for_risk()가 실제로
+    성공(action=="exited")하면 쿨다운을 다시 -inf로 리셋한다 — 그러지 않으면 포지션을
+    완전히 닫은 뒤 곧바로 재진입한 새 포지션의 정당한 손절/익절까지 남은 쿨다운 창
+    안에서 억눌린다(번들 수정). "트리거하기로 결정"한 시점의 position_return_pct/
+    matched_risk_exit_indicator는 lock 획득 전(밖) 스냅샷 기준이다 — lock 안에서
+    fresh_position을 다시 읽은 뒤에는 그 fresh 값으로 breach 여부를 다시 계산해서
+    exit_for_risk()를 부른다(3라운드 M3) — 현재 프로덕션 경로 중 lock 보유 중에
+    포지션의 원가(entry_price)가 바뀌는 경로는 없어 당장 재현 가능한 버그는 아니지만,
+    이 함수가 이미 두 라운드 연속으로 "lock 밖 스냅샷으로 실주문을 낸다"류 버그를
+    겪었으므로 같은 유형을 구조적으로 막아둔다. last_risk_exit_attempt에 기록하는
+    now는 lock을 얻은 직후 다시 읽는다(3라운드 M2) — lock 대기가 길어지면 밖에서 읽은
+    now가 실제 재시도 시각보다 과거라 쿨다운이 그만큼 짧아지는 걸 막기 위함이다(쿨다운
+    사전필터 자체는 여전히 lock 밖의 now로 판단 — 락을 매 tick 다툴 필요가 없다는 원래
+    의도는 그대로 유지). 청산 성공 시에만 check_circuit_breaker()까지 호출(결정7
+    재사용). tick 처리 예외는 로그만 남기고 다음 tick에 계속(⑤-4b 결정8과 동일 원칙)
+    — 이와 별개로 stream_ticker() 자체가 async for 문에서 예외를 던지는 경우(예:
+    핸드셰이크 TimeoutError)는 그 안쪽 try/except가 잡지 못해 태스크 전체가 로그 없이
+    죽으므로, async for 전체를 감싸는 바깥 try/except를 하나 더 둔다(Important 5)."""
     if lock is None:
         lock = asyncio.Lock()
     strategy = db.get_live_strategy(strategy_id)
@@ -204,28 +231,49 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                     if fresh_strategy["status"] != "running":
                         continue
                     risk_config = json.loads(fresh_strategy["risk_config_json"])
-                    # 가드 ② — 진행 중인 청산 시도(최근 side=='ask' wait 주문)가 있으면
-                    # 건너뛴다. 나이/side 제한 없이 list_wait_orders() 전체를 신뢰하면
-                    # 영구 wait 행 하나로 이 전략의 실시간 손절/익절이 영구히 멈춘다
-                    # (재검토 Important 2, reconciler.is_recent와 동일 전례 재사용).
+                    # 가드 ② — 진행 중인/자연 해소될 청산 시도(side=='ask' wait 주문)가
+                    # 있으면 건너뛴다. ②-1 나이창 + ②-2 limit-uuid 조합, 둘 다 위 함수
+                    # docstring 참고 (3라운드 재검토 Important 1 — ②-1만으로는
+                    # order_execution_mode='limit'의 진짜로 열려 있는 주문이 나이창을
+                    # 넘기자마자 가드가 풀려 중복 실주문이 나간다).
                     in_flight_window_sec = float(risk_config.get("order_timeout_sec", 10)) + 60
                     if any(
-                        o["side"] == "ask" and reconciler.is_recent(o["created_at"], in_flight_window_sec)
+                        o["side"] == "ask" and (
+                            reconciler.is_recent(o["created_at"], in_flight_window_sec)
+                            or (o["order_type"] == "limit" and o["upbit_uuid"] is not None)
+                        )
                         for o in db.list_wait_orders(strategy_id)
                     ):
                         continue
                     fresh_position = position_manager.get_open_position(strategy_id)
                     if fresh_position is None:
                         continue
+                    # 3라운드 M3 — lock 밖에서 계산한 matched(사전 스냅샷)를 그대로 쓰지
+                    # 않고, 방금 다시 읽은 fresh_position 기준으로 breach를 재계산한다.
+                    # 더 이상 breach가 아니면(원가가 바뀌어 손절/익절 조건을 벗어났다면)
+                    # 실주문을 내지 않고 건너뛴다.
+                    fresh_position_return_pct = (
+                        (trade_price - fresh_position["entry_price"]) / fresh_position["entry_price"] * 100
+                    )
+                    fresh_matched = signal_engine.matched_risk_exit_indicator(
+                        sell_conditions, fresh_position_return_pct,
+                    )
+                    if fresh_matched is None:
+                        continue
+                    # 3라운드 M2 — lock을 얻은 직후 다시 읽는다. lock 대기가 길면 밖에서
+                    # 읽은 now가 실제 재시도 시각보다 과거라 쿨다운이 그만큼 짧아진다.
+                    # (쿨다운 사전필터 자체는 여전히 락 밖의 now로 판단 — 락을 매 tick
+                    # 다투지 않는다는 원래 의도는 그대로 유지.)
+                    now = time.monotonic()
                     # 시도 직전에 갱신한다 — exit_for_risk()가 예외를 던지거나
                     # slippage_exceeded로 끝나도 다음 tick에 즉시 재시도하지 않고 쿨다운
                     # 상한을 지키게 하기 위함이다(_run_strategy_loop의 last_reconcile과
-                    # 동일 패턴, M3 참고). 가드 ①·②에 막혀 실제 시도조차 못 한 tick은
-                    # 쿨다운을 소모하지 않는다 — 상태가 정상으로 돌아오자마자 곧바로
-                    # 재시도할 수 있어야 한다.
+                    # 동일 패턴). 가드 ①·②에 막혀 실제 시도조차 못 한 tick은 쿨다운을
+                    # 소모하지 않는다 — 상태가 정상으로 돌아오자마자 곧바로 재시도할 수
+                    # 있어야 한다.
                     last_risk_exit_attempt = now
                     result = await order_executor.exit_for_risk(
-                        fresh_strategy, fresh_position, trade_price, matched.lower(),
+                        fresh_strategy, fresh_position, trade_price, fresh_matched.lower(),
                     )
                     if result["action"] == "exited":
                         # 포지션을 성공적으로 닫았으면 쿨다운을 리셋한다 — 그러지 않으면

@@ -1203,6 +1203,125 @@ async def test_run_risk_exit_loop_in_flight_guard_recognizes_real_order_executor
     assert create_order_calls["n"] == 1
 
 
+@pytest.mark.parametrize("side,age_sec,should_fire", [
+    ("ask", 1, False),      # 최근 ask -> 막는다 (기존 커버리지, 회귀 확인용으로 재확인)
+    ("ask", 5000, True),    # 오래된 ask -> 발사한다 (신규)
+    ("bid", 1, True),       # 최근 bid -> 발사한다 (신규 — 가드는 side=='ask'만 본다)
+    ("ask", 65, False),     # order_timeout_sec=10 기준 나이창(70초) 안쪽 경계 -> 막는다 (신규)
+    ("ask", 75, True),      # 나이창 바깥 -> 발사한다 (신규)
+])
+async def test_run_risk_exit_loop_in_flight_guard_age_side_filter(
+    monkeypatch, tmp_path, side, age_sec, should_fire,
+):
+    """3라운드 M1 — 기존 커버리지(test_run_risk_exit_loop_stops_retrying_once_wait_order_exists
+    등)는 가드가 '최근 ask 행을 인식해 막는다'(positive case)만 증명했다. age/side 필터가
+    반대 방향(막으면 안 되는 경우들)도 올바르게 통과시키는지 실제 DB 행 + is_recent 실제
+    계산으로 검증한다. wait 행은 order_type='market'(+실제 uuid)으로 만들어 I1의 새 clause
+    (order_type=='limit'+upbit_uuid)가 끼어들지 않게 하고, 순수하게 나이/side 필터만
+    노출한다. created_at 백데이팅은 test_reconciler.py의
+    test_detect_external_orders_ignores_stale_in_flight_order와 동일하게 직접
+    UPDATE orders SET created_at = ... 로 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+        risk_config_json=json.dumps({"order_execution_mode": "market", "order_timeout_sec": 10}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    order_id = dbm.insert_order(strategy_id, None, "KRW-BTC", side, "market", None, 0.01, 47_000_000.0)
+    dbm.update_order_filled(order_id, "existing-uuid", None, None, None, None, "wait")
+    conn = dbm._connect()
+    try:
+        conn.execute(
+            "UPDATE orders SET created_at = datetime('now', ?) WHERE id = ?",
+            (f"-{age_sec} seconds", order_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}  # -6%, 손절선 뚫림
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert (exit_calls["n"] == 1) == should_fire
+
+
+@pytest.mark.parametrize("order_type,upbit_uuid,should_fire", [
+    ("limit", "existing-uuid", False),  # 오래된 ask, order_type='limit'+실제 uuid -> 막는다
+    ("market", "existing-uuid", True),  # 오래된 ask, order_type='market' -> 발사한다
+    ("limit", None, True),              # 오래된 ask, order_type='limit'이지만 uuid 없음 -> 발사한다
+])
+async def test_run_risk_exit_loop_in_flight_guard_limit_uuid_clause(
+    monkeypatch, tmp_path, order_type, upbit_uuid, should_fire,
+):
+    """I1(3라운드 재검토 Important 1) — 나이창(order_timeout_sec+60=70초)을 이미 넘긴
+    ask wait 행이라도 order_type=='limit'이고 upbit_uuid가 실제 값이면 여전히 막아야
+    한다: order_execution_mode='limit'은 타임아웃/전환 없이 거래소에 진짜로 열려 있는
+    지정가 주문을 status='wait'인 채 의도적으로 남긴다(order_executor._run_limit) —
+    나이 필터만 있으면 그 살아있는 주문 위에 또 실주문을 낸다(3라운드 재검토에서 실제
+    재현: 동일 breach에 서로 다른 upbit_uuid를 가진 ask 주문 2건이 나감). 이 조합은
+    reconciler.sync_pending_limit_orders가 정확히 같은 조건(order_type='limit'+uuid
+    IS NOT NULL)으로 골라 자체 20초 주기로 정리하므로 '영구 wait 행'이 아니다.
+    order_type이 'market'이거나 uuid가 없으면(이 clause의 정확한 요구조건을 벗어나면)
+    새 clause가 매치하지 않아 나이 필터만 적용되고, 나이창을 넘겼으니 발사돼야 한다 —
+    이 두 케이스가 새 clause를 지나치게 넓게 만들지 않았음을 증명한다(영구 정지 재발
+    방지)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+        risk_config_json=json.dumps({"order_execution_mode": "limit", "order_timeout_sec": 10}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    order_id = dbm.insert_order(strategy_id, None, "KRW-BTC", "ask", order_type, None, 0.01, 47_000_000.0)
+    if upbit_uuid is not None:
+        dbm.update_order_filled(order_id, upbit_uuid, None, None, None, None, "wait")
+    conn = dbm._connect()
+    try:
+        conn.execute(
+            "UPDATE orders SET created_at = datetime('now', '-5000 seconds') WHERE id = ?",
+            (order_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}  # -6%, 손절선 뚫림
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert (exit_calls["n"] == 1) == should_fire
+
+
 async def test_task_set_manager_creates_risk_exit_task_for_new_strategy(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm, status="running")
