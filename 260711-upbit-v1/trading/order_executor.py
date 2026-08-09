@@ -619,10 +619,10 @@ async def exit_for_risk(
     없다.
 
     (수량 0) 정리한 주문이 포지션 수량을 전부(또는 최소주문금액 미만만 남기고) 소진했으면
-    팔 게 없다 — 0/음수/먼지 주문은 업비트가 거부할 뿐이므로 아무 주문도 내지 않고
-    "nothing_to_sell"로 조용히 끝낸다. positions/current_capital 부기를 여기서 흉내내지는
-    않는다 — reconciler.check_manual_intervention()의 주기적 잔고 대조가 "내부 포지션과
-    실잔고 불일치"를 정확히 그 용도로 self-heal한다.
+    팔 게 없다 — 0/음수/먼지 주문은 업비트가 거부할 뿐이므로 아무 주문도 내지 않는다.
+    대신 누적된 정리분(total_resolved_qty/proceeds/fee)으로 position_manager.close_position()을
+    호출해 포지션을 종료하고, risk_manager.record_trade_result()를 기록한 뒤
+    {"action": "exited", "order_id": None}로 반환한다.
 
     (⑤-4c 백로그 수정, 7~8라운드 대응) 6라운드까지는 "이번 tick에 처리한 만큼만" 계산해
     exit()를 호출했다 — 그 정보가 이 함수 호출 하나의 지역 변수에만 머물러서, (a) 정리한
