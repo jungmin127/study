@@ -444,6 +444,19 @@ async def test_run_strategy_loop_serializes_signal_processing_through_shared_loc
     calls, fake_sleep = _stop_after_one_tick(dbm, strategy_id)
     monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
 
+    async def fake_to_thread(func, *args):
+        # _run_strategy_loop는 evaluate_signals를 asyncio.to_thread로 실행하는데, 이건
+        # 실제 OS 스레드풀을 거치는 지연이라 아래의 단일 await real_sleep(0) 안에 끝나지
+        # 않는다 — 그 결과 이 테스트는 lock 획득 시도 근처에도 못 가본 채로
+        # "handle_signal_result" not in events가 우연히 참이 돼 통과해버린다(I1, 최종
+        # 브랜치 리뷰 지적 — Task 7의 동일한 취약 테스트와 같은 근본 원인). to_thread를
+        # in-loop sleep(0)로 대체해 실제 스레드풀 지연을 없애야 이 테스트가 진짜 lock
+        # 경합을 관찰한다.
+        await real_sleep(0)
+        return func(*args)
+
+    monkeypatch.setattr(daemon.asyncio, "to_thread", fake_to_thread)
+
     async with lock:
         events.append("lock_held_by_other")
         loop_task = asyncio.create_task(daemon._run_strategy_loop(strategy_id, lock))
@@ -452,6 +465,7 @@ async def test_run_strategy_loop_serializes_signal_processing_through_shared_loc
         # 동일한 모듈 객체), 여기서 bare asyncio.sleep(0)을 쓰면 그 fake_sleep이 호출돼 전략 상태가
         # 여기서 조기에 'stopped'로 바뀌어버린다 — 반드시 monkeypatch 전에 붙잡아둔 real_sleep을 쓴다.
         await real_sleep(0)
+        await real_sleep(0)  # to_thread의 fake_to_thread 안 real_sleep(0)까지 실제로 진행시킨다
         assert "handle_signal_result" not in events
         events.append("lock_released_by_other")
 
