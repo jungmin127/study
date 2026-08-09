@@ -763,6 +763,20 @@ async def test_run_risk_exit_loop_skips_circuit_breaker_when_exit_pending(monkey
 
 
 async def test_run_risk_exit_loop_logs_and_continues_on_exception(monkeypatch, tmp_path):
+    """C1의 쿨다운 가드는 exit_for_risk()가 예외를 던진 경우에도 last_risk_exit_attempt를
+    갱신한다(실패해도 즉시 재시도하지 않기 위함) — 그래서 이 테스트는 두 번째 tick이
+    쿨다운 밖에서 벌어지도록 daemon.time.monotonic()을 patch한다. 그러지 않으면 real
+    time으로는 두 tick 사이에 30초가 흐르지 않아 두 번째 시도 자체가 쿨다운에 막혀버려,
+    이 테스트가 원래 검증하려는 것(신호처리 예외 후에도 루프가 죽지 않고 계속 tick을
+    처리한다)을 볼 수 없다.
+
+    time.monotonic은 daemon.py가 `import time`으로 가져온 것과 동일한 모듈 객체라서,
+    이걸 monkeypatch하면 이 프로세스 전체 — 이 테스트를 실행 중인 asyncio 이벤트
+    루프 자신의 내부 스케줄링(sleep(0) 처리 등)까지 포함해서 — 가 그 함수를 쓰게 된다.
+    고정 개수의 iter([...])를 쓰면 daemon 코드가 아닌 asyncio 내부 호출만으로도
+    StopIteration이 나 버린다(실제로 재현됨) — 그래서 "소비되면 고갈되는" 값 대신
+    "명시적으로 올릴 때만 바뀌는" 가변 클록을 쓴다. tick 2개 사이에 fake_stream_ticker가
+    직접 클록을 100초 앞으로 밀어 쿨다운을 피하게 한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
         dbm, status="running", market="KRW-BTC",
@@ -772,9 +786,12 @@ async def test_run_risk_exit_loop_logs_and_continues_on_exception(monkeypatch, t
     )
     position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
     processed = {"n": 0}
+    clock = {"value": 0.0}
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["value"])
 
     async def fake_stream_ticker(markets):
         yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+        clock["value"] += 100.0  # 쿨다운(30초)보다 긴 시간이 흐른 것으로 만든다.
         yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
 
     async def failing_exit_for_risk(strategy, position, price, reason, **kwargs):
@@ -787,6 +804,174 @@ async def test_run_risk_exit_loop_logs_and_continues_on_exception(monkeypatch, t
     await daemon._run_risk_exit_loop(strategy_id)  # 예외가 밖으로 전파되면 테스트 실패
 
     assert processed["n"] == 2  # 첫 tick 실패 후에도 두 번째 tick을 계속 처리
+
+
+async def test_run_risk_exit_loop_stops_retrying_once_wait_order_exists(monkeypatch, tmp_path):
+    """C1 가드 ① — exit_for_risk()가 "pending"(리밋 주문이 아직 열려있음)을 반환하면
+    포지션은 여전히 breach 상태로 남아 다음 tick도 그대로 같은 트리거 조건을 만족한다.
+    list_wait_orders()로 진행 중인 청산 시도를 감지해 두 번째 이후 tick은 실주문을
+    내지 않고 건너뛰어야 한다. 쿨다운 가드가 개입해 이 테스트를 오염시키지 않도록
+    time.monotonic()을 매 호출 충분히 벌려 쿨다운은 항상 통과시킨다 — 이 테스트는
+    순수하게 list_wait_orders 가드만 검증한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    exit_calls = {"n": 0}
+    clock = {"value": 0.0}
+    # 쿨다운 가드가 개입해 이 테스트를 오염시키지 않도록 daemon.time.monotonic()을
+    # 매 tick 전에 넉넉히 앞당긴다 — 이 테스트는 순수하게 list_wait_orders 가드만
+    # 검증한다. iter([...]) 같은 "소비하면 고갈되는" 값은 쓰지 않는다 — daemon.time은
+    # 프로세스 전역 time 모듈과 동일 객체라서, 이 이벤트 루프 자신의 내부 스케줄링도
+    # 같은 함수를 거치므로 고정 개수 iterator는 daemon 코드가 부르기도 전에 고갈된다
+    # (직접 재현됨).
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["value"])
+
+    async def fake_stream_ticker(markets):
+        for _ in range(5):
+            clock["value"] += 100.0
+            yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "pending", "order_id": "o1"}
+
+    def fake_list_wait_orders(live_strategy_id, order_type=None):
+        # 첫 시도 전에는 대기 주문이 없다가, 그 이후엔 pending 리밋 주문이 계속
+        # 남아있는 것처럼 흉내낸다.
+        return [{"id": "o1", "status": "wait"}] if exit_calls["n"] > 0 else []
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(db, "list_wait_orders", fake_list_wait_orders)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert exit_calls["n"] == 1
+
+
+async def test_run_risk_exit_loop_cooldown_blocks_retry_after_slippage_exceeded(monkeypatch, tmp_path):
+    """C1 가드 ② — exit_for_risk()가 "slippage_exceeded"(FOK 즉시 취소, 대기 주문을
+    남기지 않음)를 반환하면 가드 ①(list_wait_orders)은 무력하다. 쿨다운으로 재시도
+    간격을 강제해야 한다. list_wait_orders는 실제 빈 DB 결과를 그대로 쓴다 — 이 테스트는
+    순수하게 쿨다운 가드만 검증한다. time.monotonic()은 patch하지 않는다 — 세 tick이
+    실제 시간으로 사실상 동시에(수 밀리초 안에) 흘러가므로 real time만으로도 쿨다운
+    윈도(30초) 안에 확실히 머문다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        for _ in range(3):
+            yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "slippage_exceeded", "order_id": None}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert exit_calls["n"] == 1
+
+
+async def test_run_risk_exit_loop_skips_trigger_when_strategy_paused(monkeypatch, tmp_path):
+    """I3(사용자 결정) — paused는 reconciler가 잔고 불일치를 발견해 데몬이 자신의
+    포지션 기록(entry_price/entry_qty)을 신뢰할 수 없다고 판단했을 때 세팅된다. 그
+    상태에서 실시간 손절/익절을 발사하는 건 아무 것도 안 하는 것보다 더 위험하므로,
+    ticker 트리거는 paused 상태에서 exit_for_risk()를 호출하면 안 된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="paused", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert exit_calls["n"] == 0
+
+
+async def test_run_risk_exit_loop_skips_non_ticker_frame(monkeypatch, tmp_path):
+    """트리비얼 지적사항 — ticker 채널에서 type != "ticker"이거나 trade_price가 없는
+    프레임이 오면 KeyError로 튀지 않고 조용히 건너뛰어야 한다. 그 다음 진짜 ticker
+    프레임은 정상적으로 처리돼야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "trade", "code": "KRW-BTC"}  # 다른 타입의 프레임 — trade_price 없음
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": None}  # 방어적 케이스
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    await daemon._run_risk_exit_loop(strategy_id)  # KeyError가 나면 여기서 예외로 실패
+
+    assert exit_calls["n"] == 1
+
+
+async def test_run_risk_exit_loop_survives_stream_ticker_generator_raising(monkeypatch, tmp_path, caplog):
+    """I5 — stream_ticker()가 tick을 만들어내는 도중(async generator 본체 자체)에서
+    예외를 던지면(예: 핸드셰이크 TimeoutError), 그 예외는 tick 단위 try/except 안이
+    아니라 async for 문 자체에서 발생한다. 지금은 이걸 흡수하는 코드가 없어 태스크
+    전체가 로그 한 줄 없이 죽는다. 바깥 try/except로 흡수하고 로그를 남겨야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+
+    async def failing_stream_ticker(markets):
+        raise TimeoutError("핸드셰이크 타임아웃")
+        yield  # pragma: no cover - 도달하지 않음, async generator로 만들기 위한 장치
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", failing_stream_ticker)
+
+    with caplog.at_level("ERROR", logger="trading.daemon"):
+        await daemon._run_risk_exit_loop(strategy_id)  # 예외가 밖으로 전파되면 테스트 실패
+
+    assert any(strategy_id in record.message for record in caplog.records)
 
 
 async def test_run_risk_exit_loop_waits_for_lock_before_exiting(monkeypatch, tmp_path):
