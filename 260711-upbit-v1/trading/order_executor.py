@@ -734,6 +734,19 @@ async def exit_for_risk(
         risk_manager.record_trade_result(strategy["id"], order["realized_pnl"], order["capital_after"])
         return {"action": "exited", "order_id": order["id"]}
     if order["status"] == "cancel":
+        if order["filled_volume"]:
+            # 최종 브랜치 리뷰 Important #2 — 시장가 매도가 부분체결 후 cancel로
+            # 확정되면(얇은 호가창) 이 orders 행은 이제 status='cancel'이라 terminal이고,
+            # 다음 tick의 잔여주문 정리(list_wait_orders는 status='wait'만 본다)로도 다시
+            # 못 찾는다. 여기서 즉시 영구 기록하지 않으면 이미 판 이 수량을 다음 tick이
+            # 다시 팔려 하거나(과다매도), 최종 close_position()의 원가 계산에서 이
+            # 체결분이 누락돼 PnL이 왜곡된다 — pending 케이스(그 행이 여전히 'wait'로
+            # 남아 다음 tick의 정리 루프가 자연스럽게 다시 발견한다)에는 적용하지 않는다,
+            # 그러면 이중 계산된다.
+            db.accumulate_stale_resolution(
+                position["id"], order["filled_volume"],
+                order["filled_price"] * order["filled_volume"], order["fee"] or 0.0,
+            )
         return {"action": "slippage_exceeded", "order_id": order["id"]}
     return {"action": "pending", "order_id": order["id"]}
 

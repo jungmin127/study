@@ -1319,6 +1319,41 @@ async def test_exit_for_risk_marks_slippage_exceeded_on_cancel(monkeypatch, tmp_
     assert position_manager.get_open_position(strategy["id"]) is not None
 
 
+async def test_exit_for_risk_accumulates_partial_fill_when_final_market_order_is_cancelled(
+    monkeypatch, tmp_path,
+):
+    """최종 브랜치 리뷰 Important #2 — 최종 시장가 매도가 부분체결 후 cancel로
+    확정되면(얇은 호가창) 그 orders 행은 이제 status='cancel'이라 terminal이고, 다음
+    tick의 잔여주문 정리(list_wait_orders는 status='wait'만 본다)로도 다시 못 찾는다.
+    그 자리에서 즉시 db.accumulate_stale_resolution()으로 영구 기록하지 않으면
+    이미 판 이 수량을 다음 tick이 다시 팔려 하거나(과다매도), 최종 close_position()의
+    원가 계산에서 이 체결분이 누락돼 PnL이 왜곡된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-partial-cancel", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "cancel", "executed_volume": "0.003", "remaining_volume": "0.007",
+                "paid_fee": "15.0", "trades": [{"funds": "150000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert result["action"] == "slippage_exceeded"
+    position_row = dbm.get_position(position["id"])
+    assert position_row["stale_resolved_qty"] == pytest.approx(0.003)
+    assert position_row["stale_resolved_proceeds"] == pytest.approx(150_000.0)
+    assert position_row["stale_resolved_fee"] == pytest.approx(15.0)
+    assert position_manager.get_open_position(strategy["id"]) is not None  # 포지션은 아직 열려 있다
+
+
 @pytest.mark.parametrize("configured_mode,extra_risk_config", [
     ("limit", {}),
     ("limit_timeout", {"order_timeout_sec": 10}),
