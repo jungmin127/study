@@ -524,3 +524,41 @@ def test_list_active_strategies_returns_only_running_and_paused(monkeypatch, tmp
     active = db.list_active_strategies()
 
     assert {s["id"] for s in active} == {running_id, paused_id}
+
+
+def test_positions_have_stale_resolution_columns_defaulting_to_zero(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    position = db.get_position(position_id)
+
+    assert position["stale_resolved_qty"] == 0
+    assert position["stale_resolved_proceeds"] == 0
+    assert position["stale_resolved_fee"] == 0
+
+
+def test_accumulate_stale_resolution_adds_to_existing_totals(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    db.accumulate_stale_resolution(position_id, 0.004, 200_000.0, 50.0)
+    db.accumulate_stale_resolution(position_id, 0.002, 100_000.0, 25.0)
+
+    position = db.get_position(position_id)
+    assert position["stale_resolved_qty"] == pytest.approx(0.006)
+    assert position["stale_resolved_proceeds"] == pytest.approx(300_000.0)
+    assert position["stale_resolved_fee"] == pytest.approx(75.0)
+
+
+def test_accumulate_stale_resolution_does_not_affect_other_positions(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_a = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    position_b = db.insert_position(strategy_id, "KRW-BTC", 51_000_000.0, 0.02)
+
+    db.accumulate_stale_resolution(position_a, 0.004, 200_000.0, 50.0)
+
+    assert db.get_position(position_a)["stale_resolved_qty"] == pytest.approx(0.004)
+    assert db.get_position(position_b)["stale_resolved_qty"] == 0

@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS positions (
     realized_pnl     REAL,
     realized_pnl_pct REAL,
     close_reason     TEXT,
+    stale_resolved_qty      REAL NOT NULL DEFAULT 0,
+    stale_resolved_proceeds REAL NOT NULL DEFAULT 0,
+    stale_resolved_fee      REAL NOT NULL DEFAULT 0,
     created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -207,6 +210,24 @@ def get_position(position_id: str) -> dict | None:
             "SELECT * FROM positions WHERE id = ?", (position_id,)
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def accumulate_stale_resolution(position_id: str, qty: float, proceeds: float, fee: float) -> None:
+    """잔여 미체결 매도 주문 정리로 확인된 수량/대금/수수료를 포지션에 즉시 누적한다
+    (⑤-4c 백로그 수정 Important #1/#3/#4 — 이 정보가 그 틱의 지역 변수에만 머물면 예외로
+    끊기거나 다음 틱에서 사라진다). exit_for_risk()가 잔여 주문 하나를 정리할 때마다
+    호출한다."""
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE positions SET stale_resolved_qty = stale_resolved_qty + ?, "
+            "stale_resolved_proceeds = stale_resolved_proceeds + ?, "
+            "stale_resolved_fee = stale_resolved_fee + ? WHERE id = ?",
+            (qty, proceeds, fee, position_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 
