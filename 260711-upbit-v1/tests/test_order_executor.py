@@ -1190,6 +1190,11 @@ async def test_exit_for_risk_records_trade_result_and_close_reason_on_success(mo
 
 
 async def test_exit_for_risk_marks_pending_without_recording_trade_when_not_filled(monkeypatch, tmp_path):
+    """order_execution_mode='limit'로 설정된 전략이라도 exit_for_risk()는 항상 market을
+    강제한다(4라운드 구조적 수정) — 그래서 이 시나리오는 이제 _run_limit()이 아니라
+    _run_market()의 3초 정산 폴링이 타임아웃까지 미확정으로 남는 경로로 "pending"이
+    된다. fake_get_order가 계속 wait을 반환해 폴링이 타임아웃까지 소진되게 하고,
+    fake_sleep으로 그 3초의 실제 대기를 건너뛴다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm, order_execution_mode="limit")
     position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
@@ -1202,9 +1207,19 @@ async def test_exit_for_risk_marks_pending_without_recording_trade_when_not_fill
 
     async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
                                  time_in_force=None, identifier=None, client=None):
+        assert ord_type == "market"  # order_execution_mode='limit'을 무시하고 강제됐다
         return {"uuid": "uuid-risk-pending", "state": "wait"}
 
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "executed_volume": "0", "remaining_volume": "0.01",
+                "paid_fee": "0", "trades": []}
+
+    async def fake_sleep(seconds):
+        pass
+
     monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep)
 
     result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "take_profit_pct")
 
@@ -1214,6 +1229,10 @@ async def test_exit_for_risk_marks_pending_without_recording_trade_when_not_fill
 
 
 async def test_exit_for_risk_marks_slippage_exceeded_on_cancel(monkeypatch, tmp_path):
+    """order_execution_mode='market_capped'로 설정돼 있어도 exit_for_risk()는 market을
+    강제하므로(4라운드 구조적 수정) 실제로는 FOK 취소가 아니라 market 주문이 거래소에서
+    체결 없이 cancel로 확정되는 경로를 탄다 — 반환 action 이름("slippage_exceeded")은
+    exit_for_risk()가 status=='cancel'인 모든 경우에 공통으로 쓰는 라벨이라 그대로다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm, order_execution_mode="market_capped", max_slippage_pct=0.1)
     position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
@@ -1226,6 +1245,7 @@ async def test_exit_for_risk_marks_slippage_exceeded_on_cancel(monkeypatch, tmp_
 
     async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
                                  time_in_force=None, identifier=None, client=None):
+        assert ord_type == "market"  # order_execution_mode='market_capped'을 무시하고 강제됐다
         return {"uuid": "uuid-risk-cancel", "state": "cancel"}
 
     async def fake_get_order(*, uuid=None, identifier=None, client=None):
@@ -1240,3 +1260,47 @@ async def test_exit_for_risk_marks_slippage_exceeded_on_cancel(monkeypatch, tmp_
     assert result["action"] == "slippage_exceeded"
     assert recorded["count"] == 0
     assert position_manager.get_open_position(strategy["id"]) is not None
+
+
+@pytest.mark.parametrize("configured_mode,extra_risk_config", [
+    ("limit", {}),
+    ("limit_timeout", {"order_timeout_sec": 10}),
+    ("market_capped", {"max_slippage_pct": 0.1}),
+])
+async def test_exit_for_risk_always_uses_market_regardless_of_configured_mode(
+    monkeypatch, tmp_path, configured_mode, extra_risk_config,
+):
+    """4라운드 구조적 수정의 핵심 불변조건 — exit_for_risk()는 strategy에 설정된
+    order_execution_mode가 무엇이든(limit/limit_timeout/market_capped 전부) 항상
+    market으로 강제해야 한다. 실제 order_executor.exit_for_risk() -> exit() 경로를
+    그대로 태우고(모드별 분기를 mock으로 우회하지 않음), 거래소에 실제로 나간
+    ord_type만 확인한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, order_execution_mode=configured_mode, **extra_risk_config)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    captured = {}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        captured["ord_type"] = ord_type
+        captured["time_in_force"] = time_in_force
+        return {"uuid": "uuid-forced-market", "state": "done", "executed_volume": "0.01",
+                "remaining_volume": "0", "paid_fee": "100.0",
+                "trades": [{"funds": "500000.0"}]}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    # order_executor._run_market()은 매도(side='ask')를 "market" ord_type으로 낸다 —
+    # configured_mode가 limit이든 limit_timeout이든 market_capped(FOK "limit"+time_in_force)
+    # 든 상관없이 이 값이어야 강제가 실제로 적용된 것이다.
+    assert captured["ord_type"] == "market"
+    assert captured["time_in_force"] is None  # market_capped였다면 "fok"가 찍혔을 값
+    assert result["action"] == "exited"

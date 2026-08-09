@@ -1164,11 +1164,20 @@ async def test_run_risk_exit_loop_in_flight_guard_recognizes_real_order_executor
     monkeypatch, tmp_path,
 ):
     """재검토 요구사항 — 기존 가드 테스트들은 exit_for_risk()와 db.list_wait_orders() 둘
-    다 mock해서, 진짜 order_executor.exit_for_risk() 호출(exit() -> _run_limit() 경로)이
-    실제로 status='wait' 행을 써서 (age/side로 강화된) 가드가 그걸 인식하는지 아무 것도
-    증명하지 못한다. 여기서는 upbit_client.create_order만 monkeypatch하고 나머지는 전부
-    진짜 경로(exit_for_risk -> exit -> _run_limit -> db.insert_order/update_order_filled)를
-    태운다. upbit_client.create_order가 전체 tick에서 정확히 1번만 불려야 한다."""
+    다 mock해서, 진짜 order_executor.exit_for_risk() 호출이 실제로 status='wait' 행을 써서
+    가드가 그걸 인식하는지 아무 것도 증명하지 못한다. 여기서는 upbit_client.create_order/
+    get_order만 monkeypatch하고 나머지는 전부 진짜 경로(exit_for_risk -> exit ->
+    _run_market -> db.insert_order/update_order_filled)를 태운다.
+    upbit_client.create_order가 전체 tick에서 정확히 1번만 불려야 한다.
+
+    strategy는 일부러 order_execution_mode='limit'으로 설정한다 — exit_for_risk()가
+    이를 무시하고 market을 강제하는지(4라운드 구조적 수정)도 이 테스트가 같이 증명한다
+    (fake_create_order의 ord_type 단언). 가드②는 이제 나이 필터(is_recent) 하나뿐이라
+    order_type을 보지 않으므로, 만들어진 wait 행의 order_type이 'limit'이 아니라
+    'market'이어도(강제됐으니 실제로 그렇다) 여전히 다음 tick들을 막아야 한다 — daemon.
+    time.monotonic()을 크게 앞당겨도(쿨다운은 통과) is_recent()는 실제 벽시계(created_at)
+    를 보므로 세 tick이 실제 시간으로 밀리초 안에 흘러가는 이 테스트에서는 항상 "최근"
+    으로 판정된다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
         dbm, status="running", market="KRW-BTC",
@@ -1191,11 +1200,21 @@ async def test_run_risk_exit_loop_in_flight_guard_recognizes_real_order_executor
 
     async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
                                  time_in_force=None, identifier=None, client=None):
+        assert ord_type == "market"  # order_execution_mode='limit'을 무시하고 강제됐다
         create_order_calls["n"] += 1
         return {"uuid": f"uuid-{create_order_calls['n']}", "state": "wait"}
 
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "executed_volume": "0", "remaining_volume": "0.01",
+                "paid_fee": "0", "trades": []}
+
+    async def fake_sleep_in_order_executor(seconds):
+        pass  # _run_market의 3초 정산 폴링을 실제로 기다리지 않는다.
+
     monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
     monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+    monkeypatch.setattr(order_executor.asyncio, "sleep", fake_sleep_in_order_executor)
     monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
 
     await daemon._run_risk_exit_loop(strategy_id)
@@ -1214,11 +1233,13 @@ async def test_run_risk_exit_loop_in_flight_guard_age_side_filter(
     monkeypatch, tmp_path, side, age_sec, should_fire,
 ):
     """3라운드 M1 — 기존 커버리지(test_run_risk_exit_loop_stops_retrying_once_wait_order_exists
-    등)는 가드가 '최근 ask 행을 인식해 막는다'(positive case)만 증명했다. age/side 필터가
+    등)는 가드가 '최근 ask 행을 인식해 막는다'(positive case)만 증명했다. 나이/side 필터가
     반대 방향(막으면 안 되는 경우들)도 올바르게 통과시키는지 실제 DB 행 + is_recent 실제
-    계산으로 검증한다. wait 행은 order_type='market'(+실제 uuid)으로 만들어 I1의 새 clause
-    (order_type=='limit'+upbit_uuid)가 끼어들지 않게 하고, 순수하게 나이/side 필터만
-    노출한다. created_at 백데이팅은 test_reconciler.py의
+    계산으로 검증한다. 4라운드부터 가드②는 이 나이/side 필터가 전부다(order_type=='limit'
+    +upbit_uuid를 나이와 무관하게 막던 옛 clause는 제거됨 — 별도
+    test_run_risk_exit_loop_in_flight_guard_ages_out_even_for_limit_uuid에서 검증).
+    wait 행은 order_type='market'으로 만들어 순수하게 나이/side 필터만 노출한다.
+    created_at 백데이팅은 test_reconciler.py의
     test_detect_external_orders_ignores_stale_in_flight_order와 동일하게 직접
     UPDATE orders SET created_at = ... 로 한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
@@ -1261,26 +1282,29 @@ async def test_run_risk_exit_loop_in_flight_guard_age_side_filter(
     assert (exit_calls["n"] == 1) == should_fire
 
 
-@pytest.mark.parametrize("order_type,upbit_uuid,should_fire", [
-    ("limit", "existing-uuid", False),  # 오래된 ask, order_type='limit'+실제 uuid -> 막는다
-    ("market", "existing-uuid", True),  # 오래된 ask, order_type='market' -> 발사한다
-    ("limit", None, True),              # 오래된 ask, order_type='limit'이지만 uuid 없음 -> 발사한다
+@pytest.mark.parametrize("order_type,upbit_uuid", [
+    ("limit", "existing-uuid"),  # candle 경로의, 정말로 거래소에 아직 열려 있을 수 있는 매도
+    ("market", "existing-uuid"),
+    ("limit", None),
 ])
-async def test_run_risk_exit_loop_in_flight_guard_limit_uuid_clause(
-    monkeypatch, tmp_path, order_type, upbit_uuid, should_fire,
+async def test_run_risk_exit_loop_in_flight_guard_ages_out_even_for_limit_uuid(
+    monkeypatch, tmp_path, order_type, upbit_uuid,
 ):
-    """I1(3라운드 재검토 Important 1) — 나이창(order_timeout_sec+60=70초)을 이미 넘긴
-    ask wait 행이라도 order_type=='limit'이고 upbit_uuid가 실제 값이면 여전히 막아야
-    한다: order_execution_mode='limit'은 타임아웃/전환 없이 거래소에 진짜로 열려 있는
-    지정가 주문을 status='wait'인 채 의도적으로 남긴다(order_executor._run_limit) —
-    나이 필터만 있으면 그 살아있는 주문 위에 또 실주문을 낸다(3라운드 재검토에서 실제
-    재현: 동일 breach에 서로 다른 upbit_uuid를 가진 ask 주문 2건이 나감). 이 조합은
-    reconciler.sync_pending_limit_orders가 정확히 같은 조건(order_type='limit'+uuid
-    IS NOT NULL)으로 골라 자체 20초 주기로 정리하므로 '영구 wait 행'이 아니다.
-    order_type이 'market'이거나 uuid가 없으면(이 clause의 정확한 요구조건을 벗어나면)
-    새 clause가 매치하지 않아 나이 필터만 적용되고, 나이창을 넘겼으니 발사돼야 한다 —
-    이 두 케이스가 새 clause를 지나치게 넓게 만들지 않았음을 증명한다(영구 정지 재발
-    방지)."""
+    """4라운드 구조적 수정 — 1~3라운드는 order_type=='limit'+upbit_uuid가 실제 값인 ask
+    wait 행을 나이와 무관하게 영구히 막는 clause를 뒀다(당시엔 ticker 청산 자체가 limit
+    모드일 수 있어 정당했다). exit_for_risk()가 이제 항상 market을 강제하므로 그 clause는
+    더 이상 ticker 자신의 주문을 보호하지 않는다 — 대신 candle 트리거 매도
+    (order_executor.exit(), 여전히 전략에 설정된 order_execution_mode를 그대로 쓴다)가
+    order_execution_mode='limit'인 채로 만든, 진짜로 영원히 안 채워질 수도 있는 매도
+    주문에 계속 걸려서 이 ticker 안전망을 영구히 멈추는 동일한 버그를 candle 경로를 통해
+    재현할 위험이 있었다(4라운드 재검토 과제 — 이 상호작용을 조사해 age-immune clause를
+    제거하기로 결정). 그래서 order_type/upbit_uuid와 무관하게 나이 필터(order_timeout_sec
+    +60초, 여기선 5000초 경과)만 적용된다 — 세 조합 모두 나이창을 넘겼으니 반드시
+    발사돼야 한다(더 이상 order_type=='limit'+uuid 조합이라고 예외를 두지 않는다).
+    나이창을 넘긴 뒤 실제로 거래소에 아직 열려 있는 candle 주문과 물량이 겹치면, 강제된
+    market 매도는 Upbit의 잔고 잠금 때문에 거부되고 다음 tick에 쿨다운 후 재시도된다 —
+    이 가드는 그 실패까지 막을 필요가 없다(무기한 차단보다 유한 시간 뒤 재시도가 이
+    브랜치의 사용자 결정과 일치)."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
         dbm, status="running", market="KRW-BTC",
@@ -1319,7 +1343,7 @@ async def test_run_risk_exit_loop_in_flight_guard_limit_uuid_clause(
 
     await daemon._run_risk_exit_loop(strategy_id)
 
-    assert (exit_calls["n"] == 1) == should_fire
+    assert exit_calls["n"] == 1
 
 
 async def test_task_set_manager_creates_risk_exit_task_for_new_strategy(monkeypatch, tmp_path):
