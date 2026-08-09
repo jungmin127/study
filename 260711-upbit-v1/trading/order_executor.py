@@ -110,10 +110,11 @@ async def _create_order_with_retry(
             )
 
 
-async def _fetch_fill(upbit_uuid: str, *, client: httpx.AsyncClient | None = None) -> dict:
-    """get_order()로 체결 결과를 조회한다. 평균체결가는 trades[].funds 합계 ÷
-    executed_volume으로 계산한다(업비트 공식 문서 기준)."""
-    resp = await upbit_client.get_order(uuid=upbit_uuid, client=client)
+def _fill_from_order(resp: dict) -> dict:
+    """GET /order 응답 하나를 체결 요약 dict로 환산한다. 평균체결가는 trades[].funds 합계 ÷
+    executed_volume으로 계산한다(업비트 공식 문서 기준). uuid 대신 identifier로 조회한
+    응답도 같은 형태라(둘 다 같은 엔드포인트) 그대로 재사용할 수 있다 — 6라운드 C1의
+    uuid 복구 경로가 조회를 한 번 더 하지 않게 하려고 _fetch_fill()에서 분리했다."""
     executed_volume = float(resp["executed_volume"])
     filled_price = (
         sum(float(t["funds"]) for t in resp["trades"]) / executed_volume
@@ -126,6 +127,11 @@ async def _fetch_fill(upbit_uuid: str, *, client: httpx.AsyncClient | None = Non
         "filled_price": filled_price,
         "fee": float(resp["paid_fee"]),
     }
+
+
+async def _fetch_fill(upbit_uuid: str, *, client: httpx.AsyncClient | None = None) -> dict:
+    """get_order()로 체결 결과를 조회한다."""
+    return _fill_from_order(await upbit_client.get_order(uuid=upbit_uuid, client=client))
 
 
 def _capped_price(expected_price: float, side: str, max_slippage_pct: float) -> float:
@@ -437,6 +443,95 @@ async def exit(
     return order
 
 
+def _mark_stale_order_resolved(stale: dict, upbit_uuid: str, fill: dict) -> None:
+    """청산 전 사전 정리에서 거래소 실제 상태를 확인한 ask wait 행을 로컬에서도 종결한다
+    (6라운드 번들 수정). 이걸 하지 않으면 그 행이 계속 status='wait'으로 남아 이후 모든
+    risk-exit 시도가 같은 행을 다시 찾아 무한히 재취소한다 — reconciler의 미체결 동기화
+    (sync_pending_limit_orders)는 order_type='limit' 전용이라 exit_for_risk()가 남기는
+    market 행을 영원히 건드리지 않기 때문에 여기서 직접 끝내야 한다.
+
+    upbit_uuid는 UNIQUE라, identifier로 복구한 uuid를 그대로 쓰면 다른 행이 이미 그 uuid를
+    선점한 경우(reconciler._detect_external_orders가 이 미확정 주문을 외부주문으로 오인해
+    별도 행으로 기록해둔 경우 — 나이 제한을 넘긴 uuid 없는 wait 행에서 실제로 가능하다)
+    IntegrityError로 손절 경로 전체가 죽는다. 그럴 땐 uuid를 기록하지 않고 상태만
+    종결한다 — 중복 기록은 reconciler가 이미 갖고 있다."""
+    owner = db.get_order_by_upbit_uuid(upbit_uuid)
+    stored_uuid = upbit_uuid if owner is None or owner["id"] == stale["id"] else stale["upbit_uuid"]
+    if stored_uuid != upbit_uuid:
+        logger.warning(
+            "잔여 매도 주문의 uuid가 다른 orders 행에 이미 기록돼 있어 상태만 종결한다: "
+            "order_id=%s upbit_uuid=%s 선점행=%s", stale["id"], upbit_uuid, owner["id"],
+        )
+    db.update_order_filled(
+        stale["id"], stored_uuid, fill["filled_price"], fill["executed_volume"],
+        fill["fee"], None, "done" if fill["state"] == "done" else "cancel",
+    )
+
+
+async def _resolve_stale_ask_order(
+    stale: dict, *, client: httpx.AsyncClient | None = None,
+) -> float:
+    """청산 전 사전 정리 대상인 ask status='wait' 행 하나를 거래소 실제 상태에 맞춰
+    정리하고, "이미 팔려서 이번 청산에서 다시 팔면 안 되는 수량"을 반환한다.
+
+    C1(uuid 복구) — _run_market()은 create_order() 성공 뒤 _await_settlement()(최대 3초)를
+    거친 다음에야 upbit_uuid를 행에 기록한다. 그 창에서 프로세스가 죽으면 거래소엔 진짜
+    주문이 살아있는데 로컬 행은 upbit_uuid=NULL이다. 그 행을 "취소할 게 없다"고 건너뛰면
+    재기동 직후 두 번째 실주문이 나간다. _create_order_with_retry가 모든 주문에 심어둔
+    identifier(= 내부 행 id)로 재조회해 실제 uuid를 복구한다 — 그 함수의 네트워크 에러
+    재시도 경로가 이미 쓰는 것과 같은 메커니즘이다. 4xx면 접수된 적이 없는 고아 행이므로
+    (create_order 자체가 실패한 뒤 정리되지 않은 경우) 취소할 대상 없이 0을 반환한다.
+    5xx는 "없다"가 아니라 "확인을 못 했다"이므로 그대로 올린다 — 살아있을지도 모르는
+    매도 주문을 확인하지 못한 채 두 번째 매도를 내는 게 이 라운드가 막으려는 바로 그
+    사고다(다음 tick에 쿨다운 뒤 다시 확인한다).
+
+    C2/I1(체결 반영) — cancel_order()의 반환값은 신뢰하지 않는다. _run_limit_timeout이
+    같은 경쟁조건에서 확립한 패턴을 따라, 취소 전에 상태를 조회하고 취소 후에 다시
+    조회해 최종 executed_volume을 확정한다. 취소 요청이 성공했어도 그 사이에 체결이
+    더 붙었을 수 있어(조회→취소 사이 창) 사후 재조회가 필요하다 — 이 값이 틀리면
+    뒤따르는 시장가 매도가 보유량을 초과해 insufficient_funds_ask로 거부되고, 그 시점엔
+    이 행을 이미 종결해버려서 다음 tick엔 정보조차 남지 않는다(영구 실패). 취소가
+    실패했는데 재조회 결과가 여전히 wait이면 그 주문은 진짜로 거래소에 살아있는
+    것이므로 예외를 삼키지 않고 올린다(5라운드는 여기서 무조건 "이미 정리됐다"고
+    가정하고 진행했다 — I1). 네트워크 예외(httpx.TransportError/TimeoutException)와
+    UpbitRateLimitError도 같은 이유로 잡지 않는다 — 전부 "거래소 상태를 확인하지 못했다"
+    이고, 그 상태로 두 번째 매도를 내는 것보다 이번 tick을 포기하는 편이 안전하다."""
+    upbit_uuid = stale["upbit_uuid"]
+    if upbit_uuid is None:
+        try:
+            resp = await upbit_client.get_order(identifier=stale["id"], client=client)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code >= 500:
+                raise
+            logger.info(
+                "잔여 매도 주문이 거래소에 접수된 적이 없다(취소 대상 아님): order_id=%s status=%s",
+                stale["id"], exc.response.status_code,
+            )
+            return 0.0
+        upbit_uuid = resp["uuid"]
+        fill = _fill_from_order(resp)
+    else:
+        fill = await _fetch_fill(upbit_uuid, client=client)
+
+    if fill["state"] in ("done", "cancel"):
+        # 이미 거래소에서 확정된 주문 — 취소할 게 없다(무의미한 취소 요청으로 order 그룹
+        # rate limit을 소모하지 않는다). 체결된 만큼만 "이미 팔림"으로 계산한다.
+        _mark_stale_order_resolved(stale, upbit_uuid, fill)
+        return fill["executed_volume"]
+
+    cancel_error: httpx.HTTPStatusError | None = None
+    try:
+        await upbit_client.cancel_order(uuid=upbit_uuid, client=client)
+    except httpx.HTTPStatusError as exc:
+        cancel_error = exc
+
+    fill = await _fetch_fill(upbit_uuid, client=client)
+    if cancel_error is not None and fill["state"] == "wait":
+        raise cancel_error
+    _mark_stale_order_resolved(stale, upbit_uuid, fill)
+    return fill["executed_volume"]
+
+
 async def exit_for_risk(
     strategy: dict, position: dict, expected_price: float, reason: str,
     *, client: httpx.AsyncClient | None = None, dry_run: bool = False,
@@ -466,33 +561,65 @@ async def exit_for_risk(
     기대 왔다(사용자가 지적한 잔여 위험). 이 라운드부터는 그 가정에 기대지 않고, exit()
     호출 전에 이 함수가 직접 그 충돌 가능성을 없앤다: db.list_wait_orders()로 이 전략의
     미체결 주문을 조회해 side=='ask'인 행만 골라(매수 wait 행은 원화를 묶어둘 뿐 지금
-    팔려는 코인 잔고와 무관하므로 건드리지 않는다) upbit_uuid가 있는 행마다
-    upbit_client.cancel_order()를 호출해 거래소에서 먼저 취소한다(upbit_uuid가 None인
-    행은 거래소에 아무 것도 걸려있지 않은 내부 부기용 고아 행이라 취소할 대상이 없다 —
-    건너뛴다). 취소 하나하나를 독립된 try/except로 감싼다 — 우리가 DB를 읽은 시점과
-    실제 취소 사이에 그 주문이 이미 체결되거나 취소돼 있으면 Upbit가 취소 요청 자체를
-    거부하는데(_run_limit_timeout이 동일 경쟁조건을 이미 겪은 전례 — httpx.HTTPStatusError
-    로 나타난다), 그건 "취소할 필요가 이미 없어졌다"는 뜻이지 실패가 아니므로 로그만
-    남기고 다음 대상으로(또는 곧바로 exit() 호출로) 넘어간다 — 이 사전 정리 단계의
-    실패가 뒤따르는 실제 청산 시도를 절대 막으면 안 된다. dry_run 모드에서는 이 사전
-    취소 자체를 건너뛴다 — dry_run은 실거래소에 어떤 부수효과도 내지 않아야 하는데,
+    팔려는 코인 잔고와 무관하므로 건드리지 않는다) 거래소에서 먼저 취소한다.
+    dry_run 모드에서는 이 사전 취소 자체를 건너뛴다 — dry_run은 실거래소에 어떤
+    부수효과도 내지 않아야 하는데,
     list_wait_orders()가 (과거 실거래에서 남은) 진짜 대기 행을 찾아내면 cancel_order()가
-    실제 DELETE 요청을 내보내 그 계약을 깬다."""
+    실제 DELETE 요청을 내보내 그 계약을 깬다.
+
+    6라운드 추가 — 5라운드의 사전 취소 단계에는 재검토가 실제 코드 경로로 재현한 구멍이
+    둘 있었다. 정리 대상 한 건을 처리하는 책임은 _resolve_stale_ask_order()로 옮겼고
+    (uuid 복구 C1, 취소-체결 경쟁조건 I1의 상세는 그 docstring 참고), 이 함수에는 그
+    결과를 청산 수량에 반영하는 책임만 남는다.
+
+    (C2) 취소한 주문이 이미 일부 체결됐으면 실제 코인 잔고는 그만큼 줄어 있는데,
+    exit()은 position["entry_qty"](원래 전량)를 그대로 팔려 해서 업비트가
+    insufficient_funds_ask로 거부한다 — 그 예외는 daemon의 tick 핸들러에 삼켜지고
+    포지션은 닫히지 않아, 손절이 매 쿨다운 주기마다 똑같이 실패한다. 그래서 정리한
+    주문들의 실체결 수량 합(resolved_volume)을 entry_qty에서 빼고, 4라운드가 strategy
+    dict에 쓴 것과 같은 shallow copy 패턴으로 position dict의 entry_qty만 덮어써
+    exit()에 넘긴다(exit()의 시그니처는 건드리지 않는다).
+
+    수량 보정 방식으로 get_accounts() 실잔고 대조(설계 후보 b)가 아니라 체결량 정밀
+    누적(후보 a)을 택한 이유: (1) 실잔고 상한은 "취소 직후 locked가 언제 풀려 balance로
+    돌아오는가"라는 검증 불가능한 업비트 내부 타이밍에 의존한다 — 아직 안 풀렸으면
+    상한이 0 근처로 잡혀 손절이 아예 안 나가는, 원래 버그보다 나쁜 실패가 된다.
+    (2) 이 모듈은 baseline_qty(사용자가 원래 갖고 있던 같은 코인 수량 — 봇 소유가 아님)를
+    모른다. reconciler._reconcile_position은 actual_qty = 잔고 - baseline_qty로 계산하는데,
+    그 보정 없이 min(entry_qty, 잔고)를 쓰면 baseline이 있는 전략에서 사용자의 코인까지
+    팔거나(잔고가 더 커 보여 상한이 무력화) 잘못된 수량을 판다. 잔고 대조는 baseline을
+    소유한 reconciler의 책임이고(그 모듈의 존재 이유 자체가 "내부 부기 대 실제 잔고
+    대조"다), order_executor가 그 계산을 복제하는 건 잘못된 위치다. (3) 체결량은 이
+    모듈이 이미 모든 경로에서 쓰는 _fetch_fill() 한 소스에서 나오며 새 의존/새 가정이
+    없다.
+
+    (수량 0) 정리한 주문이 포지션 수량을 전부(또는 최소주문금액 미만만 남기고) 소진했으면
+    팔 게 없다 — 0/음수/먼지 주문은 업비트가 거부할 뿐이므로 아무 주문도 내지 않고
+    "nothing_to_sell"로 조용히 끝낸다. positions/current_capital 부기를 여기서 흉내내지는
+    않는다 — reconciler.check_manual_intervention()의 주기적 잔고 대조가 "내부 포지션과
+    실잔고 불일치"를 정확히 그 용도로 self-heal한다."""
+    resolved_volume = 0.0
     if not dry_run:
+        # position_id로 거르지 않는다 — 이 전략에 열려있는 ask 주문은 어느 것이든 지금
+        # 팔려는 같은 코인 잔고를 두고 충돌하므로 전부 정리 대상이고, 체결량도 전부
+        # 합산한다. 혹시 이전 포지션이 남긴 체결까지 합산돼 과다 차감되더라도 방향이
+        # 안전한 쪽이다("덜 팔아 먼지가 남음"은 reconciler가 self-heal하지만, "더 팔려다
+        # insufficient_funds_ask로 거부됨"은 손절 자체가 실패한다).
         for stale in db.list_wait_orders(strategy["id"]):
-            if stale["side"] != "ask" or stale["upbit_uuid"] is None:
+            if stale["side"] != "ask":
                 continue
-            try:
-                await upbit_client.cancel_order(uuid=stale["upbit_uuid"], client=client)
-            except (
-                httpx.HTTPStatusError, httpx.TransportError, httpx.TimeoutException,
-                upbit_client.UpbitRateLimitError,
-            ) as exc:
-                logger.warning(
-                    "청산 전 잔여 매도 주문 취소 실패(이미 체결/취소됐을 수 있음, 무시하고 "
-                    "계속): order_id=%s upbit_uuid=%s error=%s",
-                    stale["id"], stale["upbit_uuid"], exc,
-                )
+            resolved_volume += await _resolve_stale_ask_order(stale, client=client)
+
+    if resolved_volume > 0:
+        sell_volume = _floor_volume(position["entry_qty"] - resolved_volume)
+        if sell_volume <= 0 or sell_volume * expected_price < _MIN_ORDER_AMOUNT_KRW:
+            logger.warning(
+                "잔여 매도 주문이 이미 체결돼 청산할 수량이 남지 않았다(주문 생략, 포지션 "
+                "부기는 reconciler가 맞춘다): strategy_id=%s entry_qty=%s 기체결=%s",
+                strategy["id"], position["entry_qty"], resolved_volume,
+            )
+            return {"action": "nothing_to_sell", "order_id": None}
+        position = {**position, "entry_qty": sell_volume}
 
     forced_risk_config = json.loads(strategy["risk_config_json"])
     forced_risk_config["order_execution_mode"] = "market"

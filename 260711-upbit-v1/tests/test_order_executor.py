@@ -1306,36 +1306,66 @@ async def test_exit_for_risk_always_uses_market_regardless_of_configured_mode(
     assert result["action"] == "exited"
 
 
+def _exit_fill_response():
+    """청산 시장가 주문이 전량 체결됐을 때의 get_order 응답(체결수량은 호출자가 검증하는
+    create_order 인자와 별개라, 이 응답 자체는 모든 시나리오에서 재사용해도 무방하다)."""
+    return {"uuid": "uuid-exit", "state": "done", "executed_volume": "0.01",
+            "remaining_volume": "0", "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+
+
+def _stale_ask_row(dbm, strategy, position, *, upbit_uuid=None, order_type="limit"):
+    """청산 전 사전 정리 대상이 되는 ask status='wait' 행 하나를 만든다. upbit_uuid=None이면
+    _run_market()이 uuid를 기록하기 전에 프로세스가 죽은 상태(6라운드 C1)를 재현한다."""
+    order_id = dbm.insert_order(
+        strategy["id"], position["id"], "KRW-BTC", "ask", order_type,
+        51_000_000.0, 0.01, 51_000_000.0,
+    )
+    if upbit_uuid is not None:
+        dbm.update_order_filled(order_id, upbit_uuid, None, None, None, None, "wait")
+    return order_id
+
+
+def _order_state(state, executed_volume, *, uuid="stale-ask-uuid", funds="200000.0"):
+    return {
+        "uuid": uuid, "state": state, "executed_volume": str(executed_volume),
+        "remaining_volume": str(round(0.01 - executed_volume, 8)),
+        "paid_fee": "50.0" if executed_volume else "0",
+        "trades": [{"funds": funds}] if executed_volume else [],
+    }
+
+
 async def test_exit_for_risk_cancels_stale_ask_wait_order_before_placing_market_exit(monkeypatch, tmp_path):
     """5라운드 핵심 수정 — exit_for_risk()는 market 청산 주문을 내기 전에, 같은 전략의
     남아있는 ask wait 행(실제 upbit_uuid가 있는)을 먼저 취소해야 한다. 순서 자체가
-    중요하므로(취소가 먼저, 시장가 주문이 나중) 두 fake가 공유하는 call_order 리스트로
-    호출 순서를 직접 검증한다 — 둘 다 호출됐다는 것만으로는 부족하다."""
+    중요하므로(취소가 먼저, 시장가 주문이 나중) fake들이 공유하는 call_order 리스트로
+    호출 순서를 직접 검증한다 — 둘 다 호출됐다는 것만으로는 부족하다.
+
+    6라운드 — 취소 전후로 그 주문의 실제 체결 상태를 조회하는 단계가 추가됐으므로(C2),
+    fake_get_order도 uuid별로 다른 응답을 준다. 이 시나리오의 잔여 주문은 한 주도
+    체결되지 않았으므로 청산 수량은 여전히 보유 전량(0.01)이어야 한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)
     position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
     position = position_manager.get_open_position(strategy["id"])
-
-    stale_order_id = dbm.insert_order(
-        strategy["id"], None, "KRW-BTC", "ask", "limit", 51_000_000.0, 0.01, 51_000_000.0,
-    )
-    dbm.update_order_filled(stale_order_id, "stale-ask-uuid", None, None, None, None, "wait")
+    _stale_ask_row(dbm, strategy, position, upbit_uuid="stale-ask-uuid")
 
     call_order = []
+    cancelled = {"done": False}
 
     async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
         call_order.append(("cancel", uuid))
+        cancelled["done"] = True
         return {"uuid": uuid, "state": "cancel"}
 
     async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
                                  time_in_force=None, identifier=None, client=None):
-        call_order.append(("create", ord_type))
-        return {"uuid": "uuid-exit", "state": "done", "executed_volume": "0.01",
-                "remaining_volume": "0", "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+        call_order.append(("create", ord_type, volume))
+        return _exit_fill_response()
 
     async def fake_get_order(*, uuid=None, identifier=None, client=None):
-        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
-                "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+        if uuid == "stale-ask-uuid":
+            return _order_state("cancel" if cancelled["done"] else "wait", 0)
+        return _exit_fill_response()
 
     monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
     monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
@@ -1343,24 +1373,78 @@ async def test_exit_for_risk_cancels_stale_ask_wait_order_before_placing_market_
 
     result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
 
-    assert call_order == [("cancel", "stale-ask-uuid"), ("create", "market")]
+    assert call_order == [("cancel", "stale-ask-uuid"), ("create", "market", "0.01")]
     assert result["action"] == "exited"
 
 
-async def test_exit_for_risk_skips_cancel_for_wait_order_without_upbit_uuid(monkeypatch, tmp_path):
-    """upbit_uuid가 None인 wait 행은 거래소에 아무 것도 걸려있지 않은 내부 부기용 고아
-    행이다 — 취소할 대상이 없으므로 cancel_order를 호출하지 않고 건너뛰어야 하고,
-    청산 자체는 정상적으로 진행돼야 한다."""
+async def test_exit_for_risk_recovers_uuidless_stale_ask_order_by_identifier(monkeypatch, tmp_path):
+    """6라운드 C1 — _run_market()은 create_order() 성공 후 _await_settlement()(최대 3초)를
+    거친 뒤에야 upbit_uuid를 orders 행에 기록한다. 그 사이에 프로세스가 죽으면 거래소엔
+    진짜 주문이 살아있는데 로컬 행은 status='wait', upbit_uuid=NULL로 남는다. 5라운드는
+    이런 행을 "취소할 대상이 없다"며 건너뛰어(가드② 제거의 회귀) 두 번째 실주문이
+    나갔다. 이제는 _create_order_with_retry가 모든 주문에 심어둔 identifier(= 내부 행 id)
+    로 재조회해 실제 uuid를 복구한 뒤 취소해야 한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)
     position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
     position = position_manager.get_open_position(strategy["id"])
+    stale_order_id = _stale_ask_row(dbm, strategy, position, order_type="market")
 
-    # upbit_uuid를 채우지 않은 채 그대로 둔다 — insert_order() 직후 상태와 동일(status='wait',
-    # upbit_uuid=NULL).
-    dbm.insert_order(strategy["id"], None, "KRW-BTC", "ask", "limit", 51_000_000.0, 0.01, 51_000_000.0)
+    calls = []
+    cancelled = {"done": False}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        calls.append(("get", uuid, identifier))
+        if identifier == stale_order_id or uuid == "recovered-uuid":
+            return _order_state(
+                "cancel" if cancelled["done"] else "wait", 0, uuid="recovered-uuid",
+            )
+        return _exit_fill_response()
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        calls.append(("cancel", uuid, identifier))
+        cancelled["done"] = True
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        calls.append(("create", ord_type, volume))
+        return _exit_fill_response()
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert ("get", None, stale_order_id) in calls  # identifier로 실제 주문을 찾아냈다
+    assert ("cancel", "recovered-uuid", None) in calls  # 복구한 uuid로 취소했다
+    # 취소가 끝난 뒤에 청산 주문이 나갔다(순서가 뒤집히면 두 매도가 잔고를 두고 충돌한다)
+    assert calls.index(("cancel", "recovered-uuid", None)) < calls.index(("create", "market", "0.01"))
+    assert result["action"] == "exited"
+    assert dbm.get_order_by_id(stale_order_id)["upbit_uuid"] == "recovered-uuid"
+
+
+async def test_exit_for_risk_skips_uuidless_stale_row_that_never_reached_the_exchange(
+    monkeypatch, tmp_path,
+):
+    """upbit_uuid가 없고 identifier 재조회도 4xx(주문 없음)로 실패하는 행은 거래소에
+    접수된 적이 없는 내부 부기용 고아 행이다(create_order 자체가 실패한 뒤 정리되지 않은
+    경우 — _validate_mode docstring이 말하는 'status=wait 고아 행'). 취소할 대상이
+    없으므로 cancel_order를 부르지 않고, 청산은 전량 그대로 진행돼야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    stale_order_id = _stale_ask_row(dbm, strategy, position)
 
     cancel_calls = {"n": 0}
+    created = {}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if identifier == stale_order_id:
+            raise _http_error(404)
+        return _exit_fill_response()
 
     async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
         cancel_calls["n"] += 1
@@ -1368,12 +1452,8 @@ async def test_exit_for_risk_skips_cancel_for_wait_order_without_upbit_uuid(monk
 
     async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
                                  time_in_force=None, identifier=None, client=None):
-        return {"uuid": "uuid-exit", "state": "done", "executed_volume": "0.01",
-                "remaining_volume": "0", "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
-
-    async def fake_get_order(*, uuid=None, identifier=None, client=None):
-        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
-                "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+        created["volume"] = volume
+        return _exit_fill_response()
 
     monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
     monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
@@ -1382,36 +1462,73 @@ async def test_exit_for_risk_skips_cancel_for_wait_order_without_upbit_uuid(monk
     result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
 
     assert cancel_calls["n"] == 0
+    assert created["volume"] == "0.01"
     assert result["action"] == "exited"
 
 
-async def test_exit_for_risk_proceeds_when_stale_cancel_fails(monkeypatch, tmp_path):
-    """취소 시점엔 이미 그 주문이 체결/취소돼 있을 수 있다 — Upbit는 이럴 때 취소
-    요청 자체를 거부한다(httpx.HTTPStatusError로 나타남, _run_limit_timeout이 이미
-    겪은 것과 동일한 경쟁조건). 이 실패가 뒤따르는 실제 청산 시도를 막으면 안 된다."""
+async def test_exit_for_risk_raises_when_identifier_lookup_fails_with_server_error(
+    monkeypatch, tmp_path,
+):
+    """5xx는 "그런 주문 없음"이 아니라 "확인 자체를 못 했음"이다 — 거래소에 살아있을 수도
+    있는 매도 주문을 확인하지 못한 채로 두 번째 시장가 매도를 내면 안 된다. 예외를 그대로
+    올려 이번 tick을 건너뛰고(daemon이 로그만 남기고 쿨다운 뒤 재시도) 다음에 다시
+    확인한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)
     position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
     position = position_manager.get_open_position(strategy["id"])
+    stale_order_id = _stale_ask_row(dbm, strategy, position)
 
-    stale_order_id = dbm.insert_order(
-        strategy["id"], None, "KRW-BTC", "ask", "limit", 51_000_000.0, 0.01, 51_000_000.0,
-    )
-    dbm.update_order_filled(stale_order_id, "already-resolved-uuid", None, None, None, None, "wait")
+    create_calls = {"n": 0}
 
-    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
-        request = httpx.Request("DELETE", "https://api.upbit.com/v1/order")
-        response = httpx.Response(400, request=request, json={"error": {"message": "order not found"}})
-        raise httpx.HTTPStatusError("order not found", request=request, response=response)
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if identifier == stale_order_id:
+            raise _http_error(503)
+        return _exit_fill_response()
 
     async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
                                  time_in_force=None, identifier=None, client=None):
-        return {"uuid": "uuid-exit", "state": "done", "executed_volume": "0.01",
-                "remaining_volume": "0", "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+        create_calls["n"] += 1
+        return _exit_fill_response()
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert create_calls["n"] == 0
+
+
+async def test_exit_for_risk_reduces_sell_volume_by_partially_filled_stale_order(
+    monkeypatch, tmp_path,
+):
+    """6라운드 C2 — 취소한 잔여 매도가 이미 0.004를 팔아치웠다면 실제 코인 잔고는
+    0.006뿐이다. 그런데도 청산이 원래 entry_qty(0.01) 전량을 팔려 하면 업비트가
+    insufficient_funds_ask로 거부하고, 그 예외가 tick 핸들러에 삼켜져 손절이 매 쿨다운
+    주기마다 똑같이 실패한다. 실제로 거래소에 나간 volume 인자를 검증한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    stale_order_id = _stale_ask_row(dbm, strategy, position, upbit_uuid="stale-ask-uuid")
+
+    cancelled = {"done": False}
+    created = {}
 
     async def fake_get_order(*, uuid=None, identifier=None, client=None):
-        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
-                "paid_fee": "100.0", "trades": [{"funds": "500000.0"}]}
+        if uuid == "stale-ask-uuid":
+            return _order_state("cancel" if cancelled["done"] else "wait", 0.004)
+        return _exit_fill_response()
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        cancelled["done"] = True
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        created["volume"] = volume
+        return _exit_fill_response()
 
     monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
     monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
@@ -1419,7 +1536,179 @@ async def test_exit_for_risk_proceeds_when_stale_cancel_fails(monkeypatch, tmp_p
 
     result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
 
+    assert created["volume"] == "0.006"  # 0.01 - 이미 팔린 0.004
     assert result["action"] == "exited"
+    assert dbm.get_order_by_id(stale_order_id)["status"] == "cancel"
+
+
+async def test_exit_for_risk_places_no_order_when_stale_order_filled_during_cancel_race(
+    monkeypatch, tmp_path,
+):
+    """6라운드 C2/I1 — DB를 읽은 시점과 취소 사이에 잔여 매도가 전량 체결되면 업비트는
+    취소를 거부한다(_run_limit_timeout이 이미 겪은 경쟁조건). 5라운드는 이 실패를
+    "이미 정리됐다"고만 로그하고 전량 매도를 강행했다. 이제는 재조회해서 done이면 그
+    수량을 이미 팔린 것으로 계산해 남길 게 없다고 판단하고, 주문을 아예 내지 않아야
+    한다(0/음수/먼지 주문 금지). 포지션/자본 부기는 다음 reconcile 주기가 맞춘다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    stale_order_id = _stale_ask_row(dbm, strategy, position, upbit_uuid="stale-ask-uuid")
+
+    create_calls = {"n": 0}
+    seen = {"n": 0}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if uuid == "stale-ask-uuid":
+            seen["n"] += 1
+            if seen["n"] == 1:  # 취소 시도 전: 아직 부분체결
+                return _order_state("wait", 0.004)
+            return _order_state("done", 0.01, funds="500000.0")  # 그 사이 전량 체결
+        return _exit_fill_response()
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        raise _http_error(400)
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        create_calls["n"] += 1
+        return _exit_fill_response()
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert create_calls["n"] == 0  # 팔 게 남아있지 않으므로 주문 자체를 내지 않는다
+    assert result["action"] == "nothing_to_sell"
+    assert result["order_id"] is None
+    stale_row = dbm.get_order_by_id(stale_order_id)
+    assert stale_row["status"] == "done"
+    assert stale_row["filled_volume"] == pytest.approx(0.01)
+
+
+async def test_exit_for_risk_does_not_cancel_stale_order_already_done_at_exchange(
+    monkeypatch, tmp_path,
+):
+    """취소 시도 전 조회에서 이미 done이면 취소할 게 없다 — cancel_order를 아예 부르지
+    않고(무의미한 order 그룹 rate limit 소모 방지) 그 수량만 '이미 팔림'으로 계산한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    _stale_ask_row(dbm, strategy, position, upbit_uuid="stale-ask-uuid")
+
+    cancel_calls = {"n": 0}
+    created = {}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if uuid == "stale-ask-uuid":
+            return _order_state("done", 0.004)
+        return _exit_fill_response()
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        cancel_calls["n"] += 1
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        created["volume"] = volume
+        return _exit_fill_response()
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    result = await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert cancel_calls["n"] == 0
+    assert created["volume"] == "0.006"
+    assert result["action"] == "exited"
+
+
+async def test_exit_for_risk_raises_when_cancel_fails_and_order_is_still_live(
+    monkeypatch, tmp_path,
+):
+    """6라운드 I1 — 취소가 실패했는데 재조회해도 여전히 wait이면 그 주문은 거래소에
+    살아있다. 5라운드처럼 로그만 남기고 시장가 매도를 강행하면 같은 코인 잔고를 두고
+    두 주문이 충돌한다. 진짜 장애이므로 삼키지 않고 올린다(_run_limit_timeout의
+    '재조회해서 done이 아니면 raise'와 동일한 판단)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    _stale_ask_row(dbm, strategy, position, upbit_uuid="stale-ask-uuid")
+
+    create_calls = {"n": 0}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if uuid == "stale-ask-uuid":
+            return _order_state("wait", 0)
+        return _exit_fill_response()
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        raise _http_error(500)
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        create_calls["n"] += 1
+        return _exit_fill_response()
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+
+    assert create_calls["n"] == 0
+
+
+async def test_exit_for_risk_does_not_recancel_a_row_it_already_cancelled(monkeypatch, tmp_path):
+    """6라운드 번들 수정 — 취소에 성공한 행을 로컬에서 종결(status='cancel')하지 않으면
+    이후 모든 risk-exit 시도가 같은 행을 다시 찾아 영원히 재취소한다(reconciler의
+    미체결 동기화는 order_type='limit' 전용이라 이 행들을 건드리지 않는다). 두 번째
+    청산에서는 그 행이 아예 조회 대상에 없어야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+    stale_order_id = _stale_ask_row(dbm, strategy, position, upbit_uuid="stale-ask-uuid")
+
+    cancelled_uuids = []
+    exit_orders = {"n": 0}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        if uuid == "stale-ask-uuid":
+            return _order_state("cancel" if cancelled_uuids else "wait", 0)
+        return _exit_fill_response()
+
+    async def fake_cancel_order(*, uuid=None, identifier=None, client=None):
+        cancelled_uuids.append(uuid)
+        return {"uuid": uuid, "state": "cancel"}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        # 청산 주문마다 다른 uuid를 준다 — orders.upbit_uuid는 UNIQUE라 같은 값을 두 번
+        # 기록하면 두 번째 청산이 IntegrityError로 죽는다(테스트 픽스처의 현실성 문제).
+        exit_orders["n"] += 1
+        return {**_exit_fill_response(), "uuid": f"uuid-exit-{exit_orders['n']}"}
+
+    monkeypatch.setattr(upbit_client, "cancel_order", fake_cancel_order)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await order_executor.exit_for_risk(strategy, position, 50_000_000.0, "stop_loss_pct")
+    assert cancelled_uuids == ["stale-ask-uuid"]
+    assert dbm.get_order_by_id(stale_order_id)["status"] == "cancel"
+
+    # 같은 전략에 새 포지션이 열려 다시 손절이 걸려도, 종결된 그 행은 다시 취소되지 않는다.
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    second_position = position_manager.get_open_position(strategy["id"])
+    await order_executor.exit_for_risk(strategy, second_position, 50_000_000.0, "stop_loss_pct")
+
+    assert cancelled_uuids == ["stale-ask-uuid"]
 
 
 async def test_exit_for_risk_does_not_cancel_bid_side_wait_orders(monkeypatch, tmp_path):

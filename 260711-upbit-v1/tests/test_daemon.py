@@ -1168,8 +1168,14 @@ async def test_run_risk_exit_loop_real_order_executor_retries_every_tick_and_can
     exit_for_risk() 자신의 5라운드 사전 취소 단계가 진짜 db.list_wait_orders()로
     찾아내 upbit_client.cancel_order()를 부른다(1라운드 exit_for_risk() 자신의 로직도
     mock하지 않은 진짜 경로다). tick1: 아직 남은 행이 없어 취소 0회. tick2: tick1이
-    남긴 행 1개를 취소. tick3: tick1+tick2가 남긴 행 2개를 취소(이 함수는 취소 후
-    DB 행 status를 바꾸지 않으므로 매 tick 정리 대상이 누적된다) — 합계 0+1+2=3회."""
+    남긴 행 1개를 취소. tick3: tick2가 남긴 행 1개만 취소 — 합계 0+1+1=2회.
+
+    6라운드 번들 수정 — 예전엔 tick3에서 tick1+tick2가 남긴 2개를 다시 취소해 합계가
+    3회였다(취소에 성공해도 DB 행이 status='wait'인 채 남아 매 tick 정리 대상이
+    무한 누적됐다. reconciler의 미체결 동기화는 order_type='limit' 전용이라 이
+    market 행들을 영원히 정리해주지 않는다). 이제 취소에 성공한 행은 곧바로 로컬에서도
+    종결되므로 누적되지 않는다 — 매 시점 정리 대상은 직전 tick이 남긴 1개뿐이고,
+    마지막에 status='wait'으로 남는 행도 tick3의 것 하나뿐이어야 한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
         dbm, status="running", market="KRW-BTC",
@@ -1217,7 +1223,9 @@ async def test_run_risk_exit_loop_real_order_executor_retries_every_tick_and_can
     await daemon._run_risk_exit_loop(strategy_id)
 
     assert create_order_calls["n"] == 3  # 옛 가드였다면 1에서 멈췄어야 한다
-    assert cancel_calls["n"] == 3  # 0(tick1) + 1(tick2) + 2(tick3)
+    assert cancel_calls["n"] == 2  # 0(tick1) + 1(tick2) + 1(tick3), 누적되지 않는다
+    # 취소된 행들은 로컬에서도 종결됐고, 마지막 tick이 남긴 행 하나만 wait로 남는다
+    assert len(dbm.list_wait_orders(strategy_id)) == 1
 
 
 async def test_task_set_manager_creates_risk_exit_task_for_new_strategy(monkeypatch, tmp_path):
