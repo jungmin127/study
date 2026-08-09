@@ -134,32 +134,35 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
     가드는 다음 둘을 lock 안에서 통과해야만 exit_for_risk()를 호출한다: ① fresh_strategy
     의 status가 "running"이 아니면 건너뛴다 — paused는 데몬이 자신의 포지션 기록을
     신뢰할 수 없다고 판단한 상태라 그 위에서 실주문 청산을 내는 게 더 위험하다(Important
-    3, 사용자 결정). ② list_wait_orders() 중 side=="ask"이고 다음 둘 중 하나에 해당하는
-    행이 있으면(이미 진행 중인/자연 해소될 청산 시도) 건너뛴다 — 무기한 신뢰하면 안
-    된다: 이 코드베이스엔 이미 영구적으로 'wait'로 남는 행(들)이 있다
-    (_run_limit_timeout의 잔량전환 고아 행 — order_type='market'+upbit_uuid IS NULL,
-    market 모드 청산의 3초 정산타임아웃 미확정 행 — order_type='market', 나이 제한 없이
-    이 가드를 두면 그런 전략의 실시간 손절/익절이 영구히 멈춘다(재검토 Important 2).
-    ②-1: order_timeout_sec+60초 이내로 최근인 행(reconciler._detect_external_orders가
-    동일 문제를 동일하게 푼 전례 — is_recent + order_timeout_sec+60 윈도 — 를 그대로
-    재사용). ②-2(3라운드 재검토 Important 1 픽스): order_type=='limit'이고 upbit_uuid가
-    실제 값인 행은 나이와 무관하게 항상 막는다 — order_execution_mode='limit'은
-    타임아웃/전환 없이 거래소에서 진짜로 열려 있는 지정가 주문을 status='wait'인 채
-    의도적으로 남겨두는 모드라(order_executor._run_limit), ②-1의 나이 상한(기본 70초)을
-    그냥 넘긴 채 여전히 살아있는 정상 주문이 흔하다 — 그 경우 나이 필터만 있으면 아직
-    거래소에 떠 있는 주문 위에 또 실주문을 낸다(3라운드 재검토에서 직접 재현: 동일
-    breach에 대해 서로 다른 upbit_uuid를 가진 ask 주문 2건이 나감). 이 조합
-    (order_type='limit' + upbit_uuid IS NOT NULL)은 reconciler.sync_pending_limit_orders
-    가 정확히 같은 조건으로 골라(list_wait_orders(order_type="limit") 필터, uuid 없는
-    행은 스킵) 자체 20초 주기로 결국 정리하도록 보장돼 있으므로 "영구 wait 행"이
-    아니다 — _run_limit_timeout 고아 행(order_type='market')·market 모드 미확정 행
-    (order_type='market') 둘 다 order_type이 'limit'이 아니라 이 조합을 만들 수 없어
-    안전하다. acknowledge_and_continue 정책 아래 reconciler가 심어둔 외부주문 행은
-    실제 거래소 주문 타입을 그대로 옮겨적으므로(insert_external_order) 이론상
-    order_type='limit'+실제 uuid 조합을 만들 수 있지만, list_wait_orders(order_type=
-    "limit")는 is_external 여부로 걸러내지 않으므로 그 행도 sync_pending_limit_orders의
-    같은 20초 스윕에 똑같이 걸려 자연 해소된다 — 그러므로 이 조합에 한해서는 외부/내부
-    출처를 가리지 않고 항상 안전하다. 쿨다운(_RISK_EXIT_RETRY_COOLDOWN_SEC)은
+    3, 사용자 결정). ② list_wait_orders() 중 side=="ask"이고 order_timeout_sec+60초
+    이내로 최근에 생성된 행이 있으면(이미 진행 중인/곧 자연 해소될 청산 시도) 건너뛴다
+    (reconciler._detect_external_orders가 동일 문제를 동일하게 푼 전례 — is_recent +
+    order_timeout_sec+60 윈도 — 를 그대로 재사용).
+
+    4라운드 구조적 수정(exit_for_risk()가 항상 market 모드로 강제되도록 바뀜, 사용자
+    결정 — "슬리피지는 감수하겠습니다")으로 이 가드는 단순화됐다. 이전엔(1~3라운드)
+    order_type=='limit'+upbit_uuid가 실제 값인 행을 나이와 무관하게 항상 막는 별도
+    clause가 있었다 — ticker 청산 자체가 limit 모드일 수 있어, order_execution_mode=
+    'limit'(타임아웃 없음)이 만든 청산 주문이 거래소에 무기한 열려 있을 수 있었기
+    때문이다(3라운드 재검토에서 직접 재현: 동일 breach에 서로 다른 upbit_uuid를 가진 ask
+    주문 2건이 나감). 그 clause를 지금도 남겨두면 위험이 사라지지 않고 자리만 옮긴다 —
+    exit_for_risk()가 만드는 행은 이제 항상 order_type='market'이라 그 clause에 절대
+    안 걸리지만, _run_strategy_loop의 candle 트리거 매도(order_executor.exit(), 여전히
+    전략에 설정된 order_execution_mode를 그대로 쓴다)가 order_execution_mode='limit'인
+    채로 만든 진짜로 안 채워지는 매도 주문에는 여전히 걸린다 — 나이 필터 없이 그 조합을
+    영구히 막으면 candle 경로를 거쳐 "이 ticker 안전망이 영구히 멈추는" 동일한 버그를
+    다른 경로로 재현하게 된다(4라운드 재검토 과제로 조사 — 이 상호작용이 실제 위험이라고
+    판단해 age-immune clause를 제거했다). 이제 order_type과 무관하게 ②-1(나이 필터)
+    하나만 적용한다 — order_timeout_sec+60초가 지나면 candle의 limit 매도가 아직도
+    거래소에 열려 있어도 가드는 풀린다. 이 상태에서 exit_for_risk()가 강제로 market
+    매도를 시도하면, candle 주문이 이미 그 물량을 거래소에 잠가둔 상태라면 Upbit가 잔고
+    부족으로 주문 자체를 거부한다(그 실패는 그대로 예외로 로그만 남고 다음 tick에 쿨다운
+    후 재시도된다 — 진짜 중복 체결이 나는 게 아니다) — 반대로 candle 주문이 그 사이
+    취소/체결됐다면 이 market 매도가 정상적으로 안전망 역할을 한다. 즉 나이 필터를 넘긴
+    뒤에는 "거래소 잔고 잠금"이 사실상의 2차 방어선이 되고, 우리 코드는 무기한 차단
+    대신 유한 시간 뒤 재시도 쪽을 택한다 — 이 브랜치의 반복된 실패 패턴(가드를 조이면
+    영구정지, 풀면 중복주문)에서 "영구 정지"가 훨씬 더 나쁘다는 사용자 결정과 일치한다.
+    쿨다운(_RISK_EXIT_RETRY_COOLDOWN_SEC)은
     exit_for_risk()가 slippage_exceeded로 끝나 대기 주문을 남기지 않는 경우(가드②가
     무력한 경우) 매 tick 재시도로 같은 breach에 실주문이 반복 발사되는 걸 막는다(최종
     브랜치 리뷰 Critical 1) — 순수 로컬 태스크 상태(공유되지 않음)라 lock 밖에서
@@ -231,17 +234,15 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                     if fresh_strategy["status"] != "running":
                         continue
                     risk_config = json.loads(fresh_strategy["risk_config_json"])
-                    # 가드 ② — 진행 중인/자연 해소될 청산 시도(side=='ask' wait 주문)가
-                    # 있으면 건너뛴다. ②-1 나이창 + ②-2 limit-uuid 조합, 둘 다 위 함수
-                    # docstring 참고 (3라운드 재검토 Important 1 — ②-1만으로는
-                    # order_execution_mode='limit'의 진짜로 열려 있는 주문이 나이창을
-                    # 넘기자마자 가드가 풀려 중복 실주문이 나간다).
+                    # 가드 ② — 진행 중인/곧 자연 해소될 청산 시도(side=='ask' + 최근 wait
+                    # 주문)가 있으면 건너뛴다. 4라운드부터 나이 필터(②-1) 하나만 적용한다
+                    # — order_type=='limit'+upbit_uuid를 나이와 무관하게 영구히 막던
+                    # 옛 clause(②-2)는 exit_for_risk()가 항상 market을 강제하는 지금은
+                    # candle 경로의 진짜로 안 채워지는 limit 매도에만 걸려 이 안전망을
+                    # 영구정지시킬 수 있어 제거했다(위 함수 docstring 4라운드 문단 참고).
                     in_flight_window_sec = float(risk_config.get("order_timeout_sec", 10)) + 60
                     if any(
-                        o["side"] == "ask" and (
-                            reconciler.is_recent(o["created_at"], in_flight_window_sec)
-                            or (o["order_type"] == "limit" and o["upbit_uuid"] is not None)
-                        )
+                        o["side"] == "ask" and reconciler.is_recent(o["created_at"], in_flight_window_sec)
                         for o in db.list_wait_orders(strategy_id)
                     ):
                         continue
