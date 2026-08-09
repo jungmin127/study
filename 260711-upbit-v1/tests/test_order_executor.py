@@ -1993,3 +1993,37 @@ async def test_enter_marks_order_failed_when_create_order_raises_auth_error(monk
     orders = dbm.list_wait_orders(strategy["id"])
     assert orders == []
     assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_exit_does_not_mark_order_failed_when_settlement_poll_raises_network_error(
+    monkeypatch, tmp_path,
+):
+    """최종 브랜치 리뷰 Critical C1 — create_order()가 성공해 거래소에 실주문이 이미
+    나간 뒤(uuid-live), settlement 폴링(get_order)이 네트워크 타임아웃으로 실패하면
+    그 orders 행을 'failed'로 마킹하면 안 된다. upbit_uuid는 settlement가 끝나야
+    orders 행에 기록되므로(_run_market 참고), 여기서 마킹해버리면
+    _resolve_stale_ask_order()의 uuid 복구 경로(status='wait'인 행만 본다)가 무력화돼
+    다음 tick이 이미 거래소에 나가있는 이 주문을 확인 없이 중복으로 또 낸다 — Minor #7
+    (401/403 인증오류 전용)이 범위를 넘어 이 케이스까지 삼킨 게 Critical 버그였다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-live", "state": "wait"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        raise httpx.TimeoutException("settlement poll timed out")
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    with pytest.raises(httpx.TimeoutException):
+        await order_executor.exit(strategy, position, 50_000_000.0)
+
+    orders = dbm.list_wait_orders(strategy["id"], position_id=position["id"])
+    assert len(orders) == 1  # 여전히 status='wait'로 남아있다 — terminal 마킹되지 않았다
+    assert orders[0]["status"] == "wait"
+    assert orders[0]["upbit_uuid"] is None  # settlement가 끝나기 전이라 아직 기록 전이다

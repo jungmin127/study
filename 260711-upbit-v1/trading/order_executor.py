@@ -382,11 +382,15 @@ async def enter(
             )
         else:  # _validate_mode()가 이미 걸러 도달 불가 — 모드 추가 시 분기 누락 방지용 방어코드
             raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
-    except Exception:
-        # ⑤-4c 백로그 수정(Minor #7) — 인증오류(401/403) 등으로 여기서 실패하면 방금 만든
-        # order_id 행이 status='wait'로 영원히 남는다(GET 재시도 대상도 아니고 영영 고아로
-        # 남음). terminal 마킹만 하고 예외는 그대로 다시 던진다(호출자의 기존 처리 유지).
-        db.update_order_filled(order_id, None, None, None, None, None, "failed")
+    except httpx.HTTPStatusError as exc:
+        # ⑤-4c 백로그 수정(Minor #7, 최종 리뷰에서 좁혀짐 — Critical C1) — 인증오류(401/403)는
+        # 거래소가 주문을 접수하기 전에 실패하므로 이 행을 terminal로 마킹해도 안전하다.
+        # 그 외 모든 예외(네트워크 타임아웃/5xx/rate limit, 또는 결제 폴링 도중의 401/403)는
+        # 이미 거래소에 실주문이 나갔을 수 있는 구간에서 발생한 것이라 절대 건드리지 않는다
+        # — 건드리면(uuid를 NULL로 덮어쓰면) _resolve_stale_ask_order()의 uuid 복구 경로가
+        # 무력화돼 다음 tick이 같은 주문을 중복으로 또 낸다(원래 이 시리즈가 막으려던 사고).
+        if exc.response.status_code in (401, 403):
+            db.update_order_filled(order_id, None, None, None, None, None, "failed")
         raise
 
     if result["status"] != "done":
@@ -440,9 +444,11 @@ async def exit(
             )
         else:  # _validate_mode()가 이미 걸러 도달 불가 — 모드 추가 시 분기 누락 방지용 방어코드
             raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
-    except Exception:
-        # ⑤-4c 백로그 수정(Minor #7) — enter()와 동일한 이유로 terminal 마킹.
-        db.update_order_filled(order_id, None, None, None, None, None, "failed")
+    except httpx.HTTPStatusError as exc:
+        # ⑤-4c 백로그 수정(Minor #7, 최종 리뷰에서 좁혀짐 — Critical C1) — enter()와 동일한
+        # 이유로 401/403만 terminal 마킹한다. 상세 근거는 enter()의 동일 except 주석 참고.
+        if exc.response.status_code in (401, 403):
+            db.update_order_filled(order_id, None, None, None, None, None, "failed")
         raise
 
     if result["status"] != "done":
