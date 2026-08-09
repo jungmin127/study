@@ -1953,3 +1953,43 @@ async def test_resolve_stale_ask_order_marks_row_failed_on_orphan_4xx(monkeypatc
     assert dbm.get_order_by_id(stale_order_id)["status"] == "failed"
     # terminal 마킹됐으므로 다음 조회에서 더 이상 wait 행으로 안 잡힌다.
     assert dbm.list_wait_orders(strategy["id"], position_id=position["id"]) == []
+
+
+async def test_exit_marks_order_failed_when_create_order_raises_auth_error(monkeypatch, tmp_path):
+    """⑤-4c 백로그 수정(Minor #7) — 401/403 같은 인증오류로 주문 생성 자체가 실패하면
+    방금 만든 orders 행이 status='wait'로 영원히 남는다(다음 GET 재시도 대상도 아니고
+    영영 고아로 남음). 예외가 나면 그 행을 'failed'로 마킹한 뒤 예외를 다시 던져야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy["id"])
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        raise _http_error(401)
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await order_executor.exit(strategy, position, 50_000_000.0)
+
+    orders = dbm.list_wait_orders(strategy["id"])
+    assert orders == []  # 더 이상 'wait'로 남아있지 않다(failed로 마킹됐다)
+
+
+async def test_enter_marks_order_failed_when_create_order_raises_auth_error(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        raise _http_error(403)
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    orders = dbm.list_wait_orders(strategy["id"])
+    assert orders == []
+    assert position_manager.get_open_position(strategy["id"]) is None

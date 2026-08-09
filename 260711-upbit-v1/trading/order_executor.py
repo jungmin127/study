@@ -360,27 +360,34 @@ async def enter(
 
     order_id = db.insert_order(strategy["id"], None, market, "bid", mode, price, volume, expected_price)
 
-    if dry_run:
-        db.update_order_filled(order_id, None, price, volume, 0.0, 0.0, "done")
-        result = {"order_id": order_id, "status": "done", "filled_price": price,
-                   "filled_volume": volume, "fee": 0.0}
-    elif mode == "market":
-        result = await _run_market(order_id, market, "bid", capital, volume, expected_price, client=client)
-    elif mode == "limit":
-        result = await _run_limit(order_id, market, "bid", price, volume, client=client)
-    elif mode == "limit_timeout":
-        timeout_sec = risk_config.get("order_timeout_sec", 10)
-        result = await _run_limit_timeout(
-            order_id, strategy["id"], None, market, "bid", price, volume, expected_price,
-            timeout_sec, client=client,
-        )
-    elif mode == "market_capped":
-        result = await _run_market_capped(
-            order_id, market, "bid", expected_price, volume, risk_config["max_slippage_pct"],
-            capital=capital, client=client,
-        )
-    else:  # _validate_mode()가 이미 걸러 도달 불가 — 모드 추가 시 분기 누락 방지용 방어코드
-        raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
+    try:
+        if dry_run:
+            db.update_order_filled(order_id, None, price, volume, 0.0, 0.0, "done")
+            result = {"order_id": order_id, "status": "done", "filled_price": price,
+                       "filled_volume": volume, "fee": 0.0}
+        elif mode == "market":
+            result = await _run_market(order_id, market, "bid", capital, volume, expected_price, client=client)
+        elif mode == "limit":
+            result = await _run_limit(order_id, market, "bid", price, volume, client=client)
+        elif mode == "limit_timeout":
+            timeout_sec = risk_config.get("order_timeout_sec", 10)
+            result = await _run_limit_timeout(
+                order_id, strategy["id"], None, market, "bid", price, volume, expected_price,
+                timeout_sec, client=client,
+            )
+        elif mode == "market_capped":
+            result = await _run_market_capped(
+                order_id, market, "bid", expected_price, volume, risk_config["max_slippage_pct"],
+                capital=capital, client=client,
+            )
+        else:  # _validate_mode()가 이미 걸러 도달 불가 — 모드 추가 시 분기 누락 방지용 방어코드
+            raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
+    except Exception:
+        # ⑤-4c 백로그 수정(Minor #7) — 인증오류(401/403) 등으로 여기서 실패하면 방금 만든
+        # order_id 행이 status='wait'로 영원히 남는다(GET 재시도 대상도 아니고 영영 고아로
+        # 남음). terminal 마킹만 하고 예외는 그대로 다시 던진다(호출자의 기존 처리 유지).
+        db.update_order_filled(order_id, None, None, None, None, None, "failed")
+        raise
 
     if result["status"] != "done":
         return db.get_order_by_id(result["order_id"])
@@ -411,27 +418,32 @@ async def exit(
 
     order_id = db.insert_order(strategy["id"], position["id"], market, "ask", mode, price, volume, expected_price)
 
-    if dry_run:
-        db.update_order_filled(order_id, None, price, volume, 0.0, 0.0, "done")
-        result = {"order_id": order_id, "status": "done", "filled_price": price,
-                   "filled_volume": volume, "fee": 0.0}
-    elif mode == "market":
-        result = await _run_market(order_id, market, "ask", None, volume, expected_price, client=client)
-    elif mode == "limit":
-        result = await _run_limit(order_id, market, "ask", price, volume, client=client)
-    elif mode == "limit_timeout":
-        timeout_sec = risk_config.get("order_timeout_sec", 10)
-        result = await _run_limit_timeout(
-            order_id, strategy["id"], position["id"], market, "ask", price, volume, expected_price,
-            timeout_sec, client=client,
-        )
-    elif mode == "market_capped":
-        result = await _run_market_capped(
-            order_id, market, "ask", expected_price, volume, risk_config["max_slippage_pct"],
-            capital=None, client=client,  # 매도는 보유수량 전량이라 capital 기반 재계산 불필요
-        )
-    else:  # _validate_mode()가 이미 걸러 도달 불가 — 모드 추가 시 분기 누락 방지용 방어코드
-        raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
+    try:
+        if dry_run:
+            db.update_order_filled(order_id, None, price, volume, 0.0, 0.0, "done")
+            result = {"order_id": order_id, "status": "done", "filled_price": price,
+                       "filled_volume": volume, "fee": 0.0}
+        elif mode == "market":
+            result = await _run_market(order_id, market, "ask", None, volume, expected_price, client=client)
+        elif mode == "limit":
+            result = await _run_limit(order_id, market, "ask", price, volume, client=client)
+        elif mode == "limit_timeout":
+            timeout_sec = risk_config.get("order_timeout_sec", 10)
+            result = await _run_limit_timeout(
+                order_id, strategy["id"], position["id"], market, "ask", price, volume, expected_price,
+                timeout_sec, client=client,
+            )
+        elif mode == "market_capped":
+            result = await _run_market_capped(
+                order_id, market, "ask", expected_price, volume, risk_config["max_slippage_pct"],
+                capital=None, client=client,  # 매도는 보유수량 전량이라 capital 기반 재계산 불필요
+            )
+        else:  # _validate_mode()가 이미 걸러 도달 불가 — 모드 추가 시 분기 누락 방지용 방어코드
+            raise ValueError(f"지원하지 않는 order_execution_mode: {mode}")
+    except Exception:
+        # ⑤-4c 백로그 수정(Minor #7) — enter()와 동일한 이유로 terminal 마킹.
+        db.update_order_filled(order_id, None, None, None, None, None, "failed")
+        raise
 
     if result["status"] != "done":
         return db.get_order_by_id(result["order_id"])
