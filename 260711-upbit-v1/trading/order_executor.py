@@ -531,7 +531,13 @@ async def _resolve_stale_ask_order(
     db.accumulate_stale_resolution()으로 즉시 영구 기록하고, 최종 청산 시 가중평균
     원가에 반영해야 하기 때문이다(Important #1/#3/#4). identifier 조회가 4xx를 받는
     고아 행은 이제 status='failed'로 terminal 마킹한다(Minor #6) — 안 그러면 다음
-    tick마다 같은 GET을 무한 재시도한다."""
+    tick마다 같은 GET을 무한 재시도한다.
+
+    (Minor #8, 미수정) cancel_order()가 성공 응답을 줬는데 그 직후 재조회에서 거래소가
+    여전히 wait으로 보고하는 극단적인 경쟁조건은 mock으로 재현 가능한 버그가 아니라 실제
+    업비트 거래소 동작에 대한 불확실성이다 — 코드로 고치지 않고
+    [[upbit-v1-live-trading-roadmap-sequencing]]의 소액 실전 테스트 단계에서 실제로
+    발생하는지 관찰 대상으로 남긴다."""
     upbit_uuid = stale["upbit_uuid"]
     if upbit_uuid is None:
         try:

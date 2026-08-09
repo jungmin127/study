@@ -156,8 +156,12 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
     다음 tick으로 넘어가며(쿨다운은 이미 소모돼 있어 즉시 재시도되지도 않는다),
     확인되지 않은 매도 주문 위로 두 번째 매도를 얹지 않는다 — 그게 이 시리즈가
     반복해서 막으려 한 사고다. 또 정리한 주문이 이미 포지션 수량을 다 팔아버린
-    경우엔 action=="nothing_to_sell"로 돌아오는데, "exited"가 아니므로 아래 분기가
-    자연히 서킷브레이커 판정/쿨다운 리셋을 건너뛴다(포지션 부기는 reconciler 몫).
+    경우엔(⑤-4c 백로그 수정 이후) exit_for_risk()가 그 자리에서 바로 포지션을 닫고
+    action=="exited"로 돌아온다 — 아래 분기가 정상적으로 서킷브레이커 판정/쿨다운
+    리셋을 수행한다(예전엔 action=="nothing_to_sell"로 아무 것도 안 하고 포지션을
+    방치해 reconciler가 "설명 안 됨"으로 오분류했었다 — 잔여주문 정리분을
+    positions 테이블에 영구 기록하는 구조로 바뀌면서 해소됨, 상세는
+    docs/superpowers/specs/2026-08-09-live-trading-risk-exit-backlog-fix-design.md).
     이 가드를 지우고도
     쿨다운(_RISK_EXIT_RETRY_COOLDOWN_SEC)은 그대로 남긴다 — 이건 정합성 가드가 아니라
     처리량 제어다. 손절/익절 임계치 바로 위에서 가격이 tick마다(초당 여러 번) 오르내리면
