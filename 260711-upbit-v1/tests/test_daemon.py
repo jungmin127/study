@@ -16,6 +16,7 @@ def test_poll_interval_sec_scales_with_timeframe():
 
 
 import json
+from datetime import datetime, timezone
 
 import trading.db as db
 import trading.order_executor as order_executor
@@ -23,6 +24,7 @@ import trading.position_manager as position_manager
 import trading.reconciler as reconciler
 import trading.risk_manager as risk_manager
 import trading.signal_engine as signal_engine
+import trading.upbit_client as upbit_client
 import trading.upbit_ws as upbit_ws
 import upbit_data_service
 from tests.trading_db_fixtures import insert_live_strategy
@@ -826,7 +828,9 @@ async def test_run_risk_exit_loop_stops_retrying_once_wait_order_exists(monkeypa
     list_wait_orders()로 진행 중인 청산 시도를 감지해 두 번째 이후 tick은 실주문을
     내지 않고 건너뛰어야 한다. 쿨다운 가드가 개입해 이 테스트를 오염시키지 않도록
     time.monotonic()을 매 호출 충분히 벌려 쿨다운은 항상 통과시킨다 — 이 테스트는
-    순수하게 list_wait_orders 가드만 검증한다."""
+    순수하게 list_wait_orders 가드만 검증한다. fake_list_wait_orders가 반환하는 행은
+    재검토 Important 2 가드(side=='ask' + is_recent)를 통과해야 하므로 side와 최근
+    created_at을 명시한다."""
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
         dbm, status="running", market="KRW-BTC",
@@ -856,8 +860,11 @@ async def test_run_risk_exit_loop_stops_retrying_once_wait_order_exists(monkeypa
 
     def fake_list_wait_orders(live_strategy_id, order_type=None):
         # 첫 시도 전에는 대기 주문이 없다가, 그 이후엔 pending 리밋 주문이 계속
-        # 남아있는 것처럼 흉내낸다.
-        return [{"id": "o1", "status": "wait"}] if exit_calls["n"] > 0 else []
+        # 남아있는 것처럼 흉내낸다. side='ask' + 최근 created_at이어야 가드에 걸린다.
+        if exit_calls["n"] == 0:
+            return []
+        created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        return [{"id": "o1", "status": "wait", "side": "ask", "created_at": created_at}]
 
     monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
     monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
@@ -1021,6 +1028,179 @@ async def test_run_risk_exit_loop_waits_for_lock_before_exiting(monkeypatch, tmp
     await loop_task
 
     assert events == ["lock_held_by_other", "lock_released_by_other", "exit_for_risk"]
+
+
+async def test_run_risk_exit_loop_closes_pause_bypass_that_happens_during_lock_wait(monkeypatch, tmp_path):
+    """재검토 Important 1, 재현된 버그 1 — 예전엔 status 재조회를 lock 밖에서 했기 때문에,
+    _run_risk_exit_loop가 lock을 기다리는 동안 _run_strategy_loop(의 reconciler)가 이
+    전략을 paused로 돌려도 이미 읽어둔(stale) status=='running' 스냅샷으로
+    exit_for_risk()를 발사했다 — pause의 안전장치가 무력화됐다. 이 테스트는 실제
+    asyncio.Lock으로 그 경합을 그대로 재현한다: 다른 태스크가 lock을 쥔 채로
+    _run_risk_exit_loop를 시작시키고, lock을 쥔 동안 실제 DB에 status='paused'를
+    기록한 뒤 풀어준다. exit_for_risk()가 절대 호출되면 안 된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    lock = asyncio.Lock()
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    async with lock:
+        loop_task = asyncio.create_task(daemon._run_risk_exit_loop(strategy_id, lock))
+        await asyncio.sleep(0)  # _run_risk_exit_loop가 트리거를 결정하고 lock 대기에 들어가게 한다
+        # _run_strategy_loop의 reconciler가 이 시점에 잔고 불일치를 발견해 paused로
+        # 전환했다고 가정한다.
+        dbm.update_live_strategy_status(strategy_id, "paused")
+
+    await loop_task
+
+    assert exit_calls["n"] == 0
+
+
+async def test_run_risk_exit_loop_closes_duplicate_order_bypass_that_happens_during_lock_wait(
+    monkeypatch, tmp_path,
+):
+    """재검토 Important 1, 재현된 버그 2 — 예전엔 list_wait_orders() 조회도 lock 밖에서
+    했기 때문에, _run_risk_exit_loop가 lock을 기다리는 동안 _run_strategy_loop가 신호
+    기반 매도주문을 내도(이제 막 status='wait' side='ask' 행이 생겼어도) 이미 읽어둔
+    (비어있던) 스냅샷으로 가드①을 통과해 중복 청산 주문을 냈다. 이 테스트는 실제
+    asyncio.Lock 경합 + 실제 db.insert_order()로 그 시나리오를 재현한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    position = position_manager.get_open_position(strategy_id)
+    lock = asyncio.Lock()
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    async with lock:
+        loop_task = asyncio.create_task(daemon._run_risk_exit_loop(strategy_id, lock))
+        await asyncio.sleep(0)  # _run_risk_exit_loop가 트리거를 결정하고 lock 대기에 들어가게 한다
+        # _run_strategy_loop가 이 시점에 신호 기반 매도주문을 냈다고 가정한다 — 실제
+        # DB에 status='wait' side='ask' 행이 생긴다(created_at은 datetime('now')로 자동
+        # 최근이 된다).
+        dbm.insert_order(
+            strategy_id, position["id"], "KRW-BTC", "ask", "limit",
+            47_000_000.0, 0.01, 47_000_000.0,
+        )
+
+    await loop_task
+
+    assert exit_calls["n"] == 0
+
+
+async def test_run_risk_exit_loop_cooldown_resets_after_successful_exit(monkeypatch, tmp_path):
+    """번들 수정 — 성공적으로 청산했으면(action=='exited') 쿨다운을 -inf로 리셋해야
+    한다. 그러지 않으면 곧바로(같은 tick 처리 흐름 안에서) 재진입한 새 포지션의 정당한
+    손절/익절이 남은 쿨다운 창(30초) 동안 억눌린다. 이 테스트는 첫 tick에서 청산 성공
+    직후, 쿨다운 윈도 안(monotonic 시계를 거의 그대로 둔 채)에 새 포지션을 열고 두 번째
+    tick을 흘려보내 exit_for_risk가 다시 호출되는지 확인한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    exit_calls = {"n": 0}
+    clock = {"value": 0.0}
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["value"])
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+        # 쿨다운(30초) 안에 머무는 짧은 시간만 흘려보낸다 — 리셋이 없었다면 이 두 번째
+        # tick은 쿨다운에 막혀야 한다.
+        clock["value"] += 1.0
+        # 첫 exit이 포지션을 완전히 닫았으므로, 두 번째 tick 전에 새 포지션이 즉시
+        # 재진입했다고 가정한다(예: 이어지는 candle 경로의 재진입).
+        position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": f"o{exit_calls['n']}"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert exit_calls["n"] == 2  # 리셋이 없었다면 1에서 멈췄어야 한다
+
+
+async def test_run_risk_exit_loop_in_flight_guard_recognizes_real_order_executor_wait_row(
+    monkeypatch, tmp_path,
+):
+    """재검토 요구사항 — 기존 가드 테스트들은 exit_for_risk()와 db.list_wait_orders() 둘
+    다 mock해서, 진짜 order_executor.exit_for_risk() 호출(exit() -> _run_limit() 경로)이
+    실제로 status='wait' 행을 써서 (age/side로 강화된) 가드가 그걸 인식하는지 아무 것도
+    증명하지 못한다. 여기서는 upbit_client.create_order만 monkeypatch하고 나머지는 전부
+    진짜 경로(exit_for_risk -> exit -> _run_limit -> db.insert_order/update_order_filled)를
+    태운다. upbit_client.create_order가 전체 tick에서 정확히 1번만 불려야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+        ]}),
+        risk_config_json=json.dumps({"order_execution_mode": "limit"}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    create_order_calls = {"n": 0}
+    clock = {"value": 0.0}
+    # 쿨다운 가드가 이 테스트를 오염시키지 않도록 매 tick 전에 넉넉히 앞당긴다 — 이
+    # 테스트는 순수하게 in-flight(wait 주문) 가드만 검증한다.
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["value"])
+
+    async def fake_stream_ticker(markets):
+        for _ in range(3):
+            clock["value"] += 100.0
+            yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        create_order_calls["n"] += 1
+        return {"uuid": f"uuid-{create_order_calls['n']}", "state": "wait"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert create_order_calls["n"] == 1
 
 
 async def test_task_set_manager_creates_risk_exit_task_for_new_strategy(monkeypatch, tmp_path):

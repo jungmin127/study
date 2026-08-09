@@ -92,7 +92,9 @@ async def hydrate_state(strategy: dict, *, client: httpx.AsyncClient | None = No
     return {"synced_wait_orders": len(synced_orders), "baseline_captured": False, **result}
 
 
-def _is_recent(created_at: str, max_age_sec: float) -> bool:
+def is_recent(created_at: str, max_age_sec: float) -> bool:
+    """공개 헬퍼 — daemon.py의 _run_risk_exit_loop(⑤-4c 재검토 Important 2)도 동일한
+    '영구 wait 행이 가드를 무기한 막는' 문제를 겪어 이 함수를 그대로 재사용한다."""
     created = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - created).total_seconds() <= max_age_sec
 
@@ -115,7 +117,7 @@ async def _detect_external_orders(
     risk_config = json.loads(strategy["risk_config_json"])
     in_flight_window_sec = float(risk_config.get("order_timeout_sec", 10)) + 60
     if any(
-        o["upbit_uuid"] is None and _is_recent(o["created_at"], in_flight_window_sec)
+        o["upbit_uuid"] is None and is_recent(o["created_at"], in_flight_window_sec)
         for o in db.list_wait_orders(strategy["id"])
     ):
         return []
