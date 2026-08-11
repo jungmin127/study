@@ -1101,3 +1101,70 @@ def list_live_strategies_endpoint() -> list[dict]:
         _live_strategy_response(s, positions[s["id"]], current_prices.get(s["market"]))
         for s in strategies
     ]
+
+
+@app.post("/api/v1/live-strategies/{strategy_id}/approve")
+async def approve_live_strategy_endpoint(strategy_id: str) -> dict:
+    strategy = trading_db.get_live_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    if strategy["status"] != "draft":
+        raise HTTPException(status_code=409, detail="draft 상태의 전략만 승인할 수 있습니다")
+
+    risk_config = json.loads(strategy["risk_config_json"])
+    accounts = await upbit_client.get_accounts()
+    krw_account = next((a for a in accounts if a["currency"] == "KRW"), None)
+    available_balance = float(krw_account["balance"]) if krw_account else 0.0
+
+    initial_capital = position_manager.calculate_initial_capital(risk_config, available_balance)
+    running_capital_sum = sum(s["current_capital"] or 0.0 for s in trading_db.list_active_strategies())
+    required = running_capital_sum + initial_capital
+    if required > available_balance:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"가용 잔고 {available_balance:,.0f}원, 필요 자금 {required:,.0f}원"
+                f"(기존 전략 {running_capital_sum:,.0f}원 + 신규 {initial_capital:,.0f}원)"
+            ),
+        )
+
+    approved = trading_db.approve_live_strategy(strategy_id, initial_capital)
+    if not approved:
+        raise HTTPException(
+            status_code=409,
+            detail="승인 처리 중 전략 상태가 변경되었습니다. 새로고침 후 다시 시도하세요",
+        )
+    return _full_live_strategy_response(strategy_id)
+
+
+@app.post("/api/v1/live-strategies/{strategy_id}/pause")
+def pause_live_strategy_endpoint(strategy_id: str) -> dict:
+    if trading_db.get_live_strategy(strategy_id) is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    if not trading_db.transition_live_strategy_status(strategy_id, "running", "paused"):
+        raise HTTPException(status_code=409, detail="running 상태의 전략만 일시정지할 수 있습니다")
+    return _full_live_strategy_response(strategy_id)
+
+
+@app.post("/api/v1/live-strategies/{strategy_id}/resume")
+def resume_live_strategy_endpoint(strategy_id: str) -> dict:
+    if trading_db.get_live_strategy(strategy_id) is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    if not trading_db.transition_live_strategy_status(strategy_id, "paused", "running"):
+        raise HTTPException(status_code=409, detail="paused 상태의 전략만 재개할 수 있습니다")
+    return _full_live_strategy_response(strategy_id)
+
+
+@app.post("/api/v1/live-strategies/{strategy_id}/stop")
+def stop_live_strategy_endpoint(strategy_id: str) -> dict:
+    strategy = trading_db.get_live_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    if strategy["status"] == "stopped":
+        raise HTTPException(status_code=409, detail="이미 중지된 전략입니다")
+    if not trading_db.stop_live_strategy_if_no_open_position(strategy_id):
+        raise HTTPException(
+            status_code=400,
+            detail="열린 포지션이 있어 중지할 수 없습니다. 먼저 포지션을 정리하세요",
+        )
+    return _full_live_strategy_response(strategy_id)

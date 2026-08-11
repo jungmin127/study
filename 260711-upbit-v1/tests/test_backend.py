@@ -407,6 +407,146 @@ def test_list_live_strategies_open_position_is_null_when_no_position(monkeypatch
     assert resp.json()[0]["open_position"] is None
 
 
+def _accounts_with_krw_balance(balance: float):
+    async def _fake(*args, **kwargs):
+        return [{"currency": "KRW", "balance": str(balance), "locked": "0"}]
+    return _fake
+
+
+def test_approve_live_strategy_transitions_to_running(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "running"
+    assert body["current_capital"] == 100000.0
+
+
+def test_approve_live_strategy_returns_404_for_missing(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.post("/api/v1/live-strategies/does-not-exist/approve")
+    assert resp.status_code == 404
+
+
+def test_approve_live_strategy_returns_409_when_already_running(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+    assert resp.status_code == 409
+
+
+def test_approve_live_strategy_rejects_when_balance_insufficient(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(50000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    assert resp.status_code == 400
+    assert trading_db_module.get_live_strategy(strategy_id)["status"] == "draft"
+
+
+def test_approve_live_strategy_sums_other_running_strategies_capital(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        backend_module, "get_krw_markets",
+        lambda: [{"market": "KRW-BTC"}, {"market": "KRW-ETH"}],
+    )
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(150000))
+    first_id = client.post(
+        "/api/v1/live-strategies", json=_live_strategy_request(market="KRW-BTC"),
+    ).json()["id"]
+    assert client.post(f"/api/v1/live-strategies/{first_id}/approve").status_code == 200
+
+    second_id = client.post(
+        "/api/v1/live-strategies", json=_live_strategy_request(market="KRW-ETH"),
+    ).json()["id"]
+    resp = client.post(f"/api/v1/live-strategies/{second_id}/approve")
+
+    assert resp.status_code == 400
+    assert trading_db_module.get_live_strategy(second_id)["status"] == "draft"
+
+
+def test_pause_and_resume_live_strategy(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    pause_resp = client.post(f"/api/v1/live-strategies/{strategy_id}/pause")
+    assert pause_resp.status_code == 200
+    assert pause_resp.json()["status"] == "paused"
+
+    resume_resp = client.post(f"/api/v1/live-strategies/{strategy_id}/resume")
+    assert resume_resp.status_code == 200
+    assert resume_resp.json()["status"] == "running"
+
+
+def test_pause_live_strategy_returns_409_when_not_running(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/pause")
+    assert resp.status_code == 409
+
+
+def test_resume_live_strategy_returns_409_when_not_paused(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/resume")
+    assert resp.status_code == 409
+
+
+def test_stop_live_strategy_succeeds_when_no_open_position(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "stopped"
+
+
+def test_stop_live_strategy_rejects_when_open_position_exists(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+    trading_db_module.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+
+    assert resp.status_code == 400
+    assert trading_db_module.get_live_strategy(strategy_id)["status"] == "running"
+
+
+def test_stop_live_strategy_returns_409_when_already_stopped(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    assert resp.status_code == 409
+
+
 def test_run_backtest_returns_run_id_and_is_retrievable(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _patch_get_candles(monkeypatch)
