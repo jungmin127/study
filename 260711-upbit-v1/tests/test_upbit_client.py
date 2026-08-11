@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from urllib.parse import unquote, urlencode
 
 import jwt
@@ -146,6 +147,41 @@ async def test_get_accounts_raises_after_exhausting_retries(monkeypatch):
     async with _mock_async_client(handler) as client:
         with pytest.raises(RuntimeError):
             await get_accounts(client=client)
+
+
+async def test_get_accounts_logs_warning_on_429_retry(monkeypatch, caplog):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+    monkeypatch.setattr(upbit_client, "RATE_LIMIT_BACKOFF_SECONDS", 0.0)
+    calls = {"count": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(429)
+        return httpx.Response(200, json=[])
+
+    async with _mock_async_client(handler) as client:
+        with caplog.at_level(logging.WARNING, logger="trading.upbit_client"):
+            await get_accounts(client=client)
+
+    assert any("429" in record.message for record in caplog.records)
+
+
+async def test_get_accounts_logs_error_when_retries_exhausted(monkeypatch, caplog):
+    monkeypatch.setenv("UPBIT_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("UPBIT_SECRET_KEY", "test-secret")
+    monkeypatch.setattr(upbit_client, "RATE_LIMIT_BACKOFF_SECONDS", 0.0)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429)
+
+    async with _mock_async_client(handler) as client:
+        with caplog.at_level(logging.WARNING, logger="trading.upbit_client"):
+            with pytest.raises(RuntimeError):
+                await get_accounts(client=client)
+
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
 
 
 async def test_get_accounts_raises_on_http_error(monkeypatch):

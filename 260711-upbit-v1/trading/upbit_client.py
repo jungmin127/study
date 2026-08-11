@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import time
 import uuid
@@ -27,6 +28,8 @@ import jwt
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 UPBIT_BASE_URL = "https://api.upbit.com/v1"
 
@@ -134,10 +137,14 @@ async def _request(
             else:
                 resp = await client.request(method, url, params=params, headers=headers)
             if resp.status_code == 429:
+                logger.warning(
+                    "업비트 429 재시도 %d/%d: %s %s", attempt + 1, RETRY_ATTEMPTS, method, path,
+                )
                 await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS * (attempt + 1))
                 continue
             resp.raise_for_status()
             return resp.json()
+        logger.error("업비트 API 호출 실패(429 재시도 소진): %s %s", method, path)
         raise UpbitRateLimitError(f"업비트 API 호출 실패 (429 재시도 소진): {method} {path}")
     finally:
         if close_client:
