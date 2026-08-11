@@ -114,7 +114,13 @@ def _fill_from_order(resp: dict) -> dict:
     """GET /order 응답 하나를 체결 요약 dict로 환산한다. 평균체결가는 trades[].funds 합계 ÷
     executed_volume으로 계산한다(업비트 공식 문서 기준). uuid 대신 identifier로 조회한
     응답도 같은 형태라(둘 다 같은 엔드포인트) 그대로 재사용할 수 있다 — 6라운드 C1의
-    uuid 복구 경로가 조회를 한 번 더 하지 않게 하려고 _fetch_fill()에서 분리했다."""
+    uuid 복구 경로가 조회를 한 번 더 하지 않게 하려고 _fetch_fill()에서 분리했다.
+
+    시장가 매수(ord_type="price") 응답에는 "volume"/"remaining_volume" 필드 자체가 없다
+    (KRW 금액 기준 주문이라 수량 개념이 없음 — 미체결 잔량도 남기지 않고 즉시 확정됨).
+    없으면 0.0으로 취급한다(실사고: 2026-08-11 KRW-DOGE 진입에서 이 필드 부재로 KeyError
+    발생 → enter()가 예외를 그대로 올려 uuid를 못 남기고, reconciler가 이를 외부주문으로
+    오인해 전략을 paused시킴)."""
     executed_volume = float(resp["executed_volume"])
     filled_price = (
         sum(float(t["funds"]) for t in resp["trades"]) / executed_volume
@@ -123,7 +129,7 @@ def _fill_from_order(resp: dict) -> dict:
     return {
         "state": resp["state"],
         "executed_volume": executed_volume,
-        "remaining_volume": float(resp["remaining_volume"]),
+        "remaining_volume": float(resp.get("remaining_volume", 0.0)),
         "filled_price": filled_price,
         "fee": float(resp["paid_fee"]),
     }
