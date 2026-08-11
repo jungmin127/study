@@ -558,6 +558,38 @@ def adjust_position_qty(
         conn.close()
 
 
+def insert_live_strategy(
+    source_run_id: str | None, market: str, timeframe: str,
+    buy_conditions_json: str, sell_conditions_json: str, risk_config_json: str,
+) -> str:
+    live_strategy_id = str(uuid.uuid4())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO live_strategies "
+            "(id, source_run_id, market, timeframe, buy_conditions_json, sell_conditions_json, risk_config_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (live_strategy_id, source_run_id, market, timeframe,
+             buy_conditions_json, sell_conditions_json, risk_config_json),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return live_strategy_id
+
+
+def list_live_strategies() -> list[dict]:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM live_strategies ORDER BY created_at DESC, rowid DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def list_active_strategies() -> list[dict]:
     conn = _connect()
     try:

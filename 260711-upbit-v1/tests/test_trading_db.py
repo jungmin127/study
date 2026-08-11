@@ -688,3 +688,48 @@ def test_accumulate_stale_resolution_does_not_affect_other_positions(monkeypatch
 
     assert db.get_position(position_a)["stale_resolved_qty"] == pytest.approx(0.004)
     assert db.get_position(position_b)["stale_resolved_qty"] == 0
+
+
+def test_insert_live_strategy_creates_draft_row(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = db.insert_live_strategy(
+        source_run_id="run-1", market="KRW-BTC", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}", risk_config_json="{}",
+    )
+
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["status"] == "draft"
+    assert strategy["source_run_id"] == "run-1"
+    assert strategy["market"] == "KRW-BTC"
+    assert strategy["timeframe"] == "minutes60"
+    assert strategy["current_capital"] is None
+    assert strategy["approved_at"] is None
+
+
+def test_insert_live_strategy_allows_null_source_run_id(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = db.insert_live_strategy(
+        source_run_id=None, market="KRW-ETH", timeframe="days",
+        buy_conditions_json="{}", sell_conditions_json="{}", risk_config_json="{}",
+    )
+
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["source_run_id"] is None
+
+
+def test_list_live_strategies_returns_all_statuses_newest_first(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    older_id = insert_live_strategy(db, status="stopped")
+    newer_id = db.insert_live_strategy(
+        source_run_id=None, market="KRW-BTC", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}", risk_config_json="{}",
+    )
+
+    rows = db.list_live_strategies()
+
+    assert [r["id"] for r in rows] == [newer_id, older_id]
+
+
+def test_list_live_strategies_returns_empty_list_when_none(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    assert db.list_live_strategies() == []
