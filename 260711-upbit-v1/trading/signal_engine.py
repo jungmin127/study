@@ -19,6 +19,7 @@ from engine.condition_tree import (
     apply_operator,
     collect_blocks,
     eval_group_values,
+    find_indicators_with_missing_values,
     indicator_key,
     max_required_period,
     required_aux_markets,
@@ -232,13 +233,16 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
     snapshot_json = json.dumps({k: (None if v != v else v) for k, v in values.items()})
     candle_time_str = latest_candle_time.isoformat()
 
+    buy_missing = find_indicators_with_missing_values(buy_conditions, values)
+    sell_missing = find_indicators_with_missing_values(sell_conditions, values)
+
     buy_signal_id = db.insert_signal(
         live_strategy_id, "buy", candle_time_str, snapshot_json,
-        skip_reason="unknown" if buy_result is None else None,
+        skip_reason=f"unknown:{','.join(buy_missing)}" if buy_result is None else None,
     )
     sell_signal_id = db.insert_signal(
         live_strategy_id, "sell", candle_time_str, snapshot_json,
-        skip_reason="unknown" if sell_result is None else None,
+        skip_reason=f"unknown:{','.join(sell_missing)}" if sell_result is None else None,
     )
 
     paused = False

@@ -267,6 +267,31 @@ def test_evaluate_signals_pauses_strategy_when_condition_unknown(monkeypatch, tm
     assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
 
 
+def test_evaluate_signals_records_missing_indicator_name_in_skip_reason(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json = json.dumps({"type": "AND", "conditions": [
+        {"indicator": "FUNDING_RATE", "params": {}, "operator": "<", "threshold": -0.01},
+    ]})
+    _, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="running", buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+    monkeypatch.setattr(signal_engine, "fetch_live_funding_rate_value", lambda market, now=None: None)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    conn = dbm._connect()
+    try:
+        row = conn.execute(
+            "SELECT skip_reason FROM signals WHERE id = ?", (result["buy_signal_id"],)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "unknown:FUNDING_RATE"
+
+
 def test_evaluate_signals_resumes_paused_strategy_when_computable_and_not_circuit_tripped(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     df = make_oscillating_df()
