@@ -762,6 +762,15 @@ async def handle_signal_result(
         return result
 
     strategy = db.get_live_strategy(strategy_id)
+    # daemon.py의 list_active_strategies()는 status IN ('running','paused')인 전략을 모두
+    # 폴링하므로, 여기서 status를 확인하지 않으면 이번 tick의 signal_result["paused"]가
+    # False(=이번 캔들의 지표는 정상 해석됨)인 한 status='paused'(수동 일시정지 포함)인
+    # 전략도 그대로 매수/매도 주문을 냈다(재검토 발견 갭). _run_risk_exit_loop가 이미
+    # 세운 원칙 — paused는 데몬이 자신의 포지션 부기를 신뢰할 수 없다는 뜻이므로, 사람/
+    # 자동화가 명시적으로 재개하기 전까지 진입·청산 모두 동결한다 — 을 candle 기반 주문
+    # 경로에도 동일하게 적용한다.
+    if strategy["status"] != "running":
+        return result
     risk_config = json.loads(strategy["risk_config_json"])
     position = position_manager.get_open_position(strategy_id)
     expected_price = signal_result["latest_close"]

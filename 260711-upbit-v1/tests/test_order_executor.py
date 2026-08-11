@@ -1185,6 +1185,70 @@ async def test_handle_signal_result_records_slippage_exceeded_on_fok_cancel(monk
     assert position_manager.get_open_position(strategy["id"]) is None
 
 
+async def test_handle_signal_result_skips_buy_when_manually_paused(monkeypatch, tmp_path):
+    """재검토 발견 갭 — signal_result["paused"]는 B그룹 데이터 장애(이번 캔들의 지표를
+    못 구했을 때)에만 True가 된다. 사용자가 수동으로 일시정지한 전략(status='paused',
+    manual_pause=1)은 지표가 정상 해석되면 signal_result["paused"]가 False라 기존
+    가드를 통과해 실제로 매수 주문을 냈다. handle_signal_result()는 strategy['status']를
+    전혀 보지 않았던 것이 원인 — daemon._run_risk_exit_loop와 동일하게
+    status != 'running'이면 모든 자동 주문(진입/청산)을 멈춰야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, market="KRW-BTC", current_capital=1_000_000.0, status="paused", manual_pause=1,
+        risk_config_json=json.dumps({
+            "order_execution_mode": "market", "max_position_per_market": 1_000_000.0,
+        }),
+    )
+
+    entered = {"called": False}
+
+    async def fake_enter(*args, **kwargs):
+        entered["called"] = True
+        raise AssertionError("수동 일시정지된 전략에서 enter()가 호출되면 안 된다")
+
+    monkeypatch.setattr(order_executor, "enter", fake_enter)
+
+    result = await order_executor.handle_signal_result(
+        strategy_id, _signal_result(buy_signal=True), dry_run=True,
+    )
+
+    assert entered["called"] is False
+    assert result["buy_action"] is None
+    assert result["buy_order_id"] is None
+    assert position_manager.get_open_position(strategy_id) is None
+
+
+async def test_handle_signal_result_skips_sell_when_manually_paused(monkeypatch, tmp_path):
+    """매수와 대칭 — 수동 일시정지 중에는 매도(청산)도 멈춰야 한다. 데몬 철학
+    (_run_risk_exit_loop 문서 참고)은 paused를 "포지션 부기를 신뢰할 수 없으니 사람이
+    재개하기 전까지 진입/청산 모두 동결"로 정의한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, market="KRW-BTC", current_capital=1_000_000.0, status="paused", manual_pause=1,
+        risk_config_json=json.dumps({
+            "order_execution_mode": "market", "max_position_per_market": 1_000_000.0,
+        }),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 49_000_000.0, 0.01)
+
+    exited = {"called": False}
+
+    async def fake_exit(*args, **kwargs):
+        exited["called"] = True
+        raise AssertionError("수동 일시정지된 전략에서 exit()가 호출되면 안 된다")
+
+    monkeypatch.setattr(order_executor, "exit", fake_exit)
+
+    result = await order_executor.handle_signal_result(
+        strategy_id, _signal_result(sell_signal=True), dry_run=True,
+    )
+
+    assert exited["called"] is False
+    assert result["sell_action"] is None
+    assert result["sell_order_id"] is None
+    assert position_manager.get_open_position(strategy_id) is not None
+
+
 async def test_exit_records_signal_as_default_close_reason(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)
