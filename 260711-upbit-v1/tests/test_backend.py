@@ -487,10 +487,35 @@ def test_pause_and_resume_live_strategy(monkeypatch, tmp_path):
     pause_resp = client.post(f"/api/v1/live-strategies/{strategy_id}/pause")
     assert pause_resp.status_code == 200
     assert pause_resp.json()["status"] == "paused"
+    assert trading_db_module.get_live_strategy(strategy_id)["manual_pause"] == 1
 
     resume_resp = client.post(f"/api/v1/live-strategies/{strategy_id}/resume")
     assert resume_resp.status_code == 200
     assert resume_resp.json()["status"] == "running"
+    assert trading_db_module.get_live_strategy(strategy_id)["manual_pause"] == 0
+
+
+def test_resume_live_strategy_clears_tripped_circuit_breaker(monkeypatch, tmp_path):
+    """Fix 1 — 승인 -> 일시정지 -> (서킷브레이커 트립 상태를 직접 삽입해 시뮬레이션) ->
+    API로 재개하면 전략이 running으로 돌아갈 뿐 아니라 서킷브레이커 tripped도 0으로
+    풀려야 한다. 그렇지 않으면 daemon이 다음 신호 평가에서 여전히 트립 상태로 취급해
+    사용자가 재개를 눌러도 실질적으로 거래가 재개되지 않는다."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+    client.post(f"/api/v1/live-strategies/{strategy_id}/pause")
+    trading_db_module.upsert_circuit_breaker_state(
+        strategy_id, "2026-08-11", 3, 1, "daily_loss_limit", "2026-08-11T01:00:00+00:00",
+    )
+
+    resume_resp = client.post(f"/api/v1/live-strategies/{strategy_id}/resume")
+
+    assert resume_resp.status_code == 200
+    assert resume_resp.json()["status"] == "running"
+    cb_state = trading_db_module.get_circuit_breaker_state(strategy_id)
+    assert cb_state["tripped"] == 0
 
 
 def test_pause_live_strategy_returns_409_when_not_running(monkeypatch, tmp_path):

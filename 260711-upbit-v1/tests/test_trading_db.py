@@ -128,9 +128,41 @@ def test_live_strategies_columns(monkeypatch, tmp_path):
     assert columns == {
         "id", "source_run_id", "market", "timeframe", "buy_conditions_json",
         "sell_conditions_json", "risk_config_json", "current_capital", "status",
-        "last_processed_candle_time", "created_at", "approved_at", "started_at",
-        "stopped_at", "baseline_qty",
+        "manual_pause", "last_processed_candle_time", "created_at", "approved_at",
+        "started_at", "stopped_at", "baseline_qty",
     }
+
+
+def test_connect_raises_when_live_strategies_table_predates_manual_pause_column(monkeypatch, tmp_path):
+    """Fix 1 — manual_pause 컬럼이 없는 기존 live_strategies 테이블(CREATE TABLE IF NOT
+    EXISTS로는 컬럼이 소급 추가되지 않는다)을 흉내내, _connect()가 이를 감지해 크게
+    실패해야 한다(개발 단계 무마이그레이션 정책, signals UNIQUE 가드와 동일 패턴)."""
+    db = _fresh_db(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db.DB_PATH)
+    conn.execute("""
+        CREATE TABLE live_strategies (
+            id                  TEXT PRIMARY KEY,
+            source_run_id       TEXT,
+            market              TEXT NOT NULL,
+            timeframe           TEXT NOT NULL,
+            buy_conditions_json TEXT NOT NULL,
+            sell_conditions_json TEXT NOT NULL,
+            risk_config_json    TEXT NOT NULL,
+            current_capital     REAL,
+            status              TEXT NOT NULL DEFAULT 'draft',
+            last_processed_candle_time TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            approved_at         TEXT,
+            started_at          TEXT,
+            stopped_at          TEXT,
+            baseline_qty        REAL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="manual_pause"):
+        db._connect()
 
 
 def test_circuit_breaker_state_and_daily_performance_are_per_strategy(monkeypatch, tmp_path):
@@ -761,24 +793,89 @@ def test_approve_live_strategy_returns_false_when_not_draft(monkeypatch, tmp_pat
     assert strategy["approved_at"] is None
 
 
-def test_transition_live_strategy_status_applies_when_status_matches(monkeypatch, tmp_path):
+def test_pause_live_strategy_manually_sets_status_and_manual_pause_flag(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db, status="running")
 
-    result = db.transition_live_strategy_status(strategy_id, "running", "paused")
+    result = db.pause_live_strategy_manually(strategy_id)
 
     assert result is True
-    assert db.get_live_strategy(strategy_id)["status"] == "paused"
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["status"] == "paused"
+    assert strategy["manual_pause"] == 1
 
 
-def test_transition_live_strategy_status_returns_false_when_status_mismatches(monkeypatch, tmp_path):
+def test_pause_live_strategy_manually_refuses_when_not_running(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db, status="draft")
 
-    result = db.transition_live_strategy_status(strategy_id, "running", "paused")
+    result = db.pause_live_strategy_manually(strategy_id)
 
     assert result is False
-    assert db.get_live_strategy(strategy_id)["status"] == "draft"
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["status"] == "draft"
+    assert strategy["manual_pause"] == 0
+
+
+def test_resume_live_strategy_manually_sets_status_and_clears_manual_pause_flag(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="paused", manual_pause=1)
+
+    result = db.resume_live_strategy_manually(strategy_id)
+
+    assert result is True
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["status"] == "running"
+    assert strategy["manual_pause"] == 0
+
+
+def test_resume_live_strategy_manually_refuses_when_not_paused(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    result = db.resume_live_strategy_manually(strategy_id)
+
+    assert result is False
+    assert db.get_live_strategy(strategy_id)["status"] == "running"
+
+
+def test_resume_live_strategy_manually_clears_tripped_circuit_breaker_preserving_audit_fields(
+    monkeypatch, tmp_path,
+):
+    """Fix 1 — 수동 재개는 서킷브레이커 트립도 함께 해제해야 하지만(그렇지 않으면
+    daemon이 다음 신호 평가에서 여전히 트립 상태로 취급해 재개가 무의미해진다),
+    tripped_reason/tripped_at/consecutive_losses 같은 감사 이력은 지우면 안 된다."""
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="paused", manual_pause=1)
+    db.upsert_circuit_breaker_state(
+        strategy_id, "2026-08-11", 3, 1, "daily_loss_limit", "2026-08-11T01:00:00+00:00",
+    )
+
+    result = db.resume_live_strategy_manually(strategy_id)
+
+    assert result is True
+    assert db.get_live_strategy(strategy_id)["status"] == "running"
+    cb_state = db.get_circuit_breaker_state(strategy_id)
+    assert cb_state["tripped"] == 0
+    assert cb_state["tripped_reason"] == "daily_loss_limit"
+    assert cb_state["tripped_at"] == "2026-08-11T01:00:00+00:00"
+    assert cb_state["consecutive_losses"] == 3
+    assert cb_state["trading_date"] == "2026-08-11"
+    assert cb_state["resumed_at"] is not None
+
+
+def test_resume_live_strategy_manually_does_not_touch_circuit_breaker_when_not_tripped(
+    monkeypatch, tmp_path,
+):
+    """트립되지 않은(흔한 경우) 수동 일시정지 재개는 circuit_breaker_state가 아예
+    없거나 tripped=0인 행을 새로 만들거나 건드리지 않아야 한다."""
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="paused", manual_pause=1)
+
+    result = db.resume_live_strategy_manually(strategy_id)
+
+    assert result is True
+    assert db.get_circuit_breaker_state(strategy_id) is None
 
 
 def test_stop_live_strategy_if_no_open_position_stops_when_no_position(monkeypatch, tmp_path):

@@ -252,7 +252,12 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
             db.update_live_strategy_status(live_strategy_id, "paused")
         paused = True
     elif strategy["status"] == "paused":
-        if not is_circuit_tripped_today(live_strategy_id):
+        # manual_pause=1이면 사용자가 웹 UI에서 명시적으로 일시정지를 눌렀다는 뜻이라(Fix
+        # 1의 Critical 버그 수정) — 이 자동 재개 분기는 B그룹 외부지표(FUNDING_RATE/
+        # FEAR_GREED_CMC/KOREA_PREMIUM) 일시 장애로 daemon이 자동으로 일시정지시킨
+        # 경우만을 위한 것이므로, manual_pause가 서있으면 조건이 정상 계산되고 서킷브레이커도
+        # 안 트립됐더라도 절대 되돌리지 않는다.
+        if not strategy["manual_pause"] and not is_circuit_tripped_today(live_strategy_id):
             db.update_live_strategy_status(live_strategy_id, "running")
             resumed = True
             # circuit_breaker_state.resumed_at을 채운다 — 재개가 실제로 일어나는 유일한

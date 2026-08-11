@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent / "data" / "trading.db"
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS live_strategies (
     risk_config_json    TEXT NOT NULL,
     current_capital     REAL,
     status              TEXT NOT NULL DEFAULT 'draft',
+    manual_pause        INTEGER NOT NULL DEFAULT 0,
     last_processed_candle_time TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     approved_at         TEXT,
@@ -155,6 +157,29 @@ def _assert_signals_unique_constraint_present(conn: sqlite3.Connection) -> None:
     )
 
 
+def _assert_live_strategies_manual_pause_column_present(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 live_strategies 테이블에 새 컬럼
+    manual_pause를 추가하지 못한다 — 이 DB 파일이 manual_pause 추가 이전에 만들어졌다면
+    수동 일시정지와 B그룹 지표 장애로 인한 자동 일시정지를 구분할 방법이 없어져
+    Fix 1(수동 일시정지가 조용히 자동 재개되는 Critical 버그)이 다시 재발한다. 개발
+    단계 무마이그레이션 정책(마이그레이션 대신 DB 파일 재생성) 위반을 시작 시점에 크게
+    실패시켜 조용한 무결성 붕괴를 막는다(_assert_signals_unique_constraint_present와
+    동일 패턴)."""
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='live_strategies'"
+    ).fetchone() is not None
+    if not table_exists:
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('live_strategies')")}
+    if "manual_pause" in columns:
+        return
+    raise RuntimeError(
+        "live_strategies 테이블에 manual_pause 컬럼이 없습니다 — 이 DB 파일은 그 컬럼이 "
+        "추가되기 전에 생성됐습니다. 개발 단계라 마이그레이션이 없으므로, 기존 DB 파일"
+        "(예: data/trading.db)을 삭제한 뒤 다시 시작하세요."
+    )
+
+
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -163,6 +188,7 @@ def _connect() -> sqlite3.Connection:
     if DB_PATH not in _initialized_paths:
         conn.executescript(_SCHEMA)
         _assert_signals_unique_constraint_present(conn)
+        _assert_live_strategies_manual_pause_column_present(conn)
         _initialized_paths.add(DB_PATH)
     return conn
 
@@ -605,17 +631,54 @@ def approve_live_strategy(live_strategy_id: str, current_capital: float) -> bool
         conn.close()
 
 
-def transition_live_strategy_status(live_strategy_id: str, from_status: str, to_status: str) -> bool:
+def pause_live_strategy_manually(live_strategy_id: str) -> bool:
+    """사용자가 웹 UI에서 명시적으로 누른 일시정지(Fix 1). manual_pause=1을 함께 기록해,
+    signal_engine.py의 자동 재개 로직(B그룹 지표 일시 장애로 인한 자동 일시정지 전용)이
+    이 수동 일시정지를 조용히 뒤집지 못하게 한다."""
     conn = _connect()
     try:
         cursor = conn.execute(
-            "UPDATE live_strategies SET status=? WHERE id=? AND status=?",
-            (to_status, live_strategy_id, from_status),
+            "UPDATE live_strategies SET status='paused', manual_pause=1 "
+            "WHERE id=? AND status='running'",
+            (live_strategy_id,),
         )
         conn.commit()
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+
+def resume_live_strategy_manually(live_strategy_id: str) -> bool:
+    """수동 일시정지의 짝(Fix 1). status/manual_pause를 되돌리는 것과 같은 DB 쓰기
+    경로 안에서 서킷브레이커 트립도 함께 해제한다 — 그렇지 않으면 사용자가 재개를
+    눌러도 daemon이 여전히 트립 상태로 취급해 재개가 무의미해진다. tripped_reason/
+    tripped_at/consecutive_losses는 감사 이력이므로 그대로 보존하고(UPSERT라 다른
+    필드를 실수로 지우지 않도록 기존 값을 그대로 넘긴다 — signal_engine.py의 기존
+    자동 재개 경로와 동일한 upsert-preserving-other-fields 패턴), tripped=0과
+    resumed_at만 새로 채운다. 애초에 트립된 적 없는(흔한 경우) 전략은
+    circuit_breaker_state 행이 아예 없거나 tripped=0이라 이 분기를 건드리지 않는다."""
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE live_strategies SET status='running', manual_pause=0 "
+            "WHERE id=? AND status='paused'",
+            (live_strategy_id,),
+        )
+        conn.commit()
+        resumed = cursor.rowcount > 0
+    finally:
+        conn.close()
+
+    if resumed:
+        cb_state = get_circuit_breaker_state(live_strategy_id)
+        if cb_state is not None and cb_state["tripped"] == 1:
+            upsert_circuit_breaker_state(
+                live_strategy_id, cb_state["trading_date"], cb_state["consecutive_losses"],
+                0, cb_state["tripped_reason"], cb_state["tripped_at"],
+                datetime.now(timezone.utc).isoformat(),
+            )
+
+    return resumed
 
 
 def stop_live_strategy_if_no_open_position(live_strategy_id: str) -> bool:

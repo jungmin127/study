@@ -380,6 +380,28 @@ def test_evaluate_signals_does_not_resume_when_circuit_breaker_tripped_today(mon
     assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
 
 
+def test_evaluate_signals_does_not_auto_resume_a_manually_paused_strategy(monkeypatch, tmp_path):
+    """Fix 1(Critical) 회귀 테스트 — manual_pause=1인 전략은 조건이 정상 계산되고
+    (unknown 없음) 서킷브레이커도 안 트립됐더라도 evaluate_signals()가 절대 status를
+    'running'으로 되돌리면 안 된다. 이 가드가 없으면 사용자가 웹 UI에서 일시정지를
+    누른 바로 다음 봉에서 조용히 재개돼버린다(버그 그 자체)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    df = make_oscillating_df()
+    buy_json, sell_json = _strategy_conditions()
+    strategy_id = insert_live_strategy(
+        dbm, status="paused", manual_pause=1,
+        buy_conditions_json=buy_json, sell_conditions_json=sell_json,
+    )
+    monkeypatch.setattr(signal_engine, "get_candles", lambda market, timeframe, start, end: df)
+
+    result = signal_engine.evaluate_signals(strategy_id, now=datetime.now(timezone.utc))
+
+    assert result["resumed"] is False
+    strategy = dbm.get_live_strategy(strategy_id)
+    assert strategy["status"] == "paused"
+    assert strategy["manual_pause"] == 1
+
+
 def test_evaluate_signals_filters_position_relative_indicators_from_computation(monkeypatch, tmp_path):
     """collect_blocks(buy)+collect_blocks(sell)에서 POSITION_RELATIVE_INDICATORS를 걸러내지
     않으면 _compute_indicator_values가 LIVE_INDICATOR_FACTORY에 없는 STOP_LOSS_PCT/

@@ -1141,7 +1141,7 @@ async def approve_live_strategy_endpoint(strategy_id: str) -> dict:
 def pause_live_strategy_endpoint(strategy_id: str) -> dict:
     if trading_db.get_live_strategy(strategy_id) is None:
         raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
-    if not trading_db.transition_live_strategy_status(strategy_id, "running", "paused"):
+    if not trading_db.pause_live_strategy_manually(strategy_id):
         raise HTTPException(status_code=409, detail="running 상태의 전략만 일시정지할 수 있습니다")
     return _full_live_strategy_response(strategy_id)
 
@@ -1150,7 +1150,7 @@ def pause_live_strategy_endpoint(strategy_id: str) -> dict:
 def resume_live_strategy_endpoint(strategy_id: str) -> dict:
     if trading_db.get_live_strategy(strategy_id) is None:
         raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
-    if not trading_db.transition_live_strategy_status(strategy_id, "paused", "running"):
+    if not trading_db.resume_live_strategy_manually(strategy_id):
         raise HTTPException(status_code=409, detail="paused 상태의 전략만 재개할 수 있습니다")
     return _full_live_strategy_response(strategy_id)
 
