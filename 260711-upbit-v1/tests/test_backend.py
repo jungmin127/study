@@ -371,6 +371,40 @@ def test_create_live_strategy_rejects_non_negative_daily_loss_limit(monkeypatch,
     assert resp.status_code == 400
 
 
+def test_create_live_strategy_rejects_empty_buy_conditions(monkeypatch, tmp_path):
+    """Fix 3(Important) — 백테스트 생성 경로(_validate_backtest_request)는 이미
+    is_empty()로 빈 조건을 막지만 라이브 전략 생성 경로는 그 검증이 빠져 있었다.
+    빈 매수 조건으로 라이브 전략을 만들면 daemon이 항상 매수 불가능한 죽은 전략을
+    승인해버리는 결과로 이어진다."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    req = _live_strategy_request(buy_conditions={"type": "AND", "conditions": []})
+
+    resp = client.post("/api/v1/live-strategies", json=req)
+    assert resp.status_code == 400
+
+
+def test_create_live_strategy_rejects_empty_sell_conditions(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    req = _live_strategy_request(sell_conditions={"type": "AND", "conditions": []})
+
+    resp = client.post("/api/v1/live-strategies", json=req)
+    assert resp.status_code == 400
+
+
+def test_create_live_strategy_rejects_unknown_indicator(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    req = _live_strategy_request(buy_conditions={
+        "type": "AND",
+        "conditions": [{"indicator": "NOT_A_REAL_INDICATOR", "params": {}, "operator": "<", "threshold": 1}],
+    })
+
+    resp = client.post("/api/v1/live-strategies", json=req)
+    assert resp.status_code == 400
+
+
 def test_list_live_strategies_returns_empty_when_none(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     resp = client.get("/api/v1/live-strategies")

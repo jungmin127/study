@@ -1019,6 +1019,18 @@ def _validate_live_strategy_request(req: CreateLiveStrategyRequest) -> list[str]
     if req.market not in krw_markets:
         errors.append(f"{req.market}은(는) 업비트 KRW 마켓 목록에 없습니다.")
 
+    buy_dict = req.buy_conditions.model_dump()
+    sell_dict = req.sell_conditions.model_dump()
+
+    if is_empty(buy_dict):
+        errors.append("매수 조건이 없습니다. 최소 1개 이상의 조건을 추가하세요.")
+    if is_empty(sell_dict):
+        errors.append("매도 조건이 없습니다. 최소 1개 이상의 조건을 추가하세요.")
+
+    unknown = sorted(set(find_unknown_indicators(buy_dict)) | set(find_unknown_indicators(sell_dict)))
+    if unknown:
+        errors.append(f"지원하지 않는 지표입니다: {', '.join(unknown)}")
+
     risk = req.risk_config
     if risk.position_sizing_value <= 0:
         errors.append("자금관리 값은 0보다 커야 합니다.")
