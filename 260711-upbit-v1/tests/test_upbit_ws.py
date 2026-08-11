@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 
 import pytest
@@ -71,6 +72,31 @@ async def test_stream_ticker_reconnects_after_connection_drop(monkeypatch):
     assert first == {"seq": 1}
     assert second == {"seq": 2}
     assert connection_count["n"] == 2
+
+
+async def test_stream_ticker_logs_warning_on_reconnect(monkeypatch, caplog):
+    monkeypatch.setattr(upbit_ws, "RECONNECT_BASE_DELAY_SECONDS", 0.01)
+    connection_count = {"n": 0}
+
+    async def handler(ws):
+        connection_count["n"] += 1
+        await ws.recv()  # subscribe message
+        if connection_count["n"] == 1:
+            await ws.send(json.dumps({"seq": 1}))
+            await ws.close()  # 첫 연결은 끊어서 재연결을 유도
+        else:
+            await ws.send(json.dumps({"seq": 2}))
+            await ws.wait_closed()
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        gen = stream_ticker(["KRW-BTC"], url=f"ws://127.0.0.1:{port}")
+        with caplog.at_level(logging.WARNING, logger="trading.upbit_ws"):
+            await anext(gen)
+            await anext(gen)
+        await gen.aclose()
+
+    assert any("재연결" in record.message for record in caplog.records)
 
 
 async def test_stream_ticker_applies_backoff_delay_on_clean_close(monkeypatch):

@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 
 import websockets
+
+logger = logging.getLogger(__name__)
 
 UPBIT_WS_URL = "wss://api.upbit.com/websocket/v1"
 
@@ -35,6 +38,7 @@ async def stream_ticker(markets: list[str], *, url: str = UPBIT_WS_URL) -> Async
     delay = RECONNECT_BASE_DELAY_SECONDS
 
     while True:
+        disconnect_reason: BaseException | str = "정상 종료"
         try:
             async with websockets.connect(url) as ws:
                 await ws.send(subscribe_msg)
@@ -42,8 +46,9 @@ async def stream_ticker(markets: list[str], *, url: str = UPBIT_WS_URL) -> Async
                 async for raw in ws:
                     data = raw.decode("utf-8") if isinstance(raw, bytes) else raw
                     yield json.loads(data)
-        except (websockets.exceptions.WebSocketException, OSError, json.JSONDecodeError):
-            pass
+        except (websockets.exceptions.WebSocketException, OSError, json.JSONDecodeError) as exc:
+            disconnect_reason = exc
+        logger.warning("ticker WS 연결 끊김(%s), %.1f초 후 재연결", disconnect_reason, delay)
         await asyncio.sleep(delay)
         delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
 
