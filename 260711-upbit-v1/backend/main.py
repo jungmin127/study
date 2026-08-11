@@ -58,9 +58,12 @@ from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
 from upbit_data_service import get_candles, get_current_prices, get_krw_markets, get_krw_markets_with_ticker
 from backend.grid_search_service import JobAlreadyRunningError, JobNotActiveError, cancel_job, start_job
+import httpx
+
 import trading.db as trading_db
 import trading.position_manager as position_manager
 import trading.upbit_client as upbit_client
+from trading.upbit_client import UpbitCredentialsError, UpbitRateLimitError
 
 def _to_utc_iso(value: str) -> str:
     """naive 문자열(오프셋 표기 없이 UTC 값만 담고 있는 경우가 대부분)에도 항상
@@ -1019,9 +1022,12 @@ def _validate_live_strategy_request(req: CreateLiveStrategyRequest) -> list[str]
     errors: list[str] = []
     if req.timeframe not in VALID_TIMEFRAMES:
         errors.append(f"지원하지 않는 봉데이터입니다: {req.timeframe}")
-    krw_markets = {m["market"] for m in get_krw_markets()}
-    if req.market not in krw_markets:
-        errors.append(f"{req.market}은(는) 업비트 KRW 마켓 목록에 없습니다.")
+    try:
+        krw_markets = {m["market"] for m in get_krw_markets()}
+        if req.market not in krw_markets:
+            errors.append(f"{req.market}은(는) 업비트 KRW 마켓 목록에 없습니다.")
+    except Exception:
+        errors.append("마켓 목록을 불러올 수 없습니다")
 
     buy_dict = req.buy_conditions.model_dump()
     sell_dict = req.sell_conditions.model_dump()
@@ -1134,11 +1140,28 @@ async def approve_live_strategy_endpoint(strategy_id: str) -> dict:
         raise HTTPException(status_code=409, detail="draft 상태의 전략만 승인할 수 있습니다")
 
     risk_config = json.loads(strategy["risk_config_json"])
-    accounts = await upbit_client.get_accounts()
+    try:
+        accounts = await upbit_client.get_accounts()
+    except UpbitCredentialsError as exc:
+        raise HTTPException(
+            status_code=400, detail="업비트 API 인증에 실패했습니다 — API 키 설정을 확인하세요",
+        ) from exc
+    except UpbitRateLimitError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="업비트 API 요청이 지나치게 많습니다 — 잠시 후 다시 시도하세요",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=400, detail="업비트 서버와 통신할 수 없습니다",
+        ) from exc
     krw_account = next((a for a in accounts if a["currency"] == "KRW"), None)
     available_balance = float(krw_account["balance"]) if krw_account else 0.0
 
-    initial_capital = position_manager.calculate_initial_capital(risk_config, available_balance)
+    try:
+        initial_capital = position_manager.calculate_initial_capital(risk_config, available_balance)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     running_capital_sum = sum(s["current_capital"] or 0.0 for s in trading_db.list_active_strategies())
     required = running_capital_sum + initial_capital
     if required > available_balance:

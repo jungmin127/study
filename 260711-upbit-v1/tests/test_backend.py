@@ -11,6 +11,7 @@ from engine.cache import save_result, save_sweep_result, finish_grid_search_job
 from engine.cache import save_segment_classification
 from tests.signal_fixtures import make_oscillating_df
 import trading.db as trading_db_module
+from trading.upbit_client import UpbitCredentialsError, UpbitRateLimitError
 
 
 def _client(monkeypatch, tmp_path):
@@ -533,6 +534,56 @@ def test_approve_live_strategy_sums_other_running_strategies_capital(monkeypatch
 
     assert resp.status_code == 400
     assert trading_db_module.get_live_strategy(second_id)["status"] == "draft"
+
+
+def test_approve_live_strategy_returns_400_when_upbit_credentials_missing(monkeypatch, tmp_path):
+    """Fix 5(Important) — get_accounts()가 UpbitCredentialsError를 던지면 raw 500 대신
+    사용자에게 무엇이 잘못됐는지 알려주는 400을 반환해야 하고, 전략은 draft에 머물러야
+    한다(승인이 절반만 진행되면 안 된다)."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    async def _raise(*args, **kwargs):
+        raise UpbitCredentialsError("no keys")
+
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _raise)
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    assert resp.status_code == 400
+    assert "인증" in resp.json()["detail"]
+    assert trading_db_module.get_live_strategy(strategy_id)["status"] == "draft"
+
+
+def test_approve_live_strategy_returns_400_when_upbit_rate_limited(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    async def _raise(*args, **kwargs):
+        raise UpbitRateLimitError("429 exhausted")
+
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _raise)
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    assert resp.status_code == 400
+    assert trading_db_module.get_live_strategy(strategy_id)["status"] == "draft"
+
+
+def test_create_live_strategy_returns_400_when_market_list_fetch_fails(monkeypatch, tmp_path):
+    """Fix 5(Important) — get_krw_markets()가 네트워크 장애로 예외를 던지면 라이브 전략
+    생성 엔드포인트가 raw 500 대신 400 검증 오류를 반환해야 한다."""
+    client = _client(monkeypatch, tmp_path)
+
+    def _raise():
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(backend_module, "get_krw_markets", _raise)
+
+    resp = client.post("/api/v1/live-strategies", json=_live_strategy_request())
+    assert resp.status_code == 400
 
 
 def test_pause_and_resume_live_strategy(monkeypatch, tmp_path):
