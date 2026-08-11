@@ -4,6 +4,7 @@ import { getBacktestDetail } from '@/lib/api/eda';
 import PriceChart from '@/components/PriceChart';
 import MetricTile from '@/components/MetricTile';
 import RefreshBacktestButton from '@/components/RefreshBacktestButton';
+import GoLiveButton from '@/components/GoLiveButton';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { returnRateColor } from '@/lib/return-rate-color';
@@ -92,6 +93,7 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
           {detail.market} · {formatTimeframe(detail.timeframe)} · {detail.start.slice(0, 10)} ~ {detail.end.slice(0, 10)}
         </p>
         <RefreshBacktestButton runId={params.runId} />
+        <GoLiveButton runId={params.runId} />
       </div>
       {detail.live_price_as_of && (
         <p className="mb-4 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
