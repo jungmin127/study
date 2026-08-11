@@ -9,10 +9,12 @@ from backend.main import app
 from engine.cache import save_result, save_sweep_result, finish_grid_search_job
 from engine.cache import save_segment_classification
 from tests.signal_fixtures import make_oscillating_df
+import trading.db as trading_db_module
 
 
 def _client(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    monkeypatch.setattr(trading_db_module, "DB_PATH", tmp_path / "trading.db")
     return TestClient(app)
 
 
@@ -303,6 +305,69 @@ def _run_request(**overrides) -> dict:
     }
     body.update(overrides)
     return body
+
+
+def _live_strategy_request(**overrides) -> dict:
+    body = {
+        "source_run_id": None,
+        "market": "KRW-BTC",
+        "timeframe": "minutes60",
+        "buy_conditions": _VALID_BUY,
+        "sell_conditions": _VALID_SELL,
+        "risk_config": {
+            "position_sizing_mode": "fixed",
+            "position_sizing_value": 100000,
+            "max_position_per_market": 500000,
+            "max_total_position": 2000000,
+            "order_execution_mode": "market",
+            "order_timeout_sec": 10,
+            "manual_intervention_policy": "all_stop",
+            "daily_loss_limit_pct": -5.0,
+            "consecutive_loss_limit": 3,
+        },
+    }
+    body.update(overrides)
+    return body
+
+
+def test_create_live_strategy_creates_draft(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post("/api/v1/live-strategies", json=_live_strategy_request())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "draft"
+    assert body["market"] == "KRW-BTC"
+    assert body["timeframe"] == "minutes60"
+    assert body["current_capital"] is None
+
+
+def test_create_live_strategy_rejects_unknown_market(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post("/api/v1/live-strategies", json=_live_strategy_request(market="KRW-NOPE"))
+    assert resp.status_code == 400
+
+
+def test_create_live_strategy_rejects_invalid_timeframe(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post("/api/v1/live-strategies", json=_live_strategy_request(timeframe="not-a-timeframe"))
+    assert resp.status_code == 400
+
+
+def test_create_live_strategy_rejects_non_negative_daily_loss_limit(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    req = _live_strategy_request()
+    req["risk_config"]["daily_loss_limit_pct"] = 5.0
+
+    resp = client.post("/api/v1/live-strategies", json=req)
+    assert resp.status_code == 400
 
 
 def test_run_backtest_returns_run_id_and_is_retrievable(monkeypatch, tmp_path):

@@ -6,6 +6,7 @@ Run: uvicorn backend.main:app --reload --port 8000  (저장소 루트에서 실�
 """
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime, timezone
 from typing import Literal, Union
@@ -57,6 +58,9 @@ from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
 from upbit_data_service import get_candles, get_current_prices, get_krw_markets, get_krw_markets_with_ticker
 from backend.grid_search_service import JobAlreadyRunningError, JobNotActiveError, cancel_job, start_job
+import trading.db as trading_db
+import trading.position_manager as position_manager
+import trading.upbit_client as upbit_client
 
 def _to_utc_iso(value: str) -> str:
     """naive 문자열(오프셋 표기 없이 UTC 값만 담고 있는 경우가 대부분)에도 항상
@@ -984,3 +988,104 @@ def delete_grid_search_job_endpoint(job_id: str) -> dict:
         delete_backtest_run(result["run_id"])
     delete_grid_search_job(job_id)
     return {"deleted": True}
+
+
+class CreateLiveStrategyRiskConfig(BaseModel):
+    position_sizing_mode: Literal["fixed", "percent"]
+    position_sizing_value: float
+    max_position_per_market: float
+    max_total_position: float
+    order_execution_mode: Literal["market", "limit", "limit_timeout"]
+    order_timeout_sec: int = 10
+    manual_intervention_policy: Literal["all_stop", "acknowledge_and_continue"]
+    daily_loss_limit_pct: float
+    consecutive_loss_limit: int
+
+
+class CreateLiveStrategyRequest(BaseModel):
+    source_run_id: str | None = None
+    market: str
+    timeframe: str
+    buy_conditions: ConditionGroupRequest
+    sell_conditions: ConditionGroupRequest
+    risk_config: CreateLiveStrategyRiskConfig
+
+
+def _validate_live_strategy_request(req: CreateLiveStrategyRequest) -> list[str]:
+    errors: list[str] = []
+    if req.timeframe not in VALID_TIMEFRAMES:
+        errors.append(f"지원하지 않는 봉데이터입니다: {req.timeframe}")
+    krw_markets = {m["market"] for m in get_krw_markets()}
+    if req.market not in krw_markets:
+        errors.append(f"{req.market}은(는) 업비트 KRW 마켓 목록에 없습니다.")
+
+    risk = req.risk_config
+    if risk.position_sizing_value <= 0:
+        errors.append("자금관리 값은 0보다 커야 합니다.")
+    if risk.position_sizing_mode == "percent" and risk.position_sizing_value > 100:
+        errors.append("퍼센트 자금관리 값은 100 이하여야 합니다.")
+    if risk.max_position_per_market <= 0:
+        errors.append("코인당 최대 포지션 금액은 0보다 커야 합니다.")
+    if risk.max_total_position <= 0:
+        errors.append("전체 최대 포지션 금액은 0보다 커야 합니다.")
+    if risk.order_execution_mode == "limit_timeout" and risk.order_timeout_sec <= 0:
+        errors.append("지정가+타임아웃 모드에서는 타임아웃 초가 0보다 커야 합니다.")
+    if risk.daily_loss_limit_pct >= 0:
+        errors.append("일일 손실 한도는 음수여야 합니다(예: -5.0).")
+    if risk.consecutive_loss_limit <= 0:
+        errors.append("연속 손실 한도는 0보다 커야 합니다.")
+    return errors
+
+
+def _open_position_summary(position: dict, current_price: float | None) -> dict:
+    unrealized_pnl_pct = None
+    if current_price is not None and position["entry_price"]:
+        unrealized_pnl_pct = (current_price - position["entry_price"]) / position["entry_price"] * 100
+    return {
+        "entry_price": position["entry_price"],
+        "entry_qty": position["entry_qty"],
+        "entry_time": position["entry_time"],
+        "unrealized_pnl_pct": unrealized_pnl_pct,
+    }
+
+
+def _live_strategy_response(strategy: dict, position: dict | None, current_price: float | None) -> dict:
+    return {
+        "id": strategy["id"],
+        "market": strategy["market"],
+        "timeframe": strategy["timeframe"],
+        "status": strategy["status"],
+        "current_capital": strategy["current_capital"],
+        "created_at": strategy["created_at"],
+        "approved_at": strategy["approved_at"],
+        "started_at": strategy["started_at"],
+        "stopped_at": strategy["stopped_at"],
+        "open_position": _open_position_summary(position, current_price) if position else None,
+    }
+
+
+def _full_live_strategy_response(strategy_id: str) -> dict:
+    strategy = trading_db.get_live_strategy(strategy_id)
+    position = trading_db.get_open_position(strategy_id)
+    current_price = None
+    if position is not None:
+        prices = get_current_prices([strategy["market"]])
+        current_price = prices.get(strategy["market"])
+    return _live_strategy_response(strategy, position, current_price)
+
+
+@app.post("/api/v1/live-strategies")
+def create_live_strategy_endpoint(req: CreateLiveStrategyRequest) -> dict:
+    errors = _validate_live_strategy_request(req)
+    if errors:
+        raise HTTPException(status_code=400, detail=" / ".join(errors))
+
+    strategy_id = trading_db.insert_live_strategy(
+        source_run_id=req.source_run_id,
+        market=req.market,
+        timeframe=req.timeframe,
+        buy_conditions_json=json.dumps(req.buy_conditions.model_dump()),
+        sell_conditions_json=json.dumps(req.sell_conditions.model_dump()),
+        risk_config_json=json.dumps(req.risk_config.model_dump()),
+    )
+    return _full_live_strategy_response(strategy_id)
