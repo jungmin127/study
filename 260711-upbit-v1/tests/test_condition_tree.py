@@ -4,6 +4,7 @@ from engine.condition_tree import (
     collect_blocks,
     eval_group,
     eval_group_values,
+    find_indicators_with_missing_values,
     find_unknown_indicators,
     get_indicator_value,
     indicator_key,
@@ -109,6 +110,50 @@ def test_find_unknown_indicators_allows_holding_period_bars():
         "conditions": [{"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">=", "threshold": 5}],
     }
     assert find_unknown_indicators(tree) == []
+
+
+def test_find_indicators_with_missing_values_returns_leaves_with_none_or_nan():
+    tree = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30},
+            {"indicator": "FUNDING_RATE", "params": {}, "operator": "<", "threshold": 0},
+        ],
+    }
+    values = {
+        indicator_key("RSI", {"period": 14}): 25.0,
+        indicator_key("FUNDING_RATE", {}): None,
+    }
+    assert find_indicators_with_missing_values(tree, values) == ["FUNDING_RATE"]
+
+
+def test_find_indicators_with_missing_values_treats_nan_as_missing():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}],
+    }
+    values = {indicator_key("RSI", {"period": 14}): float("nan")}
+    assert find_indicators_with_missing_values(tree, values) == ["RSI"]
+
+
+def test_find_indicators_with_missing_values_excludes_position_relative_indicators():
+    tree = {
+        "type": "OR",
+        "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+            {"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">=", "threshold": 5},
+        ],
+    }
+    assert find_indicators_with_missing_values(tree, {}) == []
+
+
+def test_find_indicators_with_missing_values_returns_empty_when_all_present():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}],
+    }
+    values = {indicator_key("RSI", {"period": 14}): 25.0}
+    assert find_indicators_with_missing_values(tree, values) == []
 
 
 def test_required_aux_markets_returns_btc_when_market_trend_present():

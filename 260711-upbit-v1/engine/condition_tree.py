@@ -213,6 +213,24 @@ def find_unknown_indicators(group: dict) -> list[str]:
     return sorted(unknown)
 
 
+def find_indicators_with_missing_values(group: dict, values: dict[str, float | None]) -> list[str]:
+    """조건 트리의 리프 지표 중 values에 값이 없거나 NaN인 지표명을 수집한다(중복 제거,
+    정렬). eval_group_values()가 왜 None(unknown)을 반환했는지 운영자가 signals.skip_reason
+    만 보고 파악할 수 있게 한다(운영 가시성 보완). HOLDING_PERIOD_BARS/
+    POSITION_RELATIVE_INDICATORS는 values를 안 쓰므로(eval_group_values()도 이들은
+    position_return_pct/position_holding_bars로 별도 평가) 대상에서 제외한다."""
+    missing = set()
+    for block in collect_blocks(group):
+        name = block["indicator"]
+        if name in POSITION_RELATIVE_INDICATORS:
+            continue
+        key = indicator_key(name, block.get("params", {}))
+        value = values.get(key)
+        if value is None or value != value:  # None 또는 NaN
+            missing.add(name)
+    return sorted(missing)
+
+
 def is_empty(group: dict) -> bool:
     return len(group.get("conditions", [])) == 0
 
@@ -258,6 +276,7 @@ __all__ = [
     "apply_operator",
     "eval_group",
     "eval_group_values",
+    "find_indicators_with_missing_values",
     "find_unknown_indicators",
     "is_empty",
     "max_required_period",
