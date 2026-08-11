@@ -113,6 +113,18 @@ def test_check_circuit_breaker_trips_on_consecutive_loss_limit(monkeypatch, tmp_
     assert dbm.get_live_strategy(strategy_id)["status"] == "paused"
 
 
+def test_check_circuit_breaker_records_tripped_at_in_utc(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running")
+    risk_config = {"daily_loss_limit_pct": -5.0}
+
+    record_trade_result(strategy_id, realized_pnl=-6000.0, capital_after=94_000.0)
+
+    assert check_circuit_breaker(strategy_id, risk_config) is True
+    tripped_at = dbm.get_circuit_breaker_state(strategy_id)["tripped_at"]
+    assert tripped_at.endswith("+00:00")
+
+
 def test_check_circuit_breaker_returns_true_immediately_when_already_tripped(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm, status="paused")

@@ -113,7 +113,7 @@ def check_circuit_breaker(live_strategy_id: str, risk_config: dict) -> bool:
 
     db.upsert_circuit_breaker_state(
         live_strategy_id, trading_date, consecutive_losses, 1, tripped_reason,
-        datetime.now(_KST).isoformat(),
+        datetime.now(timezone.utc).isoformat(),
     )
     db.update_live_strategy_status(live_strategy_id, "paused")
     return True
