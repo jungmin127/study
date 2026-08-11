@@ -133,6 +133,28 @@ CREATE TABLE IF NOT EXISTS manual_intervention_events (
 """
 
 
+def _assert_signals_unique_constraint_present(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 signals 테이블에 새 UNIQUE 제약을
+    추가하지 못한다 — 이 DB 파일이 UNIQUE(live_strategy_id, signal_type, candle_time)
+    추가 이전에 만들어졌다면 insert_signal()의 idempotent 보장이 조용히 무효화된다.
+    개발 단계 무마이그레이션 정책(마이그레이션 대신 DB 파일 재생성) 위반을 시작
+    시점에 크게 실패시켜 조용한 무결성 붕괴를 막는다."""
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='signals'"
+    ).fetchone() is not None
+    if not table_exists:
+        return
+    indexes = conn.execute("PRAGMA index_list('signals')").fetchall()
+    if any(row[3] == "u" for row in indexes):
+        return
+    raise RuntimeError(
+        "signals 테이블에 UNIQUE(live_strategy_id, signal_type, candle_time) 제약이 "
+        "없습니다 — 이 DB 파일은 그 제약이 추가되기 전에 생성됐습니다. 개발 단계라 "
+        "마이그레이션이 없으므로, 기존 DB 파일(예: data/trading.db)을 삭제한 뒤 다시 "
+        "시작하세요."
+    )
+
+
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -140,6 +162,7 @@ def _connect() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     if DB_PATH not in _initialized_paths:
         conn.executescript(_SCHEMA)
+        _assert_signals_unique_constraint_present(conn)
         _initialized_paths.add(DB_PATH)
     return conn
 

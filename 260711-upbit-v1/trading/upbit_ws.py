@@ -51,6 +51,11 @@ async def stream_ticker(markets: list[str], *, url: str = UPBIT_WS_URL) -> Async
         logger.warning("ticker WS 연결 끊김(%s), %.1f초 후 재연결", disconnect_reason, delay)
         await asyncio.sleep(delay)
         delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
+        if delay >= RECONNECT_MAX_DELAY_SECONDS:
+            logger.error(
+                "ticker WS 재연결이 최대 백오프(%.0f초)에 도달 — 연속 장애 의심",
+                RECONNECT_MAX_DELAY_SECONDS,
+            )
 
 
 __all__ = ["stream_ticker", "UPBIT_WS_URL"]

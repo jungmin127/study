@@ -99,6 +99,32 @@ async def test_stream_ticker_logs_warning_on_reconnect(monkeypatch, caplog):
     assert any("재연결" in record.message for record in caplog.records)
 
 
+async def test_stream_ticker_logs_error_when_backoff_reaches_max(monkeypatch, caplog):
+    monkeypatch.setattr(upbit_ws, "RECONNECT_BASE_DELAY_SECONDS", 0.01)
+    monkeypatch.setattr(upbit_ws, "RECONNECT_MAX_DELAY_SECONDS", 0.02)
+    connection_count = {"n": 0}
+
+    async def handler(ws):
+        connection_count["n"] += 1
+        await ws.recv()  # subscribe message
+        if connection_count["n"] == 1:
+            await ws.send(json.dumps({"seq": 1}))
+            await ws.close()
+        else:
+            await ws.send(json.dumps({"seq": 2}))
+            await ws.wait_closed()
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        gen = stream_ticker(["KRW-BTC"], url=f"ws://127.0.0.1:{port}")
+        with caplog.at_level(logging.WARNING, logger="trading.upbit_ws"):
+            await anext(gen)
+            await anext(gen)
+        await gen.aclose()
+
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
+
+
 async def test_stream_ticker_applies_backoff_delay_on_clean_close(monkeypatch):
     monkeypatch.setattr(upbit_ws, "RECONNECT_BASE_DELAY_SECONDS", 0.2)
     received_at: list[float] = []

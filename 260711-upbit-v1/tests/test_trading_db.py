@@ -68,6 +68,31 @@ def test_connect_initializes_schema_separately_for_each_db_path(monkeypatch, tmp
     assert table_names == set(db.TABLE_NAMES)
 
 
+def test_connect_raises_when_signals_table_predates_unique_constraint(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    # 제약 추가 이전 버전의 signals 테이블을 직접 만들어, "제약이 없는 채로 이미
+    # 존재하는 DB 파일"을 흉내낸다 — _connect()는 CREATE TABLE IF NOT EXISTS라
+    # 이 테이블을 그대로 두고 넘어가므로, 그 상태를 감지해서 크게 실패해야 한다.
+    conn = sqlite3.connect(db.DB_PATH)
+    conn.execute("""
+        CREATE TABLE signals (
+            id TEXT PRIMARY KEY,
+            live_strategy_id TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            candle_time TEXT NOT NULL,
+            indicator_snapshot_json TEXT,
+            resulting_order_id TEXT,
+            skip_reason TEXT,
+            triggered_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="UNIQUE"):
+        db._connect()
+
+
 def test_connect_enables_wal_mode(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     conn = db._connect()
@@ -380,6 +405,30 @@ def test_insert_signal_allows_different_signal_types_for_same_candle(monkeypatch
     sell_id = db.insert_signal(strategy_id, "sell", "2026-08-07T10:00:00+00:00", "{}")
 
     assert buy_id != sell_id
+
+
+def test_insert_signal_keeps_first_row_data_on_idempotent_hit(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    first_id = db.insert_signal(
+        strategy_id, "buy", "2026-08-07T10:00:00+00:00", '{"a": 1}',
+        skip_reason="unknown:FUNDING_RATE",
+    )
+    second_id = db.insert_signal(
+        strategy_id, "buy", "2026-08-07T10:00:00+00:00", '{"a": 2}',
+        skip_reason=None,
+    )
+
+    assert second_id == first_id
+    conn = db._connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM signals WHERE id = ?", (first_id,)).fetchone()
+    finally:
+        conn.close()
+    assert row["indicator_snapshot_json"] == '{"a": 1}'
+    assert row["skip_reason"] == "unknown:FUNDING_RATE"
 
 
 def test_insert_order_creates_wait_row(monkeypatch, tmp_path):
