@@ -38,6 +38,36 @@ def test_connect_is_idempotent(monkeypatch, tmp_path):
     db._connect().close()  # 여러 번 호출해도 에러 없어야 함
 
 
+def test_connect_does_not_reexecute_schema_script_on_second_call(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        db, "_SCHEMA",
+        "CREATE TABLE strict_once (id INTEGER);",  # IF NOT EXISTS 없음 — 두 번째 실행되면 에러
+    )
+
+    db._connect().close()  # 첫 호출: 정상 생성
+    db._connect().close()  # 캐싱이 안 되면 sqlite3.OperationalError: table strict_once already exists
+
+
+def test_connect_initializes_schema_separately_for_each_db_path(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    db._connect().close()  # 첫 경로 초기화
+
+    other_path = tmp_path / "other" / "trading.db"
+    monkeypatch.setattr(db, "DB_PATH", other_path)
+
+    conn = db._connect()
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        table_names = {row[0] for row in rows}
+    finally:
+        conn.close()
+
+    assert table_names == set(db.TABLE_NAMES)
+
+
 def test_connect_enables_wal_mode(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     conn = db._connect()

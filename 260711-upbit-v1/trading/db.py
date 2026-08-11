@@ -23,6 +23,8 @@ TABLE_NAMES = (
     "manual_intervention_events",
 )
 
+_initialized_paths: set[Path] = set()
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS live_strategies (
     id                  TEXT PRIMARY KEY,
@@ -135,7 +137,9 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(_SCHEMA)
+    if DB_PATH not in _initialized_paths:
+        conn.executescript(_SCHEMA)
+        _initialized_paths.add(DB_PATH)
     return conn
 
 
