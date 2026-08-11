@@ -733,3 +733,84 @@ def test_list_live_strategies_returns_all_statuses_newest_first(monkeypatch, tmp
 def test_list_live_strategies_returns_empty_list_when_none(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     assert db.list_live_strategies() == []
+
+
+def test_approve_live_strategy_transitions_draft_to_running(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="draft", current_capital=None)
+
+    result = db.approve_live_strategy(strategy_id, 150000.0)
+
+    assert result is True
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["status"] == "running"
+    assert strategy["current_capital"] == 150000.0
+    assert strategy["approved_at"] is not None
+    assert strategy["started_at"] is not None
+
+
+def test_approve_live_strategy_returns_false_when_not_draft(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running", current_capital=100000.0)
+
+    result = db.approve_live_strategy(strategy_id, 150000.0)
+
+    assert result is False
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["current_capital"] == 100000.0
+    assert strategy["approved_at"] is None
+
+
+def test_transition_live_strategy_status_applies_when_status_matches(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    result = db.transition_live_strategy_status(strategy_id, "running", "paused")
+
+    assert result is True
+    assert db.get_live_strategy(strategy_id)["status"] == "paused"
+
+
+def test_transition_live_strategy_status_returns_false_when_status_mismatches(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="draft")
+
+    result = db.transition_live_strategy_status(strategy_id, "running", "paused")
+
+    assert result is False
+    assert db.get_live_strategy(strategy_id)["status"] == "draft"
+
+
+def test_stop_live_strategy_if_no_open_position_stops_when_no_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    result = db.stop_live_strategy_if_no_open_position(strategy_id)
+
+    assert result is True
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["status"] == "stopped"
+    assert strategy["stopped_at"] is not None
+
+
+def test_stop_live_strategy_if_no_open_position_refuses_when_position_open(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+    db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    result = db.stop_live_strategy_if_no_open_position(strategy_id)
+
+    assert result is False
+    assert db.get_live_strategy(strategy_id)["status"] == "running"
+
+
+def test_stop_live_strategy_if_no_open_position_allows_stopping_after_position_closed(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    db.close_position_row(position_id, 51_000_000.0, 0.01, 10000.0, 2.0, "signal")
+
+    result = db.stop_live_strategy_if_no_open_position(strategy_id)
+
+    assert result is True
+    assert db.get_live_strategy(strategy_id)["status"] == "stopped"

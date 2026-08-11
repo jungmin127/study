@@ -590,6 +590,55 @@ def list_live_strategies() -> list[dict]:
         conn.close()
 
 
+def approve_live_strategy(live_strategy_id: str, current_capital: float) -> bool:
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE live_strategies SET status='running', current_capital=?, "
+            "approved_at=datetime('now'), started_at=datetime('now') "
+            "WHERE id=? AND status='draft'",
+            (current_capital, live_strategy_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def transition_live_strategy_status(live_strategy_id: str, from_status: str, to_status: str) -> bool:
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE live_strategies SET status=? WHERE id=? AND status=?",
+            (to_status, live_strategy_id, from_status),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def stop_live_strategy_if_no_open_position(live_strategy_id: str) -> bool:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        open_position = conn.execute(
+            "SELECT id FROM positions WHERE live_strategy_id = ? AND status = 'open'",
+            (live_strategy_id,),
+        ).fetchone()
+        if open_position is not None:
+            return False
+        cursor = conn.execute(
+            "UPDATE live_strategies SET status='stopped', stopped_at=datetime('now') "
+            "WHERE id=? AND status IN ('draft','running','paused')",
+            (live_strategy_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def list_active_strategies() -> list[dict]:
     conn = _connect()
     try:
