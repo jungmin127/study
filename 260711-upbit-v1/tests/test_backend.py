@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -368,6 +369,42 @@ def test_create_live_strategy_rejects_non_negative_daily_loss_limit(monkeypatch,
 
     resp = client.post("/api/v1/live-strategies", json=req)
     assert resp.status_code == 400
+
+
+def test_list_live_strategies_returns_empty_when_none(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/live-strategies")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_list_live_strategies_includes_open_position_summary(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    create_resp = client.post("/api/v1/live-strategies", json=_live_strategy_request())
+    strategy_id = create_resp.json()["id"]
+    trading_db_module.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    _patch_get_current_prices(monkeypatch, {"KRW-BTC": 55_000_000.0})
+
+    resp = client.get("/api/v1/live-strategies")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    position = body[0]["open_position"]
+    assert position["entry_price"] == 50_000_000.0
+    assert position["entry_qty"] == 0.01
+    assert position["unrealized_pnl_pct"] == pytest.approx(10.0)
+
+
+def test_list_live_strategies_open_position_is_null_when_no_position(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    client.post("/api/v1/live-strategies", json=_live_strategy_request())
+
+    resp = client.get("/api/v1/live-strategies")
+
+    assert resp.json()[0]["open_position"] is None
 
 
 def test_run_backtest_returns_run_id_and_is_retrievable(monkeypatch, tmp_path):

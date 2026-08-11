@@ -1089,3 +1089,15 @@ def create_live_strategy_endpoint(req: CreateLiveStrategyRequest) -> dict:
         risk_config_json=json.dumps(req.risk_config.model_dump()),
     )
     return _full_live_strategy_response(strategy_id)
+
+
+@app.get("/api/v1/live-strategies")
+def list_live_strategies_endpoint() -> list[dict]:
+    strategies = trading_db.list_live_strategies()
+    positions = {s["id"]: trading_db.get_open_position(s["id"]) for s in strategies}
+    open_markets = {s["market"] for s in strategies if positions[s["id"]] is not None}
+    current_prices = get_current_prices(list(open_markets)) if open_markets else {}
+    return [
+        _live_strategy_response(s, positions[s["id"]], current_prices.get(s["market"]))
+        for s in strategies
+    ]
