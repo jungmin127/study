@@ -397,6 +397,30 @@ def test_list_live_strategies_includes_open_position_summary(monkeypatch, tmp_pa
     assert position["unrealized_pnl_pct"] == pytest.approx(10.0)
 
 
+def test_list_live_strategies_falls_back_when_current_price_fetch_fails(monkeypatch, tmp_path):
+    """Fix 2(Important) — get_current_prices()가 업비트 장애/타임아웃으로 예외를 던져도
+    목록 엔드포인트 전체가 500으로 죽으면 안 된다. 열린 포지션이 있는 전략의
+    unrealized_pnl_pct만 None으로 빠지고 나머지는 정상 응답해야 한다(하필 포지션이
+    있어 pause/stop 버튼이 가장 필요한 순간에 목록 자체가 안 뜨는 걸 막는다)."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    create_resp = client.post("/api/v1/live-strategies", json=_live_strategy_request())
+    strategy_id = create_resp.json()["id"]
+    trading_db_module.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    def _raise(markets):
+        raise RuntimeError("업비트 ticker 호출 실패")
+
+    monkeypatch.setattr(backend_module, "get_current_prices", _raise)
+
+    resp = client.get("/api/v1/live-strategies")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["open_position"]["unrealized_pnl_pct"] is None
+
+
 def test_list_live_strategies_open_position_is_null_when_no_position(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])

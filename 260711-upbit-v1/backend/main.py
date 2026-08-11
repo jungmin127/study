@@ -1069,8 +1069,11 @@ def _full_live_strategy_response(strategy_id: str) -> dict:
     position = trading_db.get_open_position(strategy_id)
     current_price = None
     if position is not None:
-        prices = get_current_prices([strategy["market"]])
-        current_price = prices.get(strategy["market"])
+        try:
+            prices = get_current_prices([strategy["market"]])
+            current_price = prices.get(strategy["market"])
+        except Exception:
+            current_price = None
     return _live_strategy_response(strategy, position, current_price)
 
 
@@ -1096,7 +1099,10 @@ def list_live_strategies_endpoint() -> list[dict]:
     strategies = trading_db.list_live_strategies()
     positions = {s["id"]: trading_db.get_open_position(s["id"]) for s in strategies}
     open_markets = {s["market"] for s in strategies if positions[s["id"]] is not None}
-    current_prices = get_current_prices(list(open_markets)) if open_markets else {}
+    try:
+        current_prices = get_current_prices(list(open_markets)) if open_markets else {}
+    except Exception:
+        current_prices = {}
     return [
         _live_strategy_response(s, positions[s["id"]], current_prices.get(s["market"]))
         for s in strategies
