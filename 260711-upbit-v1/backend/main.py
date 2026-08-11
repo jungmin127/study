@@ -581,6 +581,19 @@ def get_backtest_detail(run_id: str) -> dict:
     }
 
 
+@app.get("/api/v1/backtests/{run_id}/config")
+def get_backtest_config_endpoint(run_id: str) -> dict:
+    config = get_run_config(run_id)
+    if config is None:
+        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 설정을 찾을 수 없습니다")
+    return {
+        "market": config["market"],
+        "timeframe": config["timeframe"],
+        "buy_conditions": config["buy_conditions"],
+        "sell_conditions": config["sell_conditions"],
+    }
+
+
 @app.delete("/api/v1/backtests/{run_id}")
 def delete_backtest(run_id: str) -> dict:
     deleted = delete_backtest_run(run_id)

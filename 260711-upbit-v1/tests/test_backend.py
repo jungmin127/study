@@ -192,6 +192,28 @@ def test_refresh_backtest_preserves_title_and_description(monkeypatch, tmp_path)
     assert run["description"] == "설명"
 
 
+def test_backtest_config_returns_404_for_missing_run(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/backtests/does-not-exist/config")
+    assert resp.status_code == 404
+
+
+def test_backtest_config_returns_market_timeframe_and_conditions(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_candles(monkeypatch)
+
+    create_resp = client.post("/api/v1/backtests/run", json=_run_request())
+    run_id = create_resp.json()["run_id"]
+
+    resp = client.get(f"/api/v1/backtests/{run_id}/config")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["market"] == "KRW-BTC"
+    assert body["timeframe"] == "days"
+    assert body["buy_conditions"] == _VALID_BUY
+    assert body["sell_conditions"] == _VALID_SELL
+
+
 def test_get_signals_returns_registered_signal_keys():
     from signals import SIGNAL_REGISTRY
 
