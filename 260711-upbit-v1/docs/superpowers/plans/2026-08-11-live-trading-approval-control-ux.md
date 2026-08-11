@@ -49,7 +49,7 @@ Router(TypeScript) 프론트엔드. 기존 grid-search/backtests 기능의 파�
   - `insert_live_strategy(source_run_id: str | None, market: str, timeframe: str, buy_conditions_json: str, sell_conditions_json: str, risk_config_json: str) -> str` — 생성된 행의 `id` 반환, `status='draft'`(스키마 기본값)
   - `list_live_strategies() -> list[dict]` — 전체 status, `created_at DESC, rowid DESC` 정렬
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_trading_db.py` 맨 아래(파일 끝, `test_accumulate_stale_resolution_does_not_affect_other_positions` 다음)에 추가:
 
@@ -99,12 +99,12 @@ def test_list_live_strategies_returns_empty_list_when_none(monkeypatch, tmp_path
     assert db.list_live_strategies() == []
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `python -m pytest tests/test_trading_db.py -k "insert_live_strategy or list_live_strategies" -v`
 Expected: FAIL — `AttributeError: module 'trading.db' has no attribute 'insert_live_strategy'`
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `trading/db.py`의 `list_active_strategies()` 함수(파일 맨 끝) 바로 앞에 추가:
 
@@ -141,17 +141,17 @@ def list_live_strategies() -> list[dict]:
         conn.close()
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `python -m pytest tests/test_trading_db.py -k "insert_live_strategy or list_live_strategies" -v`
 Expected: PASS (4 passed)
 
-- [ ] **Step 5: 전체 trading db 테스트 회귀 확인**
+- [x] **Step 5: 전체 trading db 테스트 회귀 확인**
 
 Run: `python -m pytest tests/test_trading_db.py -v`
 Expected: 전부 PASS (기존 테스트 포함, 총 40개 이상)
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add trading/db.py tests/test_trading_db.py
@@ -180,7 +180,7 @@ git commit -m "feat: 라이브 전략 생성/목록 조회 DB 함수 추가"
     없을 때만 `status='stopped'`+`stopped_at` 설정, 성공 시 True. 열린 포지션이 있으면 아무
     것도 바꾸지 않고 False.
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_trading_db.py` 맨 아래에 추가:
 
@@ -266,12 +266,12 @@ def test_stop_live_strategy_if_no_open_position_allows_stopping_after_position_c
     assert db.get_live_strategy(strategy_id)["status"] == "stopped"
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `python -m pytest tests/test_trading_db.py -k "approve_live_strategy or transition_live_strategy_status or stop_live_strategy_if_no_open_position" -v`
 Expected: FAIL — `AttributeError`
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 같은 위치(`list_active_strategies()` 바로 앞, Task 1에서 추가한 두 함수 다음)에 추가:
 
@@ -325,17 +325,17 @@ def stop_live_strategy_if_no_open_position(live_strategy_id: str) -> bool:
         conn.close()
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `python -m pytest tests/test_trading_db.py -k "approve_live_strategy or transition_live_strategy_status or stop_live_strategy_if_no_open_position" -v`
 Expected: PASS (7 passed)
 
-- [ ] **Step 5: 전체 trading db 테스트 회귀 확인**
+- [x] **Step 5: 전체 trading db 테스트 회귀 확인**
 
 Run: `python -m pytest tests/test_trading_db.py -v`
 Expected: 전부 PASS
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add trading/db.py tests/test_trading_db.py
@@ -360,7 +360,7 @@ git commit -m "feat: 라이브 전략 승인/상태전환/중지 가드 DB 함�
   `_patch_get_candles`, `_run_request`, `_VALID_BUY`, `_VALID_SELL`(모두 기존 테스트 헬퍼)
 - Produces: `GET /api/v1/backtests/{run_id}/config` → `{"market": str, "timeframe": str, "buy_conditions": dict, "sell_conditions": dict}`, 없으면 404
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_backend.py`의 `test_refresh_backtest_preserves_title_and_description` 함수
 바로 다음(193번째 줄 근처, `test_get_signals_returns_registered_signal_keys` 앞)에 추가:
@@ -388,12 +388,12 @@ def test_backtest_config_returns_market_timeframe_and_conditions(monkeypatch, tm
     assert body["sell_conditions"] == _VALID_SELL
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `python -m pytest tests/test_backend.py -k "backtest_config" -v`
 Expected: FAIL — 404 Not Found (라우트 없음, `test_backtest_config_returns_market_timeframe_and_conditions`가 실패)
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `backend/main.py`의 `get_backtest_detail` 함수(582번째 줄 근처, `return {...}` 다음) 바로
 뒤에 추가:
@@ -412,17 +412,17 @@ def get_backtest_config_endpoint(run_id: str) -> dict:
     }
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `python -m pytest tests/test_backend.py -k "backtest_config" -v`
 Expected: PASS (2 passed)
 
-- [ ] **Step 5: 전체 backend 테스트 회귀 확인**
+- [x] **Step 5: 전체 backend 테스트 회귀 확인**
 
 Run: `python -m pytest tests/test_backend.py -v`
 Expected: 전부 PASS
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
@@ -462,7 +462,7 @@ import trading.position_manager as position_manager
 import trading.upbit_client as upbit_client
 ```
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_backend.py` 상단 import 블록(11번째 줄, `from tests.signal_fixtures import
 make_oscillating_df` 다음)에 추가:
@@ -543,12 +543,12 @@ def test_create_live_strategy_rejects_non_negative_daily_loss_limit(monkeypatch,
     assert resp.status_code == 400
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `python -m pytest tests/test_backend.py -k "create_live_strategy" -v`
 Expected: FAIL — 404 Not Found(라우트 없음)
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `backend/main.py` 파일 맨 끝(`delete_grid_search_job_endpoint` 함수 다음)에 추가:
 
@@ -654,17 +654,17 @@ def create_live_strategy_endpoint(req: CreateLiveStrategyRequest) -> dict:
     return _full_live_strategy_response(strategy_id)
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `python -m pytest tests/test_backend.py -k "create_live_strategy" -v`
 Expected: PASS (4 passed)
 
-- [ ] **Step 5: 전체 backend 테스트 회귀 확인**
+- [x] **Step 5: 전체 backend 테스트 회귀 확인**
 
 Run: `python -m pytest tests/test_backend.py -v`
 Expected: 전부 PASS
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
@@ -685,7 +685,7 @@ git commit -m "feat: 라이브 전략 draft 생성 API 추가"
 - Produces: `GET /api/v1/live-strategies` → `list[dict]`(status 무관 전체, 각 행에
   `open_position` 포함)
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_backend.py`의 `test_create_live_strategy_rejects_non_negative_daily_loss_limit`
 다음에 추가. `pytest.approx`를 쓰므로 파일 최상단 import 블록에 `import pytest`가 없으면
@@ -728,12 +728,12 @@ def test_list_live_strategies_open_position_is_null_when_no_position(monkeypatch
     assert resp.json()[0]["open_position"] is None
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `python -m pytest tests/test_backend.py -k "list_live_strategies" -v`
 Expected: FAIL — 404 Not Found
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 Task 4에서 추가한 `create_live_strategy_endpoint` 함수 바로 다음에 추가:
 
@@ -750,17 +750,17 @@ def list_live_strategies_endpoint() -> list[dict]:
     ]
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `python -m pytest tests/test_backend.py -k "list_live_strategies" -v`
 Expected: PASS (3 passed)
 
-- [ ] **Step 5: 전체 backend 테스트 회귀 확인**
+- [x] **Step 5: 전체 backend 테스트 회귀 확인**
 
 Run: `python -m pytest tests/test_backend.py -v`
 Expected: 전부 PASS
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
@@ -786,7 +786,7 @@ git commit -m "feat: 라이브 전략 목록 조회 API 추가(열린 포지션 
   - `POST /api/v1/live-strategies/{strategy_id}/resume`
   - `POST /api/v1/live-strategies/{strategy_id}/stop`
 
-- [ ] **Step 1: 실패하는 테스트 작성**
+- [x] **Step 1: 실패하는 테스트 작성**
 
 `tests/test_backend.py`의 `test_list_live_strategies_open_position_is_null_when_no_position`
 다음에 추가:
@@ -932,12 +932,12 @@ def test_stop_live_strategy_returns_409_when_already_stopped(monkeypatch, tmp_pa
     assert resp.status_code == 409
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `python -m pytest tests/test_backend.py -k "approve_live_strategy or pause_live_strategy or resume_live_strategy or stop_live_strategy" -v`
 Expected: FAIL — 404 Not Found(라우트 없음)
 
-- [ ] **Step 3: 최소 구현 작성**
+- [x] **Step 3: 최소 구현 작성**
 
 `list_live_strategies_endpoint` 함수 다음에 추가:
 
@@ -1009,22 +1009,22 @@ def stop_live_strategy_endpoint(strategy_id: str) -> dict:
     return _full_live_strategy_response(strategy_id)
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [x] **Step 4: 테스트 통과 확인**
 
 Run: `python -m pytest tests/test_backend.py -k "approve_live_strategy or pause_live_strategy or resume_live_strategy or stop_live_strategy" -v`
 Expected: PASS (11 passed)
 
-- [ ] **Step 5: 전체 backend 테스트 회귀 확인**
+- [x] **Step 5: 전체 backend 테스트 회귀 확인**
 
 Run: `python -m pytest tests/test_backend.py -v`
 Expected: 전부 PASS
 
-- [ ] **Step 6: 전체 테스트 스위트 회귀 확인**
+- [x] **Step 6: 전체 테스트 스위트 회귀 확인**
 
 Run: `python -m pytest -q`
 Expected: 전부 PASS (다른 모듈에 영향 없음 확인)
 
-- [ ] **Step 7: 커밋**
+- [x] **Step 7: 커밋**
 
 ```bash
 git add backend/main.py tests/test_backend.py
@@ -1050,7 +1050,7 @@ git commit -m "feat: 라이브 전략 승인/일시정지/재개/중지 API 추�
 이 저장소는 프론트엔드 자동테스트 관례가 없으므로, 이 태스크는 파일 작성 + 타입체크로
 검증한다(Task 10에서 전체 플로우를 dev 서버로 수동 검증).
 
-- [ ] **Step 1: 타입 파일 작성**
+- [x] **Step 1: 타입 파일 작성**
 
 `frontend/lib/types/liveStrategies.ts`:
 ```typescript
@@ -1110,7 +1110,7 @@ export interface BacktestConfig {
 }
 ```
 
-- [ ] **Step 2: API 클라이언트 함수 작성**
+- [x] **Step 2: API 클라이언트 함수 작성**
 
 `frontend/lib/api/liveStrategies.ts`:
 ```typescript
@@ -1153,12 +1153,12 @@ export function stopLiveStrategy(id: string): Promise<LiveStrategy> {
 }
 ```
 
-- [ ] **Step 3: 타입체크**
+- [x] **Step 3: 타입체크**
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: 에러 없음(exit code 0)
 
-- [ ] **Step 4: 커밋**
+- [x] **Step 4: 커밋**
 
 ```bash
 git add frontend/lib/types/liveStrategies.ts frontend/lib/api/liveStrategies.ts
@@ -1184,7 +1184,7 @@ git commit -m "feat: 라이브 전략 프론트엔드 타입/API 클라이언트
 - Produces: `/live-strategies/new?source_run_id={runId}` 경로, `GoLiveButton` 컴포넌트
   (Task 9는 이 태스크에 의존하지 않음 — 독립적으로 병행 가능)
 
-- [ ] **Step 1: 백테스트 상세 페이지에 진입 버튼 추가**
+- [x] **Step 1: 백테스트 상세 페이지에 진입 버튼 추가**
 
 `frontend/components/GoLiveButton.tsx` 생성:
 ```tsx
@@ -1213,7 +1213,7 @@ import GoLiveButton from '@/components/GoLiveButton';
         <GoLiveButton runId={params.runId} />
 ```
 
-- [ ] **Step 2: draft 생성 폼 페이지 작성**
+- [x] **Step 2: draft 생성 폼 페이지 작성**
 
 `frontend/components/NewLiveStrategyPage.tsx`:
 ```tsx
@@ -1441,12 +1441,12 @@ export default function Page() {
 }
 ```
 
-- [ ] **Step 3: 타입체크**
+- [x] **Step 3: 타입체크**
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: 에러 없음
 
-- [ ] **Step 4: 커밋**
+- [x] **Step 4: 커밋**
 
 ```bash
 git add frontend/components/GoLiveButton.tsx frontend/components/NewLiveStrategyPage.tsx \
@@ -1468,7 +1468,7 @@ git commit -m "feat: 백테스트 상세 페이지에서 라이브 전략 draft 
   `@/components/ui/{button,badge,card}`, `@/lib/api/client`(`ApiError`),
   `@/lib/format`(`formatTimeframe`)
 
-- [ ] **Step 1: 관리 페이지 컴포넌트 작성**
+- [x] **Step 1: 관리 페이지 컴포넌트 작성**
 
 `frontend/components/LiveStrategiesPage.tsx`:
 ```tsx
@@ -1624,12 +1624,12 @@ export default function Page() {
 }
 ```
 
-- [ ] **Step 2: 타입체크**
+- [x] **Step 2: 타입체크**
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: 에러 없음
 
-- [ ] **Step 3: 커밋**
+- [x] **Step 3: 커밋**
 
 ```bash
 git add frontend/components/LiveStrategiesPage.tsx frontend/app/live-strategies/page.tsx
@@ -1646,7 +1646,7 @@ git commit -m "feat: 라이브 전략 관리 페이지(목록+제어) 추가"
 **Interfaces:**
 - Consumes: Task 1~9의 모든 산출물(엔드포인트 6개 + 페이지 2개 + 진입 버튼 1개)
 
-- [ ] **Step 1: 내비게이션 탭에 "라이브 전략" 추가**
+- [x] **Step 1: 내비게이션 탭에 "라이브 전략" 추가**
 
 `frontend/components/NavTabs.tsx`의 import 줄을 다음으로 교체:
 ```tsx
@@ -1665,24 +1665,24 @@ const STEPS = [
 ];
 ```
 
-- [ ] **Step 2: 타입체크**
+- [x] **Step 2: 타입체크**
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: 에러 없음
 
-- [ ] **Step 3: 커밋**
+- [x] **Step 3: 커밋**
 
 ```bash
 git add frontend/components/NavTabs.tsx
 git commit -m "feat: 내비게이션에 라이브 전략 관리 탭 추가"
 ```
 
-- [ ] **Step 4: 전체 백엔드 테스트 스위트 최종 확인**
+- [x] **Step 4: 전체 백엔드 테스트 스위트 최종 확인**
 
 Run: `python -m pytest -q`
 Expected: 전부 PASS
 
-- [ ] **Step 5: 수동 e2e 검증 (dev 서버)**
+- [x] **Step 5: 수동 e2e 검증 (dev 서버)**
 
 기존 dev 서버가 떠 있으면 재사용하고, 없으면 저장소 루트에서
 `uvicorn backend.main:app --reload --port 8000`과 `cd frontend && npm run dev`를 각각
