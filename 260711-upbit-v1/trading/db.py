@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS signals (
     indicator_snapshot_json TEXT,
     resulting_order_id      TEXT REFERENCES orders(id),
     skip_reason             TEXT,
-    triggered_at            TEXT NOT NULL DEFAULT (datetime('now'))
+    triggered_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(live_strategy_id, signal_type, candle_time)
 );
 
 CREATE TABLE IF NOT EXISTS daily_performance (
@@ -345,15 +346,26 @@ def insert_signal(
     live_strategy_id: str, signal_type: str, candle_time: str,
     indicator_snapshot_json: str, skip_reason: str | None = None,
 ) -> str:
+    """signals에 (live_strategy_id, signal_type, candle_time) UNIQUE 제약이 있어, 같은
+    조합으로 재호출되면(daemon이 last_processed_candle_time 갱신 전에 죽었다가 재시작해
+    같은 candle을 재평가하는 경우) 새 행 대신 기존 행의 id를 그대로 반환한다 — 예외
+    없이 evaluate_signals()가 계속 진행되게 한다(운영 가시성/무결성 보완)."""
     signal_id = str(uuid.uuid4())
     conn = _connect()
     try:
-        conn.execute(
-            "INSERT INTO signals "
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO signals "
             "(id, live_strategy_id, signal_type, candle_time, indicator_snapshot_json, skip_reason) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (signal_id, live_strategy_id, signal_type, candle_time, indicator_snapshot_json, skip_reason),
         )
+        if cursor.rowcount == 0:
+            existing = conn.execute(
+                "SELECT id FROM signals WHERE live_strategy_id = ? AND signal_type = ? AND candle_time = ?",
+                (live_strategy_id, signal_type, candle_time),
+            ).fetchone()
+            signal_id = existing["id"]
         conn.commit()
     finally:
         conn.close()

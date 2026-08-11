@@ -349,6 +349,39 @@ def test_insert_signal_stores_skip_reason(monkeypatch, tmp_path):
     assert row["skip_reason"] == "unknown"
 
 
+def test_insert_signal_is_idempotent_for_same_strategy_type_and_candle_time(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    first_id = db.insert_signal(
+        strategy_id, "buy", "2026-08-07T10:00:00+00:00", '{"a": 1}',
+    )
+    second_id = db.insert_signal(
+        strategy_id, "buy", "2026-08-07T10:00:00+00:00", '{"a": 2}',  # 다른 snapshot이어도 무시됨
+    )
+
+    assert second_id == first_id
+    conn = db._connect()
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE live_strategy_id = ? AND signal_type = ? AND candle_time = ?",
+            (strategy_id, "buy", "2026-08-07T10:00:00+00:00"),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 1
+
+
+def test_insert_signal_allows_different_signal_types_for_same_candle(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    buy_id = db.insert_signal(strategy_id, "buy", "2026-08-07T10:00:00+00:00", "{}")
+    sell_id = db.insert_signal(strategy_id, "sell", "2026-08-07T10:00:00+00:00", "{}")
+
+    assert buy_id != sell_id
+
+
 def test_insert_order_creates_wait_row(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db)
