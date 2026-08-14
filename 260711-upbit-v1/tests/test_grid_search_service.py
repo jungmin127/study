@@ -285,6 +285,106 @@ def test_reader_loop_finishes_db_row_before_clearing_active_slot(monkeypatch):
     assert gss._active is None
 
 
+def test_reset_active_job_clears_active_and_sends_terminate_signal(monkeypatch):
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+    _FakePopen.stdout_lines = []
+    _FakePopen.returncode = 0
+
+    job_id = gss.start_job(
+        market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+    proc = gss._active["proc"]
+
+    reset_job_id = gss.reset_active_job()
+
+    assert reset_job_id == job_id
+    assert gss._active is None
+    assert signal.CTRL_BREAK_EVENT in proc.signals_sent
+
+
+def test_reset_active_job_returns_none_when_nothing_active():
+    assert gss.reset_active_job() is None
+
+
+def test_reset_active_job_ignores_errors_from_already_dead_process(monkeypatch):
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+    _FakePopen.stdout_lines = []
+    _FakePopen.returncode = 0
+
+    gss.start_job(
+        market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    def _raise(sig):
+        raise OSError("process already terminated")
+
+    gss._active["proc"].send_signal = _raise
+
+    reset_job_id = gss.reset_active_job()
+    assert reset_job_id is not None
+    assert gss._active is None
+
+
+def test_reset_active_job_with_expected_id_ignores_mismatched_active_job(monkeypatch):
+    """delete 엔드포인트가 무관한 다른 job이 실행 중일 때 그 job까지 실수로
+    취소하지 않도록 하는 안전장치."""
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+    _FakePopen.stdout_lines = []
+    _FakePopen.returncode = 0
+
+    job_id = gss.start_job(
+        market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    reset_job_id = gss.reset_active_job(expected_job_id="different-job-id")
+
+    assert reset_job_id is None
+    assert gss._active is not None
+    assert gss._active["job_id"] == job_id
+
+
+def test_reset_active_job_with_matching_expected_id_clears_it(monkeypatch):
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+    _FakePopen.stdout_lines = []
+    _FakePopen.returncode = 0
+
+    job_id = gss.start_job(
+        market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    reset_job_id = gss.reset_active_job(expected_job_id=job_id)
+
+    assert reset_job_id == job_id
+    assert gss._active is None
+
+
+def test_reader_loop_does_not_clobber_newer_active_job_started_after_reset(monkeypatch):
+    """job A의 리더 스레드가 뒤늦게(예: 고아 프로세스의 stdout이 한참 뒤에야 닫혀서)
+    끝까지 실행됐을 때, 그 사이 사용자가 초기화 후 새로 시작한 job B의 _active
+    슬롯을 지워버리면 안 된다."""
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+    _FakePopen.stdout_lines = ["    완료 1/1건 (100.0%)\n"]
+    _FakePopen.returncode = 0
+
+    job_id_a = gss.start_job(
+        market="KRW-SOL", timeframe="minutes60", capital=1_000_000,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+    proc_a = gss._active["proc"]
+    canceled_a = gss._active["canceled"]
+
+    fake_active_b = {"job_id": "job-b", "proc": object(), "canceled": None}
+    gss._active = fake_active_b
+
+    gss._reader_loop(job_id_a, proc_a, canceled_a)
+
+    assert gss._active is fake_active_b
+
+
 def test_reader_loop_clears_active_even_when_finish_grid_search_job_raises(monkeypatch, caplog):
     def _raise_finish(*args, **kwargs):
         raise RuntimeError("database is locked")

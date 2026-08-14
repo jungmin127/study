@@ -147,7 +147,45 @@ def _reader_loop(job_id: str, proc, canceled: threading.Event) -> None:
         raise
     finally:
         with _lock:
-            _active = None
+            # _active가 이미 다른(더 최신) job으로 교체된 뒤라면 건드리지 않는다 — 이
+            # 리더 스레드가 고아 프로세스의 stdout이 뒤늦게 닫혀 한참 후에야 여기 도달한
+            # 경우, reset_active_job()으로 슬롯이 비워지고 그 사이 새 job이 이미
+            # 시작됐을 수 있다. job_id가 일치할 때만 비운다.
+            if _active is not None and _active["job_id"] == job_id:
+                _active = None
+
+
+def reset_active_job(expected_job_id: str | None = None) -> str | None:
+    """`_active`를 강제로 비운다. 정리된 job_id를 반환하고, 비울 게 없었으면 None.
+
+    expected_job_id가 주어지면 현재 `_active`의 job_id가 그것과 일치할 때만 비운다
+    (delete 엔드포인트가 이 job을 지울 때, 마침 실행 중인 *다른* 무관한 job까지 실수로
+    취소하지 않도록). None이면 무조건 비운다 — 사용자가 명시적으로 누르는 'job 초기화'
+    버튼용 안전판이다: 백엔드가 재시작됐다고 믿었는데 실제로는 이전 프로세스가
+    (Windows에서 터미널 패널을 강제로 닫아 uvicorn --reload 워커가 고아로 남는 경우 등)
+    살아남아 `_active`가 stale 상태로 계속 새 grid search를 막고 있을 때 쓴다.
+
+    추적 중이던 프로세스가 있으면 최선을 다해 종료를 시도하되, 이미 죽었거나
+    응답하지 않아도 무시하고 슬롯은 반드시 비운다."""
+    global _active
+    with _lock:
+        if _active is None:
+            return None
+        if expected_job_id is not None and _active["job_id"] != expected_job_id:
+            return None
+        job_id = _active["job_id"]
+        proc = _active["proc"]
+        _active["canceled"].set()
+        _active = None
+
+    try:
+        if sys.platform == "win32":
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            proc.terminate()
+    except Exception:
+        pass
+    return job_id
 
 
 def start_job(market: str, timeframe: str, capital: float, start: str, end: str, top_n: int) -> str:

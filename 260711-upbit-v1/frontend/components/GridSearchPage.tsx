@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ApiError } from '@/lib/api/client';
-import { cancelGridSearchJob, createGridSearchJob, getGridSearchJobs } from '@/lib/api/eda';
+import {
+  cancelGridSearchJob,
+  createGridSearchJob,
+  getGridSearchJobs,
+  resetGridSearchActiveJob,
+} from '@/lib/api/eda';
+import { Button } from '@/components/ui/button';
 import type { GridSearchJob, GridSearchJobRequest } from '@/lib/types/eda';
 import GridSearchForm from '@/components/GridSearchForm';
 import GridSearchProgress from '@/components/GridSearchProgress';
@@ -16,6 +22,8 @@ export default function GridSearchPage() {
   const [jobs, setJobs] = useState<GridSearchJob[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitErrorStatus, setSubmitErrorStatus] = useState<number | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -42,11 +50,27 @@ export default function GridSearchPage() {
 
   async function handleSubmit(request: GridSearchJobRequest) {
     setSubmitError(null);
+    setSubmitErrorStatus(null);
     try {
       const job = await createGridSearchJob(request);
       setJobs((prev) => [job, ...prev]);
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : 'grid search 시작 중 오류가 발생했습니다.');
+      setSubmitErrorStatus(err instanceof ApiError ? err.status : null);
+    }
+  }
+
+  async function handleResetActiveJob() {
+    setResetting(true);
+    try {
+      await resetGridSearchActiveJob();
+      setSubmitError(null);
+      setSubmitErrorStatus(null);
+      await refresh();
+    } catch (err) {
+      setSubmitError(err instanceof ApiError ? err.message : '초기화 중 오류가 발생했습니다.');
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -74,7 +98,16 @@ export default function GridSearchPage() {
         disabled={runningJob !== null}
         onSubmit={handleSubmit}
       />
-      {submitError && <p className="text-sm text-destructive">{submitError}</p>}
+      {submitError && (
+        <div className="flex items-center gap-3">
+          <p className="text-sm text-destructive">{submitError}</p>
+          {submitErrorStatus === 409 && (
+            <Button variant="outline" size="sm" onClick={handleResetActiveJob} disabled={resetting}>
+              {resetting ? '초기화하는 중...' : '초기화'}
+            </Button>
+          )}
+        </div>
+      )}
       {runningJob && <GridSearchProgress job={runningJob} onCancel={handleCancel} />}
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       <GridSearchHistory jobs={jobs} onRefresh={refresh} />

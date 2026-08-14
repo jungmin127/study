@@ -1908,6 +1908,53 @@ def test_cancel_grid_search_job_returns_409_when_not_active(monkeypatch, tmp_pat
     assert resp.status_code == 409
 
 
+def test_reset_grid_search_active_job_clears_stuck_slot_and_fails_running_row(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from engine.cache import create_grid_search_job
+
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+    monkeypatch.setattr(backend_module, "reset_active_job", lambda: "job-1")
+
+    resp = client.post("/api/v1/grid-search/jobs/reset")
+    assert resp.status_code == 200
+    assert resp.json() == {"reset_job_id": "job-1"}
+
+    job = next(j for j in client.get("/api/v1/grid-search/jobs").json() if j["id"] == "job-1")
+    assert job["status"] == "failed"
+
+
+def test_reset_grid_search_active_job_returns_none_when_nothing_stuck(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "reset_active_job", lambda: None)
+
+    resp = client.post("/api/v1/grid-search/jobs/reset")
+    assert resp.status_code == 200
+    assert resp.json() == {"reset_job_id": None}
+
+
+def test_delete_grid_search_job_resets_active_slot_when_job_matches(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from engine.cache import create_grid_search_job
+
+    create_grid_search_job(
+        job_id="job-1", market="KRW-SOL", timeframe="minutes60", capital=1_000_000.0,
+        start="2026-06-05", end="2026-08-03", top_n=20,
+    )
+
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        backend_module, "reset_active_job",
+        lambda expected_job_id=None: calls.append(expected_job_id),
+    )
+
+    resp = client.delete("/api/v1/grid-search/jobs/job-1")
+    assert resp.status_code == 200
+    assert calls == ["job-1"]
+
+
 def test_delete_grid_search_result_removes_run_and_updates_job(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     from engine.cache import create_grid_search_job

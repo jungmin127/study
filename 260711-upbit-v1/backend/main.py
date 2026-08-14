@@ -58,7 +58,13 @@ from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
 from upbit_data_service import get_candles, get_current_prices, get_krw_markets, get_krw_markets_with_ticker
-from backend.grid_search_service import JobAlreadyRunningError, JobNotActiveError, cancel_job, start_job
+from backend.grid_search_service import (
+    JobAlreadyRunningError,
+    JobNotActiveError,
+    cancel_job,
+    reset_active_job,
+    start_job,
+)
 import httpx
 
 import trading.db as trading_db
@@ -984,6 +990,22 @@ def cancel_grid_search_job_endpoint(job_id: str) -> dict:
     return {"status": "canceling"}
 
 
+@app.post("/api/v1/grid-search/jobs/reset")
+def reset_grid_search_active_job_endpoint() -> dict:
+    """`_active`가 실제로는 죽었거나 응답 없는 프로세스를 계속 물고 있어 새 grid
+    search가 막힐 때(예: 백엔드를 재시작했다고 믿었는데 이전 프로세스가 Windows에서
+    고아로 남아 있던 경우) 사용자가 명시적으로 슬롯을 비우는 엔드포인트."""
+    job_id = reset_active_job()
+    if job_id is not None:
+        job = get_grid_search_job(job_id)
+        if job is not None and job["status"] == "running":
+            finish_grid_search_job(
+                job_id, status="failed",
+                error_message="사용자가 실행 중이던 job을 수동으로 초기화했습니다.",
+            )
+    return {"reset_job_id": job_id}
+
+
 @app.delete("/api/v1/grid-search/jobs/{job_id}/results/{run_id}")
 def delete_grid_search_result_endpoint(job_id: str, run_id: str) -> dict:
     job = get_grid_search_job(job_id)
@@ -1002,6 +1024,11 @@ def delete_grid_search_job_endpoint(job_id: str) -> dict:
     job = get_grid_search_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="해당 job_id의 grid search를 찾을 수 없습니다")
+    # 이 job이 아직 _active가 추적 중인 대상이면 함께 정리한다 — 안 그러면 DB 행은
+    # 지워졌는데 _active는 그 job_id를 계속 물고 있어 새 grid search가 영영 막힌다
+    # (사용자가 실제로 겪은 버그). expected_job_id로 넘겨 무관한 다른 실행 중 job까지
+    # 실수로 취소하지 않도록 한다.
+    reset_active_job(expected_job_id=job_id)
     for result in job.get("result_json") or []:
         delete_backtest_run(result["run_id"])
     delete_grid_search_job(job_id)
