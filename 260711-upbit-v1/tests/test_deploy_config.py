@@ -72,3 +72,19 @@ def test_setup_script_covers_required_install_steps():
     assert "ufw allow OpenSSH" in content
     assert "ufw --force enable" in content
     assert "ifconfig.me" in content
+
+
+def test_update_script_has_valid_bash_syntax():
+    result = subprocess.run(
+        [BASH, "-n", str(DEPLOY_DIR / "update.sh")], capture_output=True, text=True, encoding="utf-8",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_update_script_covers_required_steps():
+    content = (DEPLOY_DIR / "update.sh").read_text(encoding="utf-8")
+    assert "set -euo pipefail" in content
+    assert "git pull" in content
+    assert "pip install -r requirements.txt" in content
+    assert "npm run build" in content
+    assert "systemctl restart daemon backend frontend" in content
