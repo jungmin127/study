@@ -127,8 +127,10 @@ def _resolve_allowed_origin() -> str:
     """프론트엔드가 배포된 origin. 로컬 개발은 기본값(localhost:3000), 서버 배포
     (Oracle 등)는 ALLOWED_ORIGIN 환경변수로 Tailscale 주소를 지정한다(2026-08-14
     배포 스펙 결정4). 프로세스 시작 시 한 번 결정되면 충분하다 — systemd
-    EnvironmentFile로 주입되는 값이라 실행 중 바뀌지 않는다."""
-    return os.environ.get("ALLOWED_ORIGIN", "http://localhost:3000")
+    EnvironmentFile로 주입되는 값이라 실행 중 바뀌지 않는다. `.env`에 빈 값으로
+    남아있는 경우(`ALLOWED_ORIGIN=`)도 python-dotenv가 os.environ에 빈 문자열로
+    심으므로(미설정과 다름) `or`로 폴백해 빈 문자열도 미설정과 동일하게 취급한다."""
+    return os.environ.get("ALLOWED_ORIGIN") or "http://localhost:3000"
 
 
 # 라이브 전략 승인/일시정지/재개/중지 API가 실거래(자금 이동에 준하는 조작)와 붙어 있어,
@@ -166,10 +168,10 @@ CORS 관련 동작 전부 그대로 유지된다.
 UPBIT_ACCESS_KEY=your_upbit_access_key_here
 UPBIT_SECRET_KEY=your_upbit_secret_key_here
 
-# 프론트엔드가 배포된 origin. 로컬 개발은 비워두면 기본값(http://localhost:3000)이
-# 쓰입니다. 서버 배포 시에는 Tailscale MagicDNS 주소로 지정하세요, 예:
+# 프론트엔드가 배포된 origin. 로컬 개발은 이 줄을 주석 처리한 채로 두면
+# 기본값(http://localhost:3000)이 쓰입니다. 서버 배포 시에는 아래 주석을 해제하고
+# Tailscale MagicDNS 주소로 지정하세요, 예:
 # ALLOWED_ORIGIN=http://oracle-server.tailXXXX.ts.net:3000
-ALLOWED_ORIGIN=
 ```
 
 - [ ] **Step 7: 커밋**

@@ -40,6 +40,15 @@ def test_resolve_allowed_origin_uses_env_var_when_set(monkeypatch):
     )
 
 
+def test_resolve_allowed_origin_treats_empty_string_as_unset(monkeypatch):
+    """load_dotenv()가 빈 값의 .env 항목을 os.environ에 빈 문자열로 심는 경우
+    (트레일링 blank ALLOWED_ORIGIN= 줄) 기본값으로 폴백해야 한다 — 그러지 않으면
+    allow_origins=[""]로 CORS가 조용히 깨진다(리뷰에서 실증된 버그)."""
+    monkeypatch.setenv("ALLOWED_ORIGIN", "")
+
+    assert backend_module._resolve_allowed_origin() == "http://localhost:3000"
+
+
 def test_health_check():
     client = TestClient(app)
     resp = client.get("/health")
