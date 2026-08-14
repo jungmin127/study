@@ -163,6 +163,10 @@ Oracle 전용 콘솔 클릭이나 사람이 손으로 따라 치는 가이드 �
 `deploy/update.sh`가 하는 일: `git pull` → 의존성 변경 시만 재설치 → 프론트 변경 시
 `npm run build` → 변경된 서비스만 `systemctl restart`.
 
+**운영 주의사항(런북에 명시):** `daemon.service`를 재시작하는 몇 초 동안 실시간
+손절/익절 감시(`_run_risk_exit_loop`)가 끊긴다. 급하지 않은 업데이트는 포지션이 없을
+때, 또는 사용자가 직접 지켜보고 있을 때 배포하는 것을 권장한다.
+
 두 스크립트와 systemd 유닛 파일, 그리고 순서를 설명하는 `deploy/README.md`(런북)를
 저장소에 커밋한다.
 
