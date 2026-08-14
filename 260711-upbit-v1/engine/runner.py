@@ -207,7 +207,12 @@ def run_backtest(
     sharpe_ratio = sharpe_analysis.get("sharperatio")
 
     drawdown_analysis = strategy.analyzers.drawdown.get_analysis()
-    max_drawdown_pct = drawdown_analysis.get("max", {}).get("drawdown")
+    _raw_max_drawdown = drawdown_analysis.get("max", {}).get("drawdown")
+    # backtrader의 DrawDown 애널라이저는 낙폭을 양수로 반환하지만, engine/metrics.py의
+    # calculate_metrics()가 같은 equity curve로 계산하는 mdd는 음수(고점 대비 낙폭)다.
+    # 부호를 통일하지 않으면 같은 run인데도 목록/랭킹 테이블(이 값)과 백테스트
+    # 상세페이지(metrics.mdd)에 정반대 부호로 표시된다.
+    max_drawdown_pct = -_raw_max_drawdown if _raw_max_drawdown is not None else None
 
     open_trades = strategy.analyzers.trades.get_open_trades()
     if open_trades:

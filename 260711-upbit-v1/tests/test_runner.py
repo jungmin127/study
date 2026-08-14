@@ -58,6 +58,47 @@ def test_run_backtest_buy_and_hold_once():
     assert result["trades"][0]["size"] > 0
 
 
+def test_run_backtest_max_drawdown_is_negative_or_zero():
+    """MDD는 항상 0 이하여야 한다 — engine/metrics.py의 calculate_metrics()가 같은
+    equity curve로 계산하는 mdd(고점 대비 낙폭, 음수)와 부호를 통일한다. 이전에는
+    backtrader DrawDown 애널라이저 값을 그대로(양수) 반환해, 백테스트 상세페이지의
+    mdd(음수)와 목록/랭킹 테이블의 max_drawdown(양수)이 같은 run인데도 부호가
+    반대로 보였다."""
+    n = 60
+    prices = []
+    p = 10000.0
+    for i in range(n):
+        if i < 20:
+            p += 50
+        elif i < 35:
+            p -= 120
+        else:
+            p += 30
+        prices.append(p)
+    idx = pd.date_range("2026-01-01", periods=n, freq="D", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx,
+        "open": prices,
+        "high": [x + 5 for x in prices],
+        "low": [x - 5 for x in prices],
+        "close": prices,
+        "volume": [1.0] * n,
+    })
+
+    result = run_backtest(
+        df=df,
+        strategy_cls=BuyAndHoldOnce,
+        risk_config={
+            "initial_capital": 10000,
+            "commission_rate": 0.001,
+            "position_sizing": "percent",
+            "position_size": 100,
+        },
+    )
+
+    assert result["max_drawdown"] < 0
+
+
 def test_forced_close_trade_deducts_entry_and_exit_commission():
     trade = _build_forced_close_trade(
         entry_time="2026-01-01T00:00:00", entry_price=100.0, size=2.0,
