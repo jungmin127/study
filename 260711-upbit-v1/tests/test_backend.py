@@ -21,6 +21,25 @@ def _client(monkeypatch, tmp_path):
     return TestClient(app)
 
 
+def test_resolve_allowed_origin_defaults_to_localhost_when_env_unset(monkeypatch):
+    """ALLOWED_ORIGIN 환경변수가 없으면 기존 기본값(localhost:3000)을 그대로 써야
+    한다 — 로컬 개발 흐름에 회귀가 없어야 한다(배포 스펙 결정4)."""
+    monkeypatch.delenv("ALLOWED_ORIGIN", raising=False)
+
+    assert backend_module._resolve_allowed_origin() == "http://localhost:3000"
+
+
+def test_resolve_allowed_origin_uses_env_var_when_set(monkeypatch):
+    """ALLOWED_ORIGIN이 설정되면(예: 서버 배포 시 Tailscale 주소) 그 값을 그대로
+    써야 한다."""
+    monkeypatch.setenv("ALLOWED_ORIGIN", "http://oracle-server.tailnet.ts.net:3000")
+
+    assert (
+        backend_module._resolve_allowed_origin()
+        == "http://oracle-server.tailnet.ts.net:3000"
+    )
+
+
 def test_health_check():
     client = TestClient(app)
     resp = client.get("/health")

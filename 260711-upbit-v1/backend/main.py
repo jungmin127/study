@@ -7,6 +7,7 @@ Run: uvicorn backend.main:app --reload --port 8000  (저장소 루트에서 실�
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from typing import Literal, Union
@@ -78,13 +79,20 @@ def _to_utc_iso(value: str) -> str:
 
 app = FastAPI(title="Upbit Strategy EDA API", version="0.1.0")
 
+
+def _resolve_allowed_origin() -> str:
+    """프론트엔드가 배포된 origin. 로컬 개발은 기본값(localhost:3000), 서버 배포
+    (Oracle 등)는 ALLOWED_ORIGIN 환경변수로 Tailscale 주소를 지정한다(2026-08-14
+    배포 스펙 결정4). 프로세스 시작 시 한 번 결정되면 충분하다 — systemd
+    EnvironmentFile로 주입되는 값이라 실행 중 바뀌지 않는다."""
+    return os.environ.get("ALLOWED_ORIGIN", "http://localhost:3000")
+
+
 # 라이브 전략 승인/일시정지/재개/중지 API가 실거래(자금 이동에 준하는 조작)와 붙어 있어,
-# 와이드오픈 CORS("*")는 실제 계좌에 대한 위험이다(Fix 4, 최종 리뷰 Important). 이 저장소는
-# 단일 개발자 로컬 개발 환경이라 프론트 dev 서버 origin(Next.js 기본 포트 3000)을 하드코딩
-# 한다 — 환경변수화는 이 규모에서 과설계다.
+# 와이드오픈 CORS("*")는 실제 계좌에 대한 위험이다(Fix 4, 최종 리뷰 Important).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[_resolve_allowed_origin()],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
