@@ -55,6 +55,37 @@ async def test_fetch_fill_computes_weighted_average_price_from_trades(monkeypatc
     assert fill["fee"] == pytest.approx(500.0)
 
 
+def test_fill_from_order_defaults_remaining_volume_for_market_buy_without_field():
+    """실사고 회귀 테스트(2026-08-11 KRW-DOGE) — 시장가 매수(ord_type="price") 응답에는
+    remaining_volume 필드 자체가 없다(수량 개념이 없는 KRW 금액 주문). 이 경우 KeyError로
+    죽지 않고 0.0으로 취급해야 한다."""
+    resp = {
+        "state": "done", "ord_type": "price", "executed_volume": "1011.72037583",
+        "paid_fee": "50.586", "trades": [{"funds": "99900.0"}],
+        # remaining_volume 필드 없음 — 실제 업비트 시장가 매수 응답과 동일
+    }
+
+    fill = order_executor._fill_from_order(resp)
+
+    assert fill["remaining_volume"] == pytest.approx(0.0)
+    assert fill["executed_volume"] == pytest.approx(1011.72037583)
+
+
+def test_fill_from_order_raises_for_limit_order_missing_remaining_volume():
+    """코드 리뷰 Important 발견 — 시장가 매수용 기본값(0.0)이 지정가 조회에도 적용되면,
+    _run_limit_timeout()이 진짜 미해결 잔량을 "남은 게 없음"으로 오판해 포지션을 실제보다
+    적게 체결된 것으로 조용히 마감할 수 있다. 지정가 응답에 remaining_volume이 없는 건
+    여전히 KeyError로 시끄럽게 실패해야 한다."""
+    resp = {
+        "state": "done", "ord_type": "limit", "executed_volume": "0.01",
+        "paid_fee": "5.0", "trades": [{"funds": "500000.0"}],
+        # remaining_volume 필드 없음 — 지정가에선 비정상 상황
+    }
+
+    with pytest.raises(KeyError):
+        order_executor._fill_from_order(resp)
+
+
 async def test_fetch_fill_returns_none_price_when_nothing_executed(monkeypatch):
     async def fake_get_order(*, uuid=None, identifier=None, client=None):
         return {"state": "wait", "executed_volume": "0", "remaining_volume": "1.0",

@@ -205,12 +205,25 @@ def get_live_strategy(live_strategy_id: str) -> dict | None:
         conn.close()
 
 
-def update_live_strategy_status(live_strategy_id: str, status: str) -> None:
+def update_live_strategy_status(
+    live_strategy_id: str, status: str, *, manual_pause: int | None = None,
+) -> None:
+    """manual_pause를 함께 넘기면(reconciler의 개입정지 등, 사람 확인 전엔 자동재개되면
+    안 되는 경우) 그 값도 같이 기록한다 — signal_engine.py의 B그룹 자동재개 가드가
+    manual_pause==1인 전략은 절대 되돌리지 않기 때문이다. 생략하면(기본 None) status만
+    바꾸고 manual_pause는 건드리지 않는다(circuit breaker 트립/B그룹 자동정지처럼 원래도
+    자동재개 대상인 호출부는 이 인자를 넘기지 않는다)."""
     conn = _connect()
     try:
-        conn.execute(
-            "UPDATE live_strategies SET status = ? WHERE id = ?", (status, live_strategy_id)
-        )
+        if manual_pause is None:
+            conn.execute(
+                "UPDATE live_strategies SET status = ? WHERE id = ?", (status, live_strategy_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE live_strategies SET status = ?, manual_pause = ? WHERE id = ?",
+                (status, manual_pause, live_strategy_id),
+            )
         conn.commit()
     finally:
         conn.close()

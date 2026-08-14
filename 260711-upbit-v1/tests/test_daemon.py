@@ -476,6 +476,38 @@ async def test_run_strategy_loop_serializes_signal_processing_through_shared_loc
     assert events == ["lock_held_by_other", "lock_released_by_other", "handle_signal_result"]
 
 
+async def test_run_strategy_loop_hydrate_state_waits_for_shared_lock(monkeypatch, tmp_path):
+    """코드 리뷰 Critical 발견 — hydrate_state()가 락 없이 실행되면, 데몬 시작 시점에
+    이미 리스크 라인을 넘어선 포지션이 있을 때 _run_risk_exit_loop의 exit_for_risk()와
+    동시에 돌면서 포지션 수량이 꼬일 수 있다. hydrate_state도 이 파일의 다른 모든
+    reconcile/주문실행 구간처럼 공유 lock을 기다려야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", timeframe="minutes1")
+    lock = asyncio.Lock()
+    events = []
+    real_sleep = asyncio.sleep
+
+    async def fake_hydrate_state(strategy, *, client=None):
+        events.append("hydrate_state")
+        return {"synced_wait_orders": 0, "baseline_captured": True}
+
+    monkeypatch.setattr(reconciler, "hydrate_state", fake_hydrate_state)
+    calls, fake_sleep = _stop_after_one_tick(dbm, strategy_id)
+    monkeypatch.setattr(daemon.asyncio, "sleep", fake_sleep)
+
+    async with lock:
+        events.append("lock_held_by_other")
+        loop_task = asyncio.create_task(daemon._run_strategy_loop(strategy_id, lock))
+        await real_sleep(0)
+        await real_sleep(0)
+        assert "hydrate_state" not in events
+        events.append("lock_released_by_other")
+
+    await loop_task
+
+    assert events == ["lock_held_by_other", "lock_released_by_other", "hydrate_state"]
+
+
 async def test_task_set_manager_creates_task_for_new_strategy(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm, status="running")

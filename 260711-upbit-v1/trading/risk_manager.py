@@ -62,8 +62,19 @@ def record_trade_result(live_strategy_id: str, realized_pnl: float, capital_afte
     )
     consecutive_losses = prior_consecutive_losses + 1 if realized_pnl < 0 else 0
 
+    # resumed_at을 안 넘기면 UPSERT의 excluded.resumed_at이 매번 NULL이 돼, 이 거래와
+    # 무관한 재개 감사기록을 지운다(코드 리뷰 Important 발견) — signal_engine.py가 재개
+    # 시 채워둔 값을 그대로 보존한다. tripped/tripped_reason/tripped_at과 같은 규칙으로
+    # trading_date가 바뀌면(새 날) 이전 재개 기록도 함께 리셋한다.
+    resumed_at = (
+        cb_state["resumed_at"]
+        if cb_state is not None and cb_state["trading_date"] == trading_date
+        else None
+    )
+
     db.upsert_circuit_breaker_state(
         live_strategy_id, trading_date, consecutive_losses, tripped, tripped_reason, tripped_at,
+        resumed_at,
     )
 
 

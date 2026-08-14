@@ -162,6 +162,38 @@ def test_record_trade_result_resets_stale_circuit_breaker_state_from_previous_da
     assert cb["tripped_at"] is None
 
 
+def test_record_trade_result_preserves_resumed_at_on_same_day(monkeypatch, tmp_path):
+    """코드 리뷰 Important 발견 — record_trade_result()가 upsert_circuit_breaker_state()를
+    호출할 때 resumed_at을 안 넘기면 UPSERT가 매번 NULL로 덮어써, 재개(resume) 감사기록이
+    그날의 첫 거래 이후로 전부 사라진다. 오늘자 기존 resumed_at은 그대로 보존돼야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    dbm.upsert_circuit_breaker_state(
+        strategy_id, today_kst(), 0, 0, None, None, "2026-08-12T09:00:00+00:00",
+    )
+
+    record_trade_result(strategy_id, realized_pnl=1000.0, capital_after=101_000.0)
+
+    cb = dbm.get_circuit_breaker_state(strategy_id)
+    assert cb["resumed_at"] == "2026-08-12T09:00:00+00:00"
+
+
+def test_record_trade_result_resets_resumed_at_on_new_trading_day(monkeypatch, tmp_path):
+    """전날의 재개 기록이 오늘로 넘어오면 안 된다 — tripped/tripped_reason/tripped_at과
+    같은 날짜기준 리셋 규칙을 resumed_at도 따라야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    dbm.upsert_circuit_breaker_state(
+        strategy_id, "2020-01-01", 0, 0, None, None, "2020-01-01T09:00:00+00:00",
+    )
+
+    record_trade_result(strategy_id, realized_pnl=1000.0, capital_after=101_000.0)
+
+    cb = dbm.get_circuit_breaker_state(strategy_id)
+    assert cb["trading_date"] == today_kst()
+    assert cb["resumed_at"] is None
+
+
 def test_is_circuit_tripped_today_returns_true_when_tripped_today(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm)

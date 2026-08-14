@@ -156,15 +156,20 @@ async def _detect_external_orders(
         )
         found.append(db.get_order_by_id(order_id))
 
+    # 사이클당 외부주문 N건은 한 사건이다 — 주문마다 기록/상태갱신을 반복하면 같은 사건이
+    # DB에 N번 중복 쓰기된다(코드 리뷰 지적). 발견분 전체를 한 번에 요약해 한 번만 쓴다.
+    if found:
         action_taken = "all_stop" if should_pause else "acknowledged_and_continued"
+        uuid_list = ", ".join(o["upbit_uuid"] for o in found)
         db.insert_manual_intervention_event(
             market,
-            f"내부에 없는 외부주문 발견: uuid={upbit_uuid}, side={detail['side']}, "
-            f"state={detail['state']}",
+            f"내부에 없는 외부주문 {len(found)}건 발견: uuid=[{uuid_list}]",
             action_taken,
         )
         if should_pause:
-            db.update_live_strategy_status(strategy["id"], "paused")
+            # manual_pause=1 — 사람이 원인을 확인하기 전엔 signal_engine.py의 B그룹
+            # 자동재개 가드가 이 정지를 되돌리면 안 된다(코드 리뷰 Critical 발견).
+            db.update_live_strategy_status(strategy["id"], "paused", manual_pause=1)
 
     return found
 
@@ -286,16 +291,28 @@ async def _reconcile_position(
         is_manual = bool(external_orders)
         paused = is_manual and policy != "acknowledge_and_continue"
         if paused:
-            db.update_live_strategy_status(strategy["id"], "paused")
+            # manual_pause=1 — 사람이 원인을 확인하기 전엔 자동재개 가드가 이 정지를
+            # 되돌리면 안 된다(코드 리뷰 Critical 발견, signal_engine.py 참고).
+            db.update_live_strategy_status(strategy["id"], "paused", manual_pause=1)
         return {"balance_mismatch": True, "action": action, "paused": paused}
 
+    # own_fills만으로 diff가 전부 설명되면(외부주문 없이) mixed_side/topup 가드 때문에
+    # 정밀 self-heal 경로를 못 탔을 뿐, 이건 우리 자신이 추적 중인 주문이 뒤늦게 두 개
+    # 이상 겹쳐 반영된 것뿐이다 — 결정5("설명 안 되는 잔고 불일치")의 대상인 진짜 미확인
+    # 변화(입출금 등, 우리 주문으로 전혀 설명 안 되는 경우)와는 다르다(코드 리뷰 지적).
+    # 수량 self-heal은 그대로 하되, 사람 개입이 필요한 정지/기록은 걸지 않는다.
+    explained_by_own_fills_only = not external_orders and abs(diff - explained_diff) <= _QTY_EPSILON
+
     _self_heal_unexplained(strategy, position, actual_qty, avg_buy_price)
+    if explained_by_own_fills_only:
+        return {"balance_mismatch": True, "action": "unexplained", "paused": False}
+
     db.insert_manual_intervention_event(
         market,
         f"설명 안 되는 잔고 변화: 기대수량={internal_qty}, 실제수량={actual_qty}",
         "all_stop",
     )
-    db.update_live_strategy_status(strategy["id"], "paused")
+    db.update_live_strategy_status(strategy["id"], "paused", manual_pause=1)
     return {"balance_mismatch": True, "action": "unexplained", "paused": True}
 
 

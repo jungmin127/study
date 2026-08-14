@@ -1,6 +1,7 @@
 import pytest
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pandas as pd
 from fastapi.testclient import TestClient
 
@@ -570,6 +571,72 @@ def test_approve_live_strategy_returns_400_when_upbit_rate_limited(monkeypatch, 
 
     assert resp.status_code == 400
     assert trading_db_module.get_live_strategy(strategy_id)["status"] == "draft"
+
+
+def test_approve_live_strategy_distinguishes_auth_rejection_from_network_failure(
+    monkeypatch, tmp_path,
+):
+    """코드 리뷰/백로그 발견 — get_accounts()가 업비트로부터 401(invalid_access_key)을
+    받으면 httpx.HTTPStatusError가 나는데, 이걸 순수 네트워크 장애와 같은
+    "업비트 서버와 통신할 수 없습니다" 메시지로 뭉뚱그리면 안 된다. 사용자가 실제로 이
+    메시지 때문에 원인 파악(API 키 오류였음)에 시간을 썼다."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    async def _raise(*args, **kwargs):
+        request = httpx.Request("GET", "https://api.upbit.com/v1/accounts")
+        response = httpx.Response(401, request=request, json={"error": {"message": "invalid_access_key"}})
+        raise httpx.HTTPStatusError("401", request=request, response=response)
+
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _raise)
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    assert resp.status_code == 400
+    assert "인증" in resp.json()["detail"]
+    assert "401" in resp.json()["detail"]
+    assert trading_db_module.get_live_strategy(strategy_id)["status"] == "draft"
+
+
+def test_approve_live_strategy_reports_upbit_server_error_status(monkeypatch, tmp_path):
+    """401/403이 아닌 다른 상태코드(예: 500)는 인증 문제로 오인하지 않되, 여전히
+    status 코드를 메시지에 남겨 원인 파악을 돕는다."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    async def _raise(*args, **kwargs):
+        request = httpx.Request("GET", "https://api.upbit.com/v1/accounts")
+        response = httpx.Response(500, request=request, json={})
+        raise httpx.HTTPStatusError("500", request=request, response=response)
+
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _raise)
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    assert resp.status_code == 400
+    assert "인증" not in resp.json()["detail"]
+    assert "500" in resp.json()["detail"]
+
+
+def test_approve_live_strategy_keeps_generic_message_for_network_failure(monkeypatch, tmp_path):
+    """진짜 네트워크 장애(connect/timeout, HTTP 응답 자체가 없음)는 여전히 기존 일반
+    메시지를 유지한다 — status_code가 없는 경우이므로 HTTPStatusError 분기가 아니라
+    httpx.HTTPError 분기로 빠져야 한다."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    async def _raise(*args, **kwargs):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _raise)
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "업비트 서버와 통신할 수 없습니다"
 
 
 def test_create_live_strategy_returns_400_when_market_list_fetch_fails(monkeypatch, tmp_path):

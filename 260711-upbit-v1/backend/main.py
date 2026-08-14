@@ -1151,6 +1151,24 @@ async def approve_live_strategy_endpoint(strategy_id: str) -> dict:
             status_code=400,
             detail="업비트 API 요청이 지나치게 많습니다 — 잠시 후 다시 시도하세요",
         ) from exc
+    except httpx.HTTPStatusError as exc:
+        # UpbitCredentialsError는 access/secret key 환경변수 자체가 없을 때만 던져진다
+        # (upbit_client._build_jwt_headers) — 키는 있는데 값이 틀렸거나 IP 화이트리스트
+        # 미등록 등으로 업비트가 401/403을 반환하면 여기로 온다. 이걸 아래 httpx.HTTPError
+        # 분기로 뭉뚱그리면 "네트워크 장애"와 "인증 거부"가 똑같은 메시지가 돼 원인 파악이
+        # 어려워진다(사용자가 실제로 겪은 혼선, 백로그 항목).
+        if exc.response.status_code in (401, 403):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"업비트 API 인증이 거부됐습니다(status={exc.response.status_code}) — "
+                    "API 키 값/권한/IP 화이트리스트를 확인하세요"
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=400,
+            detail=f"업비트 서버가 오류를 반환했습니다(status={exc.response.status_code})",
+        ) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=400, detail="업비트 서버와 통신할 수 없습니다",

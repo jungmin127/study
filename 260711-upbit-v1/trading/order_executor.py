@@ -118,18 +118,26 @@ def _fill_from_order(resp: dict) -> dict:
 
     시장가 매수(ord_type="price") 응답에는 "volume"/"remaining_volume" 필드 자체가 없다
     (KRW 금액 기준 주문이라 수량 개념이 없음 — 미체결 잔량도 남기지 않고 즉시 확정됨).
-    없으면 0.0으로 취급한다(실사고: 2026-08-11 KRW-DOGE 진입에서 이 필드 부재로 KeyError
-    발생 → enter()가 예외를 그대로 올려 uuid를 못 남기고, reconciler가 이를 외부주문으로
-    오인해 전략을 paused시킴)."""
+    이 케이스에서만 0.0으로 취급한다(실사고: 2026-08-11 KRW-DOGE 진입에서 이 필드 부재로
+    KeyError 발생 → enter()가 예외를 그대로 올려 uuid를 못 남기고, reconciler가 이를
+    외부주문으로 오인해 전략을 paused시킴). 지정가(limit) 조회에는 이 기본값을 적용하지
+    않는다 — _run_limit_timeout()이 지정가 1차 주문의 잔량 전환 여부를 이 값으로
+    판단하므로(order_executor.py 256행), 지정가 응답에 remaining_volume이 없는 건 여전히
+    비정상이라 KeyError로 시끄럽게 실패해야 한다. 그러지 않으면 진짜 미해결 잔량을
+    "남은 게 없음"으로 조용히 오판해 포지션을 실제보다 적게 체결된 것으로 마감할 수
+    있다(코드 리뷰 Important 발견)."""
     executed_volume = float(resp["executed_volume"])
     filled_price = (
         sum(float(t["funds"]) for t in resp["trades"]) / executed_volume
         if executed_volume > 0 else None
     )
+    remaining_volume = (
+        0.0 if resp.get("ord_type") == "price" else float(resp["remaining_volume"])
+    )
     return {
         "state": resp["state"],
         "executed_volume": executed_volume,
-        "remaining_volume": float(resp.get("remaining_volume", 0.0)),
+        "remaining_volume": remaining_volume,
         "filled_price": filled_price,
         "fee": float(resp["paid_fee"]),
     }

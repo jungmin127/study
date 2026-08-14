@@ -166,6 +166,69 @@ async def test_detect_external_orders_finds_new_order_all_stop(monkeypatch, tmp_
     assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
 
 
+async def test_detect_external_orders_sets_manual_pause_so_auto_resume_cannot_revert(
+    monkeypatch, tmp_path,
+):
+    """코드 리뷰 Critical 발견 — reconciler가 외부주문을 발견해 정지시키면 manual_pause=1도
+    함께 세워야, signal_engine.py의 B그룹 자동재개 가드가 다음 poll에서 이 정지를 조용히
+    되돌리지 못한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "ext-uuid-manual-pause"}]
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "side": "bid", "ord_type": "limit",
+                "executed_volume": "0", "remaining_volume": "1.0",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    await reconciler._detect_external_orders(strategy)
+
+    assert dbm.get_live_strategy(strategy["id"])["manual_pause"] == 1
+
+
+async def test_detect_external_orders_multiple_orders_write_single_intervention_event(
+    monkeypatch, tmp_path,
+):
+    """Minor 발견 — 한 사이클에 외부주문 N건이 발견돼도 상태갱신/개입이벤트는 한 사건당
+    한 번만 기록해야 한다(주문마다 반복 기록하면 같은 사건이 N번 중복된다)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "ext-uuid-a"}, {"uuid": "ext-uuid-b"}]
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "side": "bid", "ord_type": "limit",
+                "executed_volume": "0", "remaining_volume": "1.0",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert len(found) == 2
+    conn = dbm._connect()
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM manual_intervention_events").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 1
+
+
 async def test_detect_external_orders_acknowledge_and_continue_keeps_running(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(
@@ -280,6 +343,7 @@ async def test_reconcile_position_closes_from_matched_external_sell(monkeypatch,
     assert result == {"balance_mismatch": True, "action": "closed", "paused": True}
     assert position_manager.get_open_position(strategy["id"]) is None
     assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+    assert dbm.get_live_strategy(strategy["id"])["manual_pause"] == 1
 
 
 async def test_reconcile_position_adjusts_qty_on_partial_external_sell(monkeypatch, tmp_path):
@@ -316,8 +380,62 @@ async def test_reconcile_position_unexplained_forces_paused_regardless_of_policy
 
     assert result == {"balance_mismatch": True, "action": "unexplained", "paused": True}
     assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+    assert dbm.get_live_strategy(strategy["id"])["manual_pause"] == 1
     position = position_manager.get_open_position(strategy["id"])
     assert position["entry_qty"] == pytest.approx(0.005)
+
+
+async def test_reconcile_position_own_fills_mixed_side_does_not_pause(monkeypatch, tmp_path):
+    """코드 리뷰 Minor 발견 — mixed_side/topup 가드로 정밀 self-heal은 못 타지만, 그
+    잔고변화가 own_fills(우리 자신이 추적하는 주문)만으로 전부 설명되면 external_orders가
+    전혀 없으므로 사람이 확인해야 할 수동개입이 아니다. 수량 self-heal은 하되 정지/기록은
+    걸지 않아야 한다 — 그러지 않으면 own_fills-only는 정지시키지 않는다는 규칙(설명된
+    변화 분기)과 모순된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+
+    async def fake_get_accounts(*, client=None):
+        # 매수 0.01 - 매도 0.005 = 순증 0.005, 전부 own_fills
+        return [_account(0.005, avg_buy_price="50500000")]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    own_fills = [
+        {"side": "bid", "filled_volume": 0.01, "filled_price": 50_000_000.0, "fee": 500.0},
+        {"side": "ask", "filled_volume": 0.005, "filled_price": 51_000_000.0, "fee": 250.0},
+    ]
+    result = await reconciler._reconcile_position(strategy, [], own_fills=own_fills)
+
+    assert result == {"balance_mismatch": True, "action": "unexplained", "paused": False}
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "running"
+    assert dbm.get_live_strategy(strategy["id"])["manual_pause"] == 0
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_qty"] == pytest.approx(0.005)
+    conn = dbm._connect()
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM manual_intervention_events").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 0
+
+
+async def test_reconcile_position_mixed_side_with_external_order_still_pauses(monkeypatch, tmp_path):
+    """own_fills-only 예외가 진짜 외부주문이 섞인 mixed_side까지 조용히 지나치면 안 된다 —
+    external_orders가 하나라도 있으면 종전대로 정지시켜야 한다(결정5 준수)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.005)]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    external_orders = [{"side": "bid", "filled_volume": 0.01, "filled_price": 50_000_000.0, "fee": 500.0}]
+    own_fills = [{"side": "ask", "filled_volume": 0.005, "filled_price": 51_000_000.0, "fee": 250.0}]
+    result = await reconciler._reconcile_position(strategy, external_orders, own_fills=own_fills)
+
+    assert result == {"balance_mismatch": True, "action": "unexplained", "paused": True}
+    assert dbm.get_live_strategy(strategy["id"])["manual_pause"] == 1
 
 
 async def test_reconcile_position_negative_actual_qty_from_baseline_does_not_open_position(

@@ -67,7 +67,12 @@ async def _run_strategy_loop(strategy_id: str, lock: asyncio.Lock | None = None)
     if strategy is None:
         return
     try:
-        await reconciler.hydrate_state(strategy)
+        # 락 없이 실행하면 데몬 시작 시점에 이미 리스크 라인을 넘어선 포지션이 있을 때
+        # _run_risk_exit_loop의 exit_for_risk()와 동시에 돌면서 포지션 수량을 놓고
+        # 레이스가 난다 — 이 파일의 다른 모든 reconcile/주문실행 구간처럼 락으로
+        # 감싼다(코드 리뷰 Critical 발견).
+        async with lock:
+            await reconciler.hydrate_state(strategy)
     except Exception:
         # hydrate_state는 아래 while 루프의 try/except 밖에 있어 여기서 직접 흡수해야
         # 한다 — 그러지 않으면 일시적 네트워크 장애로 태스크 자체가 로그 한 줄 없이
