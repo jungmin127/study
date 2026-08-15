@@ -16,8 +16,10 @@ Tailscale 등 클라우드 무관 결정)와
 3. 콘솔 검색창에 "EC2"를 검색해 EC2 대시보드로 이동, **"인스턴스 시작"** 버튼을
    클릭한다.
 4. **이름**: 원하는 대로 입력(예: `upbit-live-trading`).
-5. **애플리케이션 및 OS 이미지(AMI)**: Ubuntu 선택 → **Ubuntu Server 22.04 LTS**
-   (또는 24.04 LTS), 아키텍처를 **64비트(Arm)**로 변경한다(기본값은 x86이므로 반드시
+5. **애플리케이션 및 OS 이미지(AMI)**: Ubuntu 선택 → **Ubuntu Server 22.04 LTS**를
+   선택한다(24.04 LTS는 선택하지 않는다 — 24.04는 기본 Python이 3.12이고
+   `python3.11` 패키지가 없어 `deploy/setup.sh`가 실패한다). 아키텍처를
+   **64비트(Arm)**로 변경한다(기본값은 x86이므로 반드시
    Arm으로 바꿔야 한다 — 인스턴스 타입과 아키텍처가 맞지 않으면 시작 시 오류가 난다).
 6. **인스턴스 유형**: `t4g.small` 검색해서 선택(2 vCPU / 2GiB RAM, ARM Graviton).
 7. **키 페어 생성**: "새 키 페어 생성" 클릭 → 이름 입력(예: `upbit-server-key`) →
@@ -27,7 +29,9 @@ Tailscale 등 클라우드 무관 결정)와
    - 보안 그룹 이름: 원하는 대로(예: `upbit-server-sg`).
    - 인바운드 보안 그룹 규칙: 기본으로 잡히는 **SSH, 포트 22, 소스 0.0.0.0/0** 규칙
      하나만 남긴다. 그 외 규칙(HTTP/HTTPS 등)은 추가하지 않는다 — backend(8000)/
-     frontend(3000)는 Tailscale로만 접속하므로 인터넷에 열지 않는다.
+     frontend(3000)는 Tailscale로만 접속하므로 인터넷에 열지 않는다. 단, 이 SSH
+     규칙 자체는 나중에 지우지 않는다 — 지우면 콘솔에서 별도 복구 절차 없이는
+     인스턴스에 접속할 방법이 없어져 완전히 잠길 수 있다.
 9. **스토리지 구성**: 루트 볼륨 크기를 기본 8GiB에서 **20GiB**로 변경한다(볼륨
    유형은 기본값 gp3 유지) — venv/`node_modules`/빌드 산출물을 합치면 8GiB로는
    빠듯하다.
@@ -52,6 +56,8 @@ Tailscale 등 클라우드 무관 결정)와
 인스턴스를 오래 정지시켜 둘 계획이라면 안 쓰는 탄력적 IP는 릴리스(해제)하는 것이
 좋다(이 프로젝트는 상시 가동이 목적이라 해당 사항 없음).
 
+비용 경보(7절)는 인스턴스를 만든 직후 바로 설정해두는 걸 권장한다.
+
 ## 2. SSH 접속 및 배포 스크립트 실행
 
 Windows(Git Bash)에서:
@@ -69,22 +75,40 @@ icacls "<다운로드한-키파일>.pem" /inheritance:r
 icacls "<다운로드한-키파일>.pem" /grant:r "$($env:USERNAME):(R)"
 ```
 
-접속 후:
+접속 후, 먼저 최신 Node.js를 설치한다(Ubuntu 22.04의 기본 `apt` nodejs는 v12라
+Next.js 14 빌드가 실패하므로, `deploy/setup.sh` 실행 전에 NodeSource 저장소를
+추가해 apt가 최신 LTS(20.x)를 설치하게 만든다):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+```
+
+이어서 저장소를 내려받고 배포 스크립트를 실행한다:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
+sudo mkdir -p /opt/study && sudo chown -R $USER:$USER /opt/study
 git clone https://github.com/jungmin127/study.git /opt/study
-sudo chown -R $USER:$USER /opt/study
 cd /opt/study/260711-upbit-v1
 bash deploy/setup.sh
 ```
 
 `.env`와 `frontend/.env.production`이 없으면 스크립트가 중간에 멈추고 만드는 법을
-알려준다 — 안내대로 채운 뒤 `bash deploy/setup.sh`를 다시 실행한다.
+알려준다 — 안내대로 채운 뒤 `bash deploy/setup.sh`를 다시 실행한다. 이때 필요한
+Tailscale 주소는 3절을 먼저 진행해(`sudo tailscale up` 로그인 후 Tailscale 관리
+콘솔에서 MagicDNS 이름을 확인) 얻은 뒤 이 단계로 돌아온다.
 
 ## 3. Tailscale 연결
 
-`deploy/setup.sh`가 Tailscale을 설치한다. 로그인이 아직이면:
+`deploy/setup.sh`가 Tailscale을 설치한다. 로그인이 아직이면, 먼저 호스트명을
+읽기 쉬운 이름으로 지정해둔다(안 해두면 MagicDNS 이름이 `ip-172-31-x-x`처럼
+알아보기 어렵게 잡힐 수 있다):
+
+```bash
+sudo hostnamectl set-hostname upbit-server
+```
+
+그다음 로그인한다:
 
 ```bash
 sudo tailscale up
@@ -94,7 +118,7 @@ sudo tailscale up
 
 핸드폰/노트북에도 각각 Tailscale 앱을 설치하고 **같은 계정으로 로그인**한다. 이후
 Tailscale 관리 콘솔(https://login.tailscale.com/admin/machines)에서 서버의
-MagicDNS 이름(예: `oracle-server.tailXXXX.ts.net`)을 확인할 수 있다.
+MagicDNS 이름(예: `upbit-server.tailXXXX.ts.net`)을 확인할 수 있다.
 
 ## 4. 업비트 API IP 화이트리스트 등록
 
@@ -111,7 +135,7 @@ curl http://127.0.0.1:8000/health
 ```
 
 핸드폰에서 Tailscale 앱 로그인 후 브라우저로
-`http://oracle-server.tailXXXX.ts.net:3000` 접속 — 라이브 전략 목록이 보이면 완료.
+`http://upbit-server.tailXXXX.ts.net:3000` 접속 — 라이브 전략 목록이 보이면 완료.
 
 **보안 확인(중요):** Tailscale을 끄고 핸드폰 LTE로 `http://<탄력적 IP>:8000`,
 `http://<탄력적 IP>:3000`에 직접 접속을 시도해서 응답이 없는지(타임아웃) 확인한다
@@ -134,49 +158,64 @@ bash deploy/update.sh
 $200 크레딧(6개월) 소진을 조기에 알아채고, 필요하면 서버를 직접 멈출 수 있게 다음을
 한 번 설정해둔다.
 
+예상 정상 운영 비용: 인스턴스 약 $10~13 + 탄력적 IP 약 $3.6 + EBS 약 $1.6 ≈ 월
+$15~18(리전/시점에 따라 달라질 수 있음).
+
 ### 7-1. IAM 역할 생성 (Budgets가 인스턴스를 멈출 수 있는 최소 권한)
 
 1. 콘솔에서 "IAM" 검색 → 좌측 **"역할"** → **"역할 생성"**.
 2. 신뢰할 수 있는 엔터티 유형: **"사용자 지정 신뢰 정책"** 선택 후 다음 JSON을
    붙여넣는다:
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": { "Service": "budgets.amazonaws.com" },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-```
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Principal": { "Service": "budgets.amazonaws.com" },
+         "Action": "sts:AssumeRole"
+       }
+     ]
+   }
+   ```
 
-3. 다음 화면에서 **"정책 생성"**으로 새 창을 열어 아래 JSON으로 인라인 정책을
-   만든다(`<인스턴스ID>`는 EC2 콘솔에서 확인한 `i-`로 시작하는 ID로 바꾼다):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": "ec2:StopInstances",
-      "Resource": "arn:aws:ec2:ap-northeast-2:*:instance/<인스턴스ID>"
-    }
-  ]
-}
-```
-
+3. 권한 추가 화면은 아무 정책도 선택하지 않고 그대로 **"다음"**을 눌러 넘어간다
+   (이 마법사의 "정책 생성" 버튼은 인라인 정책이 아니라 별도의 고객 관리형
+   정책을 만드는 것이라 이 용도에 맞지 않다 — 권한은 역할을 만든 뒤 역할
+   상세 페이지에서 인라인 정책으로 붙인다).
 4. 역할 이름을 입력(예: `budgets-stop-upbit-server`)하고 생성한다.
+5. 생성된 역할 상세 페이지로 이동 → **"권한"** 탭 → **"권한 추가"** →
+   **"인라인 정책 생성"** → 아래 JSON을 붙여넣는다(`<인스턴스ID>`는 EC2
+   콘솔에서 확인한 `i-`로 시작하는 ID로 바꾼다):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": "ec2:StopInstances",
+         "Resource": "arn:aws:ec2:ap-northeast-2:*:instance/<인스턴스ID>"
+       }
+     ]
+   }
+   ```
+
+6. 정책 이름을 입력(예: `stop-upbit-server`)하고 저장한다.
 
 ### 7-2. 예산 + 예산 액션 생성
 
 1. 콘솔에서 "Budgets" 검색 → **"예산 생성"**.
-2. 예산 유형: **비용 예산**, 예산 금액: **월 $20**.
-3. 예산 알림: 실제 비용이 예산의 100% 도달 시 이메일로 알림받도록 이메일 주소를
-   입력한다.
+2. 예산 유형: **비용 예산**, 예산 금액: **월 $30**. 비용 추적 범위는 **"실제 비용
+   기준(크레딧 제외)"**으로 설정한다 — 콘솔 기본값이 "크레딧 포함"이면 체크를
+   해제한다. 이 예산은 크레딧 잔액과 무관하게 실제 리소스 사용량 이상 징후를
+   잡기 위한 것이고(크레딧 잔액 확인은 7-3의 Cost Explorer가 맡는다), 크레딧이
+   적용되는 동안은 실제 청구액이 0에 가까워 "크레딧 포함" 기준으로는 임계값에
+   도달하지 않기 때문이다.
+3. 예산 알림: 실제 비용이 예산의 **80%(=$24) 도달 시** 이메일로 알림받도록 이메일
+   주소를 입력한다(100%로 하면 정상 운영 비용($15~18) 대비 여유가 거의 없어
+   경보가 매달 울리거나 무의미해진다).
 4. **예산 액션 추가**:
    - 작업 유형: **"Amazon EC2 인스턴스 중지"**
    - 대상 인스턴스: 방금 만든 인스턴스 선택
@@ -191,6 +230,12 @@ $200 크레딧(6개월) 소진을 조기에 알아채고, 필요하면 서버를
 
 **한계**: 인스턴스를 정지해도 탄력적 IP(월 ~$3.6)와 EBS 스토리지(월 ~$1.6) 요금은
 계속 청구된다 — 가장 큰 비중(인스턴스 시간당 요금)만 막을 뿐이다.
+
+**재개**: 예산 액션으로 인스턴스가 정지된 뒤 다시 켜려면 EC2 콘솔 → 인스턴스
+선택 → 인스턴스 상태 → 인스턴스 시작. 탄력적 IP가 그대로 붙어있으므로 업비트
+화이트리스트 재등록은 불필요하고(1-1 참고), daemon/backend/frontend 세 서비스는
+systemd `enable` 상태라 부팅과 함께 자동으로 다시 켜진다.
+`systemctl status daemon backend frontend`로 세 개 모두 active인지 확인한다.
 
 ### 7-3. Cost Explorer 활성화 — 월별 실사용 비용 확인
 
