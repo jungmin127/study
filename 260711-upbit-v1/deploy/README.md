@@ -54,8 +54,19 @@ Tailscale 등 클라우드 무관 결정)와
 
 ## 2. SSH 접속 및 배포 스크립트 실행
 
+Windows(Git Bash)에서:
+
 ```bash
-ssh -i <다운로드한-키파일> ubuntu@<공인IP>
+chmod 400 <다운로드한-키파일>.pem
+ssh -i <다운로드한-키파일>.pem ubuntu@<탄력적 IP>
+```
+
+`chmod 400`이 적용되지 않고("Permissions ... are too open" 에러) 접속이 거부되면
+PowerShell에서 다음을 실행해 키 파일 권한을 좁힌다:
+
+```powershell
+icacls "<다운로드한-키파일>.pem" /inheritance:r
+icacls "<다운로드한-키파일>.pem" /grant:r "$($env:USERNAME):(R)"
 ```
 
 접속 후:
@@ -87,8 +98,9 @@ MagicDNS 이름(예: `oracle-server.tailXXXX.ts.net`)을 확인할 수 있다.
 
 ## 4. 업비트 API IP 화이트리스트 등록
 
-`deploy/setup.sh` 마지막에 출력되는 서버 공인 IP를, 업비트 웹사이트의 API 키 관리
-페이지에서 해당 키의 IP 화이트리스트에 추가한다.
+`deploy/setup.sh` 마지막에 출력되는 서버 공인 IP(1-1에서 연결한 탄력적 IP와 같은
+값이어야 한다)를, 업비트 웹사이트의 API 키 관리 페이지에서 해당 키의 IP
+화이트리스트에 추가한다.
 
 ## 5. 확인
 
@@ -101,8 +113,8 @@ curl http://127.0.0.1:8000/health
 핸드폰에서 Tailscale 앱 로그인 후 브라우저로
 `http://oracle-server.tailXXXX.ts.net:3000` 접속 — 라이브 전략 목록이 보이면 완료.
 
-**보안 확인(중요):** Tailscale을 끄고 핸드폰 LTE로 `http://<서버-공인IP>:8000`,
-`http://<서버-공인IP>:3000`에 직접 접속을 시도해서 응답이 없는지(타임아웃) 확인한다
+**보안 확인(중요):** Tailscale을 끄고 핸드폰 LTE로 `http://<탄력적 IP>:8000`,
+`http://<탄력적 IP>:3000`에 직접 접속을 시도해서 응답이 없는지(타임아웃) 확인한다
 — 방화벽이 실제로 막고 있는지 검증하는 단계다.
 
 ## 6. 이후 코드 업데이트할 때
