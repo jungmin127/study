@@ -20,5 +20,7 @@ echo "=== 3/4: 프론트엔드 재빌드 ==="
 echo "=== 4/4: 서비스 재시작 ==="
 echo ">>> 주의: daemon 재시작 중 몇 초간 실시간 손절/익절 감시가 끊깁니다."
 echo ">>> 포지션이 없거나, 직접 지켜보고 있을 때 실행하는 걸 권장합니다."
+sudo cp deploy/systemd/daemon.service deploy/systemd/backend.service deploy/systemd/frontend.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl restart daemon backend frontend
 sudo systemctl status daemon backend frontend --no-pager

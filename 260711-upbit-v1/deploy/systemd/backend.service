@@ -10,7 +10,7 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/opt/study/260711-upbit-v1
 EnvironmentFile=/opt/study/260711-upbit-v1/.env
-ExecStart=/opt/study/260711-upbit-v1/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+ExecStart=/opt/study/260711-upbit-v1/.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 
