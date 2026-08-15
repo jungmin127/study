@@ -10,6 +10,7 @@ def insert_live_strategy(db_module, **overrides) -> str:
     그 테이블들의 CRUD 테스트를 작성할 수 없다."""
     defaults = {
         "id": str(uuid.uuid4()),
+        "source_run_id": None,
         "market": "KRW-BTC",
         "timeframe": "minutes60",
         "buy_conditions_json": "{}",
@@ -25,10 +26,10 @@ def insert_live_strategy(db_module, **overrides) -> str:
     try:
         conn.execute(
             "INSERT INTO live_strategies "
-            "(id, market, timeframe, buy_conditions_json, sell_conditions_json, "
+            "(id, source_run_id, market, timeframe, buy_conditions_json, sell_conditions_json, "
             "risk_config_json, current_capital, status, manual_pause) "
-            "VALUES (:id, :market, :timeframe, :buy_conditions_json, :sell_conditions_json, "
-            ":risk_config_json, :current_capital, :status, :manual_pause)",
+            "VALUES (:id, :source_run_id, :market, :timeframe, :buy_conditions_json, "
+            ":sell_conditions_json, :risk_config_json, :current_capital, :status, :manual_pause)",
             defaults,
         )
         conn.commit()
