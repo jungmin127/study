@@ -68,6 +68,7 @@ from backend.grid_search_service import (
 import httpx
 
 import trading.db as trading_db
+from backend.trading_analytics_service import get_journal_summary, get_strategy_journal
 import trading.position_manager as position_manager
 import trading.upbit_client as upbit_client
 from trading.upbit_client import UpbitCredentialsError, UpbitRateLimitError
@@ -1269,3 +1270,16 @@ def stop_live_strategy_endpoint(strategy_id: str) -> dict:
             detail="열린 포지션이 있어 중지할 수 없습니다. 먼저 포지션을 정리하세요",
         )
     return _full_live_strategy_response(strategy_id)
+
+
+@app.get("/api/v1/journal/summary")
+def get_journal_summary_endpoint() -> dict:
+    return get_journal_summary()
+
+
+@app.get("/api/v1/journal/strategies/{strategy_id}")
+def get_journal_strategy_endpoint(strategy_id: str) -> dict:
+    detail = get_strategy_journal(strategy_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="실거래 이력이 없는 전략입니다")
+    return detail
