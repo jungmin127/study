@@ -11,7 +11,7 @@ const STEPS = [
   { href: '/backtests', title: '백테스트 결과', icon: FlaskConical },
   { href: '/live-strategies', title: '라이브 전략', icon: Rocket },
   { href: '/journal', title: '매매일지', icon: ClipboardList },
-  { href: '/analysis', title: '분석', icon: BarChart3 },
+  { href: '/analysis', title: '세그먼트', icon: BarChart3 },
   { href: '/guide', title: '지표 가이드', icon: BookOpen },
 ];
 
