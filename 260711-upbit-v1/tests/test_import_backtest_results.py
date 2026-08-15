@@ -1,8 +1,11 @@
+import sys
 from datetime import datetime, timezone
+
+import pytest
 
 import engine.cache as cache_module
 from engine.cache import save_result
-from scripts.import_backtest_results import merge_databases
+from scripts.import_backtest_results import main, merge_databases
 
 
 def _seed(monkeypatch, db_path, run_id: str, final_value: float) -> None:
@@ -90,3 +93,27 @@ def test_merge_databases_handles_run_without_matching_result(tmp_path, monkeypat
 
     assert counts["runs_inserted"] == 1  # run-orphan
     assert counts["results_inserted"] == 0  # 짝이 없으니 결과는 삽입될 게 없음
+
+
+def test_main_raises_when_incoming_file_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "server.db")
+    monkeypatch.setattr(sys, "argv", ["import_backtest_results.py", str(tmp_path / "nope.db")])
+
+    with pytest.raises(SystemExit, match="입력 파일이 없습니다"):
+        main()
+
+
+def test_main_deletes_incoming_file_after_successful_merge(tmp_path, monkeypatch, capsys):
+    server_db = tmp_path / "server.db"
+    incoming_db = tmp_path / "incoming.db"
+    _seed(monkeypatch, incoming_db, "run-c", 13000.0)
+
+    monkeypatch.setattr(cache_module, "DB_PATH", server_db)
+    monkeypatch.setattr(sys, "argv", ["import_backtest_results.py", str(incoming_db)])
+
+    main()
+
+    assert not incoming_db.exists()
+    output = capsys.readouterr().out
+    assert "신규 1건 추가" in output
+    assert "임시 파일 삭제" in output
