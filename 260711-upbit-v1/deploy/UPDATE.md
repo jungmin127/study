@@ -73,3 +73,34 @@ exit
 ```
 
 로 SSH 접속을 끊고 로컬 셸로 돌아온다.
+
+## 5. 로컬 백테스트 결과를 서버로 가져오기
+
+무거운 grid search(9-오실레이터 전 교차, 20,700개 조합)를 AWS 서버에서 직접 돌리면
+`t4g.small`의 CPU 크레딧을 상당히 소모한다. 대신 로컬 PC에서 grid search를 돌리고,
+그 결과(`data/backtest_results.db`)만 서버로 보내 "실거래 전환"에 쓸 수 있다.
+
+### 최초 1회 설정
+
+로컬 저장소 루트의 `.env`에 다음 두 줄을 추가한다(1절의 SSH 접속에 쓴 값과 동일):
+
+```
+DEPLOY_SSH_KEY_PATH=<다운로드한-키파일>.pem의 절대 경로
+DEPLOY_SERVER_HOST=ubuntu@<탄력적 IP 또는 Tailscale MagicDNS 주소>
+```
+
+### 실행
+
+로컬 PC(Git Bash)에서 저장소 루트로 이동한 뒤:
+
+```bash
+bash scripts/push_backtest_results.sh
+```
+
+이 한 줄이 `data/backtest_results.db`를 서버로 전송하고, 서버에서 자동으로 병합까지
+실행한다. `run_id`가 백테스트 조건의 내용 기반 해시라 이미 서버에 있는 결과는 자동
+건너뛰므로, 로컬에서 grid search를 새로 돌릴 때마다 이 명령을 반복 실행해도 안전하다.
+
+실행이 끝나면 "백테스트 결과 병합 완료: 신규 N건 추가, 기존 M건 건너뜀"이 출력된다.
+이후 서버 프론트엔드의 백테스트 목록에서 새로 옮겨진 결과를 확인하고, 그 결과
+상세 페이지의 "실거래 전환" 버튼으로 라이브 전략을 만들 수 있다.
