@@ -71,8 +71,9 @@ def main() -> None:
     )
     if counts["results_inserted"] != counts["runs_inserted"]:
         print(
-            f"경고: 결과 없이 저장된 run이 있습니다 (runs_inserted={counts['runs_inserted']}, "
-            f"results_inserted={counts['results_inserted']}) — 프론트엔드 목록에 안 보일 수 있습니다."
+            f"경고: runs와 results 삽입 건수가 다릅니다 (runs_inserted={counts['runs_inserted']}, "
+            f"results_inserted={counts['results_inserted']}) — 결과가 없는 run은 프론트엔드 "
+            f"목록에 안 보일 수 있습니다."
         )
 
     incoming_path.unlink()

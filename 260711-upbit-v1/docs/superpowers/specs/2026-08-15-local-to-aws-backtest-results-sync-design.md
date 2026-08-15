@@ -67,8 +67,10 @@ grid search를 다시 돌려도 항상 같은 `run_id`가 나온다. 이 성질�
 2. `scp`로 이 파일을 서버의 `data/_incoming_backtest_results.db`에 올린다(원래
    파일명과 겹치지 않는 접두어 `_incoming_`을 붙여, 실수로 서버 쪽 실제 DB를
    덮어쓰는 사고를 원천적으로 피한다).
-3. `ssh`로 서버에 접속해 `.venv/bin/python scripts/import_backtest_results.py
-   data/_incoming_backtest_results.db`를 실행시킨다.
+3. `ssh`로 서버에 접속해 `PYTHONPATH=. .venv/bin/python scripts/import_backtest_results.py
+   data/_incoming_backtest_results.db`를 실행시킨다(`PYTHONPATH=.` 없이는 `engine`
+   패키지를 찾지 못해 `ModuleNotFoundError`로 죽는다 — 이 프로젝트에 `pyproject.toml`이
+   없어 저장소 루트가 `sys.path`에 자동으로 들어가지 않기 때문).
 4. 병합이 성공적으로 끝나면 서버 쪽 임시 파일을 정리한다(실패 시에는 지우지 않는다 —
    자세한 근거는 아래 "에러 처리" 절 참고).
 

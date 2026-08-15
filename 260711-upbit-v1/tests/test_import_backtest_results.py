@@ -139,3 +139,11 @@ def test_script_runs_as_real_subprocess_entry_point():
     assert result.returncode != 0
     assert "입력 파일이 없습니다" in (result.stdout + result.stderr)
     assert "ModuleNotFoundError" not in (result.stdout + result.stderr)
+
+
+def test_push_script_sets_pythonpath_for_remote_invocation():
+    """push_backtest_results.sh가 서버에서 실행하는 ssh 명령에 PYTHONPATH=.가 빠지면
+    engine.cache import가 실패한다(위 서브프로세스 테스트가 검증하는 바로 그 문제) —
+    이 테스트는 그 방지책이 실제로 스크립트 안에 남아있는지 직접 확인한다."""
+    script = (REPO_ROOT / "scripts" / "push_backtest_results.sh").read_text(encoding="utf-8")
+    assert "PYTHONPATH=." in script
