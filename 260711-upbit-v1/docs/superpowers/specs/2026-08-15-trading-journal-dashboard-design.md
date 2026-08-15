@@ -104,10 +104,11 @@ def _mdd(values: pd.Series) -> float:
 - `daily_performance` 1일치만 있음 → 라인차트 점 1개, MDD는 0(정상 동작)
 - `source_run_id` 없는 전략 → BT 대조표 대신 "백테스트 비교 불가" 안내
 - 거래횟수 < 10 → 표본 부족 경고 표시
-- **알려진 한계(v1에서 미해결)**: `stopped`된 전략의 마지막 `ending_balance`는 종료 이후
-  일자의 계좌 합산 그래프에 반영되지 않는다(그 전략의 `daily_performance` 갱신이 멈추므로).
-  지금은 라이브 전략이 1개뿐이라 체감되지 않지만, 여러 전략을 동시 운용하기 시작하면 계좌
-  총자산이 실제보다 낮게 보이는 문제가 생긴다. forward-fill 등의 해결은 그 시점에 별도 진행.
+- ~~알려진 한계: stopped된 전략의 자금이 계좌 합산에서 사라짐~~ — **구현 플랜(2026-08-15)
+  단계에서 해소**. 잔고(ending_balance)를 날짜별로 합산하는 대신 일별 손익(realized_pnl)
+  flow를 누적하는 방식으로 바꿔, 전략이 stopped된 뒤에도 과거 손익이 계좌 합산에 그대로
+  남는다. 상세 설계는 `docs/superpowers/plans/2026-08-15-trading-journal-dashboard.md`의
+  "설계 노트" 참고.
 
 ## 테스트 계획
 
