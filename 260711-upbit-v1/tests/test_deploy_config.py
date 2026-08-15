@@ -23,11 +23,13 @@ def test_daemon_service_has_required_directives():
     assert "WantedBy=multi-user.target" in content
 
 
-def test_backend_service_binds_localhost_only():
+def test_backend_service_binds_all_interfaces_for_tailscale():
+    # Tailscale로 backend에 접근하려면 127.0.0.1 전용 바인딩으로는 불가능하다 —
+    # 0.0.0.0으로 바꾼 의도적 변경이다(커밋 b54cde0).
     content = (SYSTEMD_DIR / "backend.service").read_text(encoding="utf-8")
     assert f"WorkingDirectory={APP_DIR}" in content
     assert f"EnvironmentFile={APP_DIR}/.env" in content
-    assert "uvicorn backend.main:app --host 127.0.0.1 --port 8000" in content
+    assert "uvicorn backend.main:app --host 0.0.0.0 --port 8000" in content
     assert "Restart=always" in content
     assert "StartLimitBurst=10" in content
 
