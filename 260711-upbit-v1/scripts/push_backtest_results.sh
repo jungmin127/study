@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # 로컬에서 만든 백테스트 결과(data/backtest_results.db)를 AWS 서버 DB에 병합한다.
-# run_id가 내용 기반 해시라 이미 서버에 있는 결과는 자동으로 건너뛰므로, grid search를
+# run_id가 내용 기반 해시라 이미 서버에 있는 결과는 자동으로 건너뛰고, 로컬에서
+# "최신 데이터로 갱신"해 더 최신이 된 같은 run_id는 서버 것을 교체한다. grid search를
 # 새로 돌릴 때마다 반복 실행해도 안전하다. 설정 방법은 deploy/UPDATE.md 참고.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

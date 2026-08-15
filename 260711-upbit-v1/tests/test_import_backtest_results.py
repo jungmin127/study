@@ -13,9 +13,11 @@ from scripts.import_backtest_results import main, merge_databases
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _seed(monkeypatch, db_path, run_id: str, final_value: float) -> None:
+def _seed(monkeypatch, db_path, run_id: str, final_value: float, created_at: str | None = None) -> None:
     """cache_module.DB_PATH를 db_path로 잠깐 바꿔 save_result()로 한 건을 저장한다.
-    monkeypatch를 통해서만 바꿔야 각 테스트 종료 시 원래 값으로 정확히 복원된다."""
+    monkeypatch를 통해서만 바꿔야 각 테스트 종료 시 원래 값으로 정확히 복원된다.
+    created_at을 지정하면 save_result()가 넣은 datetime('now') 값을 덮어써서,
+    실행 속도에 좌우되지 않고 신구 관계를 결정적으로 테스트할 수 있다."""
     monkeypatch.setattr(cache_module, "DB_PATH", db_path)
     save_result(
         run_id=run_id,
@@ -31,6 +33,11 @@ def _seed(monkeypatch, db_path, run_id: str, final_value: float) -> None:
             "equity_curve": [], "trades": [],
         },
     )
+    if created_at is not None:
+        conn = cache_module._connect()
+        conn.execute("UPDATE backtest_runs SET created_at = ? WHERE id = ?", (created_at, run_id))
+        conn.commit()
+        conn.close()
 
 
 def test_merge_databases_inserts_new_runs_and_results(tmp_path, monkeypatch):
@@ -44,8 +51,8 @@ def test_merge_databases_inserts_new_runs_and_results(tmp_path, monkeypatch):
     counts = merge_databases(incoming_db)
 
     assert counts == {
-        "runs_inserted": 1, "runs_skipped": 0,
-        "results_inserted": 1, "results_skipped": 0,
+        "runs_inserted": 1, "runs_replaced": 0, "runs_skipped": 0,
+        "results_inserted": 1, "results_replaced": 0, "results_skipped": 0,
     }
 
     from engine.cache import load_result
@@ -53,23 +60,45 @@ def test_merge_databases_inserts_new_runs_and_results(tmp_path, monkeypatch):
     assert load_result("run-b")["final_value"] == 12000.0
 
 
-def test_merge_databases_skips_existing_run_id_without_overwriting(tmp_path, monkeypatch):
+def test_merge_databases_skips_when_incoming_is_not_newer(tmp_path, monkeypatch):
     server_db = tmp_path / "server.db"
     incoming_db = tmp_path / "incoming.db"
 
-    _seed(monkeypatch, server_db, "run-a", 11000.0)
-    _seed(monkeypatch, incoming_db, "run-a", 99999.0)  # 같은 run_id, 다른 값 — 서버 값이 우선해야 함
+    _seed(monkeypatch, server_db, "run-a", 11000.0, created_at="2026-01-05 00:00:00")
+    # 같은 run_id, 다른 값이지만 incoming 쪽이 서버보다 최신이 아님(동일 시각) — 서버 값이 우선해야 함
+    _seed(monkeypatch, incoming_db, "run-a", 99999.0, created_at="2026-01-05 00:00:00")
 
     monkeypatch.setattr(cache_module, "DB_PATH", server_db)
     counts = merge_databases(incoming_db)
 
     assert counts == {
-        "runs_inserted": 0, "runs_skipped": 1,
-        "results_inserted": 0, "results_skipped": 1,
+        "runs_inserted": 0, "runs_replaced": 0, "runs_skipped": 1,
+        "results_inserted": 0, "results_replaced": 0, "results_skipped": 1,
     }
 
     from engine.cache import load_result
     assert load_result("run-a")["final_value"] == 11000.0  # 서버 쪽 값 그대로
+
+
+def test_merge_databases_replaces_when_incoming_is_newer(tmp_path, monkeypatch):
+    server_db = tmp_path / "server.db"
+    incoming_db = tmp_path / "incoming.db"
+
+    # 같은 run_id를 로컬에서 "최신 데이터로 갱신"한 뒤 다시 push하는 상황을 재현한다:
+    # 내용은 다르지만 run_id는 같고, incoming 쪽 created_at이 서버보다 미래다.
+    _seed(monkeypatch, server_db, "run-a", 11000.0, created_at="2026-01-05 00:00:00")
+    _seed(monkeypatch, incoming_db, "run-a", 99999.0, created_at="2026-01-06 00:00:00")
+
+    monkeypatch.setattr(cache_module, "DB_PATH", server_db)
+    counts = merge_databases(incoming_db)
+
+    assert counts == {
+        "runs_inserted": 0, "runs_replaced": 1, "runs_skipped": 0,
+        "results_inserted": 0, "results_replaced": 1, "results_skipped": 0,
+    }
+
+    from engine.cache import load_result
+    assert load_result("run-a")["final_value"] == 99999.0  # 더 최신인 incoming 값으로 교체됨
 
 
 def test_merge_databases_handles_run_without_matching_result(tmp_path, monkeypatch):
@@ -97,7 +126,9 @@ def test_merge_databases_handles_run_without_matching_result(tmp_path, monkeypat
     counts = merge_databases(incoming_db)
 
     assert counts["runs_inserted"] == 1  # run-orphan
+    assert counts["runs_replaced"] == 0
     assert counts["results_inserted"] == 0  # 짝이 없으니 결과는 삽입될 게 없음
+    assert counts["results_replaced"] == 0
 
 
 def test_main_raises_when_incoming_file_missing(tmp_path, monkeypatch):
