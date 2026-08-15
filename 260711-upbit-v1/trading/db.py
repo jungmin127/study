@@ -725,3 +725,44 @@ def list_active_strategies() -> list[dict]:
         return [dict(row) for row in rows]
     finally:
         conn.close()
+
+
+def list_daily_performance(live_strategy_id: str) -> list[dict]:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM daily_performance WHERE live_strategy_id = ? "
+            "ORDER BY trading_date ASC",
+            (live_strategy_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def list_closed_positions(live_strategy_id: str) -> list[dict]:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM positions WHERE live_strategy_id = ? AND status = 'closed' "
+            "ORDER BY entry_time DESC, rowid DESC",
+            (live_strategy_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def list_orders_for_strategy(live_strategy_id: str) -> list[dict]:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM orders WHERE live_strategy_id = ? ORDER BY created_at ASC",
+            (live_strategy_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()

@@ -911,3 +911,65 @@ def test_stop_live_strategy_if_no_open_position_allows_stopping_after_position_c
 
     assert result is True
     assert db.get_live_strategy(strategy_id)["status"] == "stopped"
+
+
+def test_list_daily_performance_returns_rows_ordered_by_date(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    db.upsert_daily_performance(
+        strategy_id, "2026-08-12", 1000.0, 1.0, 1, 1, 0, 100_000.0, 101_000.0,
+    )
+    db.upsert_daily_performance(
+        strategy_id, "2026-08-10", -500.0, -0.5, 1, 0, 1, 100_500.0, 100_000.0,
+    )
+
+    rows = db.list_daily_performance(strategy_id)
+
+    assert [r["trading_date"] for r in rows] == ["2026-08-10", "2026-08-12"]
+
+
+def test_list_daily_performance_scoped_to_strategy(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_a = insert_live_strategy(db)
+    strategy_b = insert_live_strategy(db)
+    db.upsert_daily_performance(
+        strategy_a, "2026-08-10", 1000.0, 1.0, 1, 1, 0, 100_000.0, 101_000.0,
+    )
+    db.upsert_daily_performance(
+        strategy_b, "2026-08-10", -500.0, -0.5, 1, 0, 1, 200_000.0, 199_500.0,
+    )
+
+    rows = db.list_daily_performance(strategy_a)
+
+    assert len(rows) == 1
+    assert rows[0]["live_strategy_id"] == strategy_a
+
+
+def test_list_closed_positions_excludes_open_and_orders_newest_first(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    open_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    older_id = db.insert_position(strategy_id, "KRW-BTC", 49_000_000.0, 0.01)
+    newer_id = db.insert_position(strategy_id, "KRW-BTC", 51_000_000.0, 0.01)
+    db.close_position_row(older_id, 49_500_000.0, 0.01, 5000.0, 1.0, "take_profit")
+    db.close_position_row(newer_id, 51_500_000.0, 0.01, 5000.0, 1.0, "take_profit")
+
+    rows = db.list_closed_positions(strategy_id)
+
+    assert [r["id"] for r in rows] == [newer_id, older_id]
+    assert open_id not in [r["id"] for r in rows]
+
+
+def test_list_orders_for_strategy_returns_all_orders(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    order_id = db.insert_order(
+        strategy_id, position_id, "KRW-BTC", "bid", "market", None, 0.01, 50_000_000.0,
+    )
+    db.update_order_filled(order_id, "uuid-1", 50_010_000.0, 0.01, 25.0, 0.02, "done")
+
+    rows = db.list_orders_for_strategy(strategy_id)
+
+    assert len(rows) == 1
+    assert rows[0]["slippage_pct"] == 0.02
