@@ -6,7 +6,15 @@ import pandas as pd
 import pytest
 
 import upbit_data_service as uds
-from upbit_data_service import _endpoint_for_timeframe, _parse_candles, _fetch_page, _fetch_range, _compute_gaps, get_candles
+from upbit_data_service import (
+    _endpoint_for_timeframe,
+    _parse_candles,
+    _fetch_page,
+    _fetch_range,
+    _compute_gaps,
+    _concat_candles,
+    get_candles,
+)
 
 
 def test_endpoint_for_days():
@@ -203,6 +211,30 @@ def test_compute_gaps_fully_covered_returns_empty():
     start = datetime(2026, 1, 2, tzinfo=timezone.utc)
     end = datetime(2026, 1, 9, tzinfo=timezone.utc)
     assert _compute_gaps(cached, start, end) == []
+
+
+def test_concat_candles_excludes_empty_placeholder_from_dtype_inference():
+    """빈 캐시 placeholder(pd.DataFrame(columns=_CANDLE_COLUMNS), candle_time object dtype)와
+    실제 tz-aware 데이터를 concat해도 candle_time이 datetime64[tz]를 유지해야 한다.
+    (pandas 3.0의 concat dtype 추론 변경으로 이게 object로 붕괴하면서 실제로 발생한 회귀 —
+    AWS 신규 마켓 첫 조회에서 'Index' object has no attribute 'tz' RuntimeError를 냈다.)"""
+    empty_cache = pd.DataFrame(columns=uds._CANDLE_COLUMNS)
+    real_data = pd.DataFrame({
+        "candle_time": pd.to_datetime(["2026-08-15T00:00:00", "2026-08-15T01:00:00"], utc=True),
+        "open": [1, 2], "high": [1, 2], "low": [1, 2], "close": [1, 2],
+        "volume": [1, 2], "trade_value": [1, 2],
+    })
+
+    merged = _concat_candles([empty_cache, real_data])
+
+    assert merged["candle_time"].dt.tz is not None
+    assert merged.set_index("candle_time").index.tz is not None
+
+
+def test_concat_candles_all_empty_returns_empty_with_schema():
+    result = _concat_candles([pd.DataFrame(columns=uds._CANDLE_COLUMNS)])
+    assert list(result.columns) == uds._CANDLE_COLUMNS
+    assert len(result) == 0
 
 
 def test_get_candles_fetches_full_range_when_no_cache(monkeypatch, tmp_path):

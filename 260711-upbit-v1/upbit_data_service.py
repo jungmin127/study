@@ -19,6 +19,20 @@ REQUEST_DELAY_SECONDS = 0.15
 _CANDLE_COLUMNS = ["candle_time", "open", "high", "low", "close", "volume", "trade_value"]
 
 
+def _concat_candles(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    """빈 프레임(placeholder pd.DataFrame(columns=_CANDLE_COLUMNS) 등)을 제외하고 concat한다.
+
+    pandas 3.0부터 concat이 빈/전부-NA 프레임도 dtype 추론에 포함시키도록 바뀌어서,
+    candle_time이 object dtype인 빈 placeholder와 tz-aware datetime64 실데이터를 그대로
+    concat하면 결과 컬럼이 object로 붕괴해 이후 .dt/.tz 접근이 깨진다(캐시가 아직 없는
+    마켓의 첫 조회에서 실제로 발생 확인). 빈 프레임을 미리 걸러내면 pandas 버전과 무관하게
+    안전하다."""
+    non_empty = [f for f in frames if not f.empty]
+    if not non_empty:
+        return pd.DataFrame(columns=_CANDLE_COLUMNS)
+    return pd.concat(non_empty)
+
+
 class _SyncTokenBucket:
     """trading.upbit_client.TokenBucket과 동일한 토큰버킷 알고리즘의 동기 버전(설계
     스펙 결정6) — get_candles() 호출 체인이 전부 동기 함수라 asyncio 기반
@@ -162,7 +176,7 @@ def _fetch_range(
             return pd.DataFrame(columns=_CANDLE_COLUMNS)
 
         merged = (
-            pd.concat(frames)
+            _concat_candles(frames)
             .drop_duplicates(subset="candle_time")
             .sort_values("candle_time")
             .reset_index(drop=True)
@@ -223,7 +237,7 @@ def get_candles(market: str, timeframe: str, start: datetime, end: datetime) -> 
     if gaps:
         fetched = [_fetch_range(market, timeframe, g_start, g_end) for g_start, g_end in gaps]
         cached = (
-            pd.concat([cached, *fetched])
+            _concat_candles([cached, *fetched])
             .drop_duplicates(subset="candle_time")
             .sort_values("candle_time")
             .reset_index(drop=True)
