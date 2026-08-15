@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, BookOpen, FlaskConical, Grid3x3, Rocket, Settings } from 'lucide-react';
+import { BarChart3, BookOpen, ClipboardList, FlaskConical, Grid3x3, Rocket, Settings } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const STEPS = [
@@ -10,6 +10,7 @@ const STEPS = [
   { href: '/grid-search', title: 'Grid Search', icon: Grid3x3 },
   { href: '/backtests', title: '백테스트 결과', icon: FlaskConical },
   { href: '/live-strategies', title: '라이브 전략', icon: Rocket },
+  { href: '/journal', title: '매매일지', icon: ClipboardList },
   { href: '/analysis', title: '분석', icon: BarChart3 },
   { href: '/guide', title: '지표 가이드', icon: BookOpen },
 ];
