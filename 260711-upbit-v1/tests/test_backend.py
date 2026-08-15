@@ -1,5 +1,7 @@
+import ast
 import pytest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 import pandas as pd
@@ -49,11 +51,44 @@ def test_resolve_allowed_origin_treats_empty_string_as_unset(monkeypatch):
     assert backend_module._resolve_allowed_origin() == "http://localhost:3000"
 
 
-def test_health_check():
-    client = TestClient(app)
+def test_health_check(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_no_bare_testclient_bypasses_db_isolation():
+    """TestClient(app)를 DB_PATH 격리 없이 만들면, FastAPI startup 이벤트
+    (_fail_orphaned_grid_search_jobs)가 실제 운영 DB(data/backtest_results.db)를
+    건드린다 — 실사고: 로컬에서 진짜 돌고 있던 grid search job이, DB를 격리하지 않던
+    test_health_check가 포함된 전체 테스트 스위트 실행 때문에 고아로 오판되어 failed로
+    덮어써졌다. AST로 각 test_* 함수를 검사해, TestClient(app)를 쓰면서 _client() 헬퍼도
+    안 쓰고 monkeypatch로 DB_PATH도 안 바꾸는 함수가 없는지 확인한다(단순 문자열 검색은
+    docstring/assert 메시지 안의 "TestClient(app)" 문자열에도 오탐하므로 AST를 쓴다)."""
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or not node.name.startswith("test_"):
+            continue
+        calls = [n for n in ast.walk(node) if isinstance(n, ast.Call)]
+        uses_testclient = any(
+            isinstance(c.func, ast.Name) and c.func.id == "TestClient" for c in calls
+        )
+        if not uses_testclient:
+            continue
+        uses_client_helper = any(
+            isinstance(c.func, ast.Name) and c.func.id == "_client" for c in calls
+        )
+        sets_db_path = any(
+            isinstance(c.func, ast.Attribute)
+            and c.func.attr == "setattr"
+            and any(isinstance(arg, ast.Constant) and arg.value == "DB_PATH" for arg in c.args)
+            for c in calls
+        )
+        if not uses_client_helper and not sets_db_path:
+            offenders.append(node.name)
+    assert offenders == [], f"DB_PATH를 격리하지 않고 TestClient(app)를 쓰는 테스트: {offenders}"
 
 
 def test_heatmap_returns_latest_sweep_results(monkeypatch, tmp_path):
@@ -247,10 +282,10 @@ def test_backtest_config_returns_market_timeframe_and_conditions(monkeypatch, tm
     assert body["sell_conditions"] == _VALID_SELL
 
 
-def test_get_signals_returns_registered_signal_keys():
+def test_get_signals_returns_registered_signal_keys(monkeypatch, tmp_path):
     from signals import SIGNAL_REGISTRY
 
-    client = TestClient(app)
+    client = _client(monkeypatch, tmp_path)
     resp = client.get("/api/v1/eda/signals")
     assert resp.status_code == 200
     assert resp.json() == sorted(SIGNAL_REGISTRY.keys())
@@ -1236,7 +1271,8 @@ def test_get_segment_size_analysis_returns_empty_list_before_first_batch(monkeyp
     assert resp.json() == []
 
 
-def test_startup_event_spawns_segment_batch_as_daemon_thread(monkeypatch):
+def test_startup_event_spawns_segment_batch_as_daemon_thread(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     calls = []
 
     class _FakeThread:
