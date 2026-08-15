@@ -11,7 +11,7 @@ APP_DIR="/opt/study/260711-upbit-v1"
 
 echo "=== 1/9: 시스템 패키지 설치 ==="
 sudo apt-get update
-sudo apt-get install -y python3.11 python3.11-venv python3-pip nodejs npm git ufw curl
+sudo apt-get install -y python3.11 python3.11-venv python3-pip nodejs git ufw curl
 
 echo "=== 2/9: 저장소 배치 ==="
 if [ ! -d "$CLONE_ROOT" ]; then
