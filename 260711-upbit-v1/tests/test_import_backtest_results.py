@@ -1,11 +1,16 @@
+import os
+import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 import engine.cache as cache_module
 from engine.cache import save_result
 from scripts.import_backtest_results import main, merge_databases
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _seed(monkeypatch, db_path, run_id: str, final_value: float) -> None:
@@ -117,3 +122,20 @@ def test_main_deletes_incoming_file_after_successful_merge(tmp_path, monkeypatch
     output = capsys.readouterr().out
     assert "신규 1건 추가" in output
     assert "임시 파일 삭제" in output
+
+
+def test_script_runs_as_real_subprocess_entry_point():
+    """실제 운영 환경처럼 `python scripts/import_backtest_results.py <path>`를 서브프로세스로
+    직접 실행해, engine.cache import가 실패하지 않는지 검증한다. pytest는 pytest.ini의
+    pythonpath=.로 이 문제를 가려서, main()을 인프로세스로 호출하는 테스트로는 잡을 수 없었다
+    (실제로 이 테스트가 없어서 PYTHONPATH 누락 버그가 4차례의 태스크 리뷰를 통과했다)."""
+    result = subprocess.run(
+        [sys.executable, "scripts/import_backtest_results.py", "/nonexistent/nope.db"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "PYTHONPATH": "."},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "입력 파일이 없습니다" in (result.stdout + result.stderr)
+    assert "ModuleNotFoundError" not in (result.stdout + result.stderr)

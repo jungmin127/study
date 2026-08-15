@@ -69,7 +69,8 @@ grid search를 다시 돌려도 항상 같은 `run_id`가 나온다. 이 성질�
    덮어쓰는 사고를 원천적으로 피한다).
 3. `ssh`로 서버에 접속해 `.venv/bin/python scripts/import_backtest_results.py
    data/_incoming_backtest_results.db`를 실행시킨다.
-4. 병합이 끝나면(성공/실패 무관하게) 서버 쪽 임시 파일을 정리한다.
+4. 병합이 성공적으로 끝나면 서버 쪽 임시 파일을 정리한다(실패 시에는 지우지 않는다 —
+   자세한 근거는 아래 "에러 처리" 절 참고).
 
 `deploy/update.sh`와 동일하게 `set -euo pipefail`로 중간 실패 시 즉시 중단한다.
 

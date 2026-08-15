@@ -85,11 +85,18 @@ exit
 로컬 저장소 루트의 `.env`에 다음 두 줄을 추가한다(1절의 SSH 접속에 쓴 값과 동일):
 
 ```
-DEPLOY_SSH_KEY_PATH=<다운로드한-키파일>.pem의 절대 경로
+DEPLOY_SSH_KEY_PATH=<다운로드한-키파일>.pem의 절대 경로 (Git Bash 형식, 예: /c/Users/이름/Downloads/key.pem — C:\... 형식은 scp가 인식하지 못합니다)
 DEPLOY_SERVER_HOST=ubuntu@<탄력적 IP 또는 Tailscale MagicDNS 주소>
 ```
 
 ### 실행
+
+(이 절을 처음 실행하기 전에는 1~2절로 서버 코드를 최신으로 갱신해둬야 한다 —
+`scripts/import_backtest_results.py`가 서버에 있어야 이 명령이 동작한다.)
+
+**주의**: 로컬 백엔드나 그리드서치가 `data/backtest_results.db`에 한창 쓰고 있는 도중에
+실행하면 전송되는 파일이 일관되지 않을 수 있다 — 그리드서치가 끝난 뒤, 가능하면 로컬
+백엔드가 조용한 시점에 실행한다.
 
 로컬 PC(Git Bash)에서 저장소 루트로 이동한 뒤:
 

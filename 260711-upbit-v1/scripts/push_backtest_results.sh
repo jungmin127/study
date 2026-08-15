@@ -7,7 +7,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$REPO_ROOT"
 
 REMOTE_APP_DIR="/opt/study/260711-upbit-v1"
 LOCAL_DB="$REPO_ROOT/data/backtest_results.db"
@@ -20,7 +19,8 @@ fi
 
 if [ -f "$REPO_ROOT/.env" ]; then
     set -a
-    source "$REPO_ROOT/.env"
+    # shellcheck disable=SC1090
+    source <(tr -d '\r' < "$REPO_ROOT/.env")
     set +a
 fi
 
@@ -35,4 +35,4 @@ scp -i "$DEPLOY_SSH_KEY_PATH" "$LOCAL_DB" "$DEPLOY_SERVER_HOST:$REMOTE_APP_DIR/$
 
 echo "=== 2/2: 서버에서 병합 실행 ==="
 ssh -i "$DEPLOY_SSH_KEY_PATH" "$DEPLOY_SERVER_HOST" \
-    "cd $REMOTE_APP_DIR && .venv/bin/python scripts/import_backtest_results.py $REMOTE_INCOMING"
+    "cd $REMOTE_APP_DIR && PYTHONPATH=. .venv/bin/python scripts/import_backtest_results.py $REMOTE_INCOMING"
