@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { Check, Pause, Play, Square, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import {
   approveLiveStrategy,
@@ -12,13 +13,23 @@ import {
 import type { LiveStrategy } from '@/lib/types/liveStrategies';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { formatTimeframe } from '@/lib/format';
+import { returnRateColor } from '@/lib/return-rate-color';
 
 const POLL_INTERVAL_MS = 5000;
 
 function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+function Stat({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
+  return (
+    <div className="flex-1 border-l border-border pl-2.5 first:border-l-0 first:pl-0">
+      <p className="text-[0.68rem] text-muted-foreground">{label}</p>
+      <p className={`text-sm font-semibold tabular-nums ${valueClassName ?? ''}`}>{value}</p>
+    </div>
+  );
 }
 
 export default function LiveStrategiesPage() {
@@ -70,98 +81,116 @@ export default function LiveStrategiesPage() {
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
         {strategies.map((s) => (
-          <Card key={s.id} className="py-3 gap-3 md:py-4 md:gap-4">
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between max-md:text-sm">
-                <span>{s.market} · {formatTimeframe(s.timeframe)}</span>
+          <Card
+            key={s.id}
+            className={`gap-2 overflow-hidden border-l-[3px] py-3 md:gap-3 md:py-4 ${
+              s.open_position ? 'border-l-red-500' : 'border-l-transparent'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 px-4">
+              <span className="min-w-0 truncate text-sm font-semibold">
+                {s.market} · {formatTimeframe(s.timeframe)}
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
                 <Badge variant={s.status === 'running' ? 'default' : 'secondary'}>{s.status}</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1.5 md:space-y-2">
-              {s.current_capital !== null && (
-                <p className="text-xs md:text-sm">현재 자금: {Math.round(s.current_capital).toLocaleString()}원</p>
-              )}
-              {s.open_position && (
-                <div className="rounded-md bg-muted/50 p-1.5 text-xs md:p-2 md:text-sm">
-                  <p>열린 포지션: 진입가 {Math.round(s.open_position.entry_price).toLocaleString()}</p>
-                  <p>
-                    수량 {s.open_position.entry_qty} · 손익{' '}
-                    {s.open_position.unrealized_pnl_pct !== null ? fmtPct(s.open_position.unrealized_pnl_pct) : '-'}
-                  </p>
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2 pt-1.5 md:pt-2">
                 {s.status === 'draft' && (
                   <>
                     <Button
-                      size="sm"
-                      className="max-md:min-h-9"
+                      size="icon-lg"
+                      aria-label="승인"
+                      title="승인"
                       disabled={pendingId === s.id}
                       onClick={() => runAction(s.id, approveLiveStrategy)}
                     >
-                      승인
+                      <Check />
                     </Button>
                     <Button
-                      size="sm"
+                      size="icon-lg"
                       variant="outline"
-                      className="max-md:min-h-9"
+                      aria-label="취소"
+                      title="취소"
                       disabled={pendingId === s.id}
                       onClick={() => runAction(s.id, stopLiveStrategy)}
                     >
-                      취소
+                      <X />
                     </Button>
                   </>
                 )}
                 {s.status === 'running' && (
                   <>
                     <Button
-                      size="sm"
+                      size="icon-lg"
                       variant="outline"
-                      className="max-md:min-h-9"
+                      aria-label="일시정지"
+                      title="일시정지"
                       disabled={pendingId === s.id}
                       onClick={() => runAction(s.id, pauseLiveStrategy)}
                     >
-                      일시정지
+                      <Pause />
                     </Button>
                     <Button
-                      size="sm"
+                      size="icon-lg"
                       variant="destructive"
-                      className="max-md:min-h-9"
+                      aria-label="중지"
+                      title="중지"
                       disabled={pendingId === s.id}
                       onClick={() => runAction(s.id, stopLiveStrategy)}
                     >
-                      중지
+                      <Square />
                     </Button>
                   </>
                 )}
                 {s.status === 'paused' && (
                   <>
                     <Button
-                      size="sm"
-                      className="max-md:min-h-9"
+                      size="icon-lg"
+                      aria-label="재개"
+                      title="재개"
                       disabled={pendingId === s.id}
                       onClick={() => runAction(s.id, resumeLiveStrategy)}
                     >
-                      재개
+                      <Play />
                     </Button>
                     <Button
-                      size="sm"
+                      size="icon-lg"
                       variant="destructive"
-                      className="max-md:min-h-9"
+                      aria-label="중지"
+                      title="중지"
                       disabled={pendingId === s.id}
                       onClick={() => runAction(s.id, stopLiveStrategy)}
                     >
-                      중지
+                      <Square />
                     </Button>
                   </>
                 )}
-                {s.status === 'stopped' && (
-                  <p className="text-xs text-muted-foreground">
-                    중지됨{s.stopped_at ? ` (${s.stopped_at})` : ''}
-                  </p>
-                )}
               </div>
-            </CardContent>
+            </div>
+
+            <div className="flex px-4">
+              {s.current_capital !== null && (
+                <Stat label="현재 자금" value={`${Math.round(s.current_capital).toLocaleString()}원`} />
+              )}
+              {s.open_position ? (
+                <>
+                  <Stat label="진입가" value={Math.round(s.open_position.entry_price).toLocaleString()} />
+                  <Stat
+                    label="손익"
+                    value={
+                      s.open_position.unrealized_pnl_pct !== null
+                        ? fmtPct(s.open_position.unrealized_pnl_pct)
+                        : '-'
+                    }
+                    valueClassName={returnRateColor(s.open_position.unrealized_pnl_pct)}
+                  />
+                </>
+              ) : (
+                s.status !== 'draft' && <Stat label="포지션" value={s.status === 'stopped' ? '중지됨' : '없음'} />
+              )}
+            </div>
+
+            {s.status === 'stopped' && s.stopped_at && (
+              <p className="px-4 text-xs text-muted-foreground">중지 시각: {s.stopped_at}</p>
+            )}
           </Card>
         ))}
       </div>
