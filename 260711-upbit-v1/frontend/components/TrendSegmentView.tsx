@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import CoinSelect from '@/components/CoinSelect';
+import TrendPatternLegend from '@/components/TrendPatternLegend';
 import TrendSegmentChart from '@/components/TrendSegmentChart';
 import TrendSegmentTable from '@/components/TrendSegmentTable';
 import { getTrendSegments, refreshTrendSegments } from '@/lib/api/eda';
@@ -87,6 +88,7 @@ export default function TrendSegmentView({ markets }: { markets: Market[] }) {
             {new Date(data.computed_at).toLocaleString('ko-KR')}
           </p>
           <TrendSegmentChart ohlcv={data.ohlcv} segments={data.segments} />
+          <TrendPatternLegend />
           <TrendSegmentTable segments={data.segments} />
         </>
       )}
