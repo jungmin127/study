@@ -14,6 +14,7 @@ import type { GridSearchJob, GridSearchJobRequest } from '@/lib/types/eda';
 import GridSearchForm from '@/components/GridSearchForm';
 import GridSearchProgress from '@/components/GridSearchProgress';
 import GridSearchHistory from '@/components/GridSearchHistory';
+import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling';
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -42,11 +43,7 @@ export default function GridSearchPage() {
   const runningJob = jobs.find((j) => j.status === 'running') ?? null;
   const isJobRunning = runningJob !== null;
 
-  useEffect(() => {
-    if (!isJobRunning) return;
-    const id = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [isJobRunning, refresh]);
+  useVisiblePolling(refresh, POLL_INTERVAL_MS, isJobRunning);
 
   async function handleSubmit(request: GridSearchJobRequest) {
     setSubmitError(null);

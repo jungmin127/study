@@ -14,6 +14,7 @@ from typing import Literal, Union
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from engine.cache import (
@@ -107,6 +108,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 모바일 LTE 데이터 절약(설계 결정: 500바이트 미만은 압축 이득보다 CPU 비용이 더 큼) —
+# 백테스트/그리드서치/매매일지 목록 JSON 응답이 수십~수백 KB인 경우가 많아 효과가 크다.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
 def _run_segment_batch_safely() -> None:

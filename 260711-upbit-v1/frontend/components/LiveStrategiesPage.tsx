@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Check, Pause, Play, Square, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import {
@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { formatTimeframe } from '@/lib/format';
 import { returnRateColor } from '@/lib/return-rate-color';
+import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -48,11 +49,7 @@ export default function LiveStrategiesPage() {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [refresh]);
+  useVisiblePolling(refresh, POLL_INTERVAL_MS);
 
   async function runAction(id: string, action: (id: string) => Promise<LiveStrategy>) {
     setActionError(null);
