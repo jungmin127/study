@@ -18,7 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <TooltipProvider>
           <NavTabs />
-          <main className="p-6">{children}</main>
+          <main className="p-3 sm:p-4 md:p-6">{children}</main>
         </TooltipProvider>
       </body>
     </html>
