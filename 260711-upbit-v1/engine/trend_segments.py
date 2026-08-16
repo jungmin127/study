@@ -7,6 +7,8 @@ docs/superpowers/specs/2026-08-16-trend-segment-analysis-design.md
 """
 from __future__ import annotations
 
+import pandas as pd
+
 
 def _zigzag_pivot_indices(closes: list[float], threshold_pct: float) -> list[int]:
     """종가 배열에서 ZigZag 스윙 고점/저점의 인덱스를 확정 순서대로 반환한다.
@@ -158,3 +160,63 @@ def _absorb_short_segments(segments: list[dict], threshold_pct: float) -> list[d
             changed = True
             break
     return segments
+
+
+HALF_THRESHOLD_RATIO = 0.5
+
+PATTERN_LABELS: dict[tuple[str, str], str] = {
+    ("up", "up"): "지속형 상승",
+    ("up", "down"): "상승 후 반전",
+    ("up", "sideways"): "상승 후 둔화",
+    ("down", "up"): "하락 후 반등",
+    ("down", "down"): "지속형 하락",
+    ("down", "sideways"): "하락 후 멈춤",
+    ("sideways", "up"): "횡보 이탈(상승)",
+    ("sideways", "down"): "횡보 이탈(하락)",
+    ("sideways", "sideways"): "지속형 횡보",
+}
+
+
+def _classify_half(closes: list[float], start_idx: int, end_idx: int, threshold_pct: float) -> str:
+    start_price = closes[start_idx]
+    end_price = closes[end_idx]
+    return_pct = (end_price - start_price) / start_price * 100
+    return _classify_return(return_pct, threshold_pct * HALF_THRESHOLD_RATIO)
+
+
+def compute_trend_segments(df: pd.DataFrame, threshold_pct: float) -> list[dict]:
+    """일봉 df(candle_time 오름차순, close 컬럼)를 상승/하락/횡보 구간으로
+    분류하고, 구간마다 전반/후반 9패턴 라벨을 붙인다."""
+    if df.empty:
+        return []
+
+    closes = df["close"].tolist()
+    dates = df["candle_time"].tolist()
+
+    pivots = _zigzag_pivot_indices(closes, threshold_pct)
+    legs = _legs_from_pivots(closes, dates, pivots)
+    if not legs:
+        return []
+
+    runs = _merge_sideways_runs(legs, threshold_pct)
+    segments = [_run_to_segment(run, threshold_pct) for run in runs]
+    segments = _absorb_short_segments(segments, threshold_pct)
+
+    result = []
+    for seg in segments:
+        mid_idx = seg["start_idx"] + (seg["end_idx"] - seg["start_idx"]) // 2
+        first_half_trend = _classify_half(closes, seg["start_idx"], mid_idx, threshold_pct)
+        second_half_trend = _classify_half(closes, mid_idx, seg["end_idx"], threshold_pct)
+        start_date = seg["start_date"]
+        end_date = seg["end_date"]
+        result.append({
+            "start_date": start_date.strftime("%Y-%m-%d") if hasattr(start_date, "strftime") else str(start_date),
+            "end_date": end_date.strftime("%Y-%m-%d") if hasattr(end_date, "strftime") else str(end_date),
+            "days": (end_date - start_date).days,
+            "return_pct": seg["return_pct"],
+            "trend": seg["trend"],
+            "first_half_trend": first_half_trend,
+            "second_half_trend": second_half_trend,
+            "pattern_label": PATTERN_LABELS[(first_half_trend, second_half_trend)],
+        })
+    return result

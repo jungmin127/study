@@ -1,7 +1,8 @@
 import pytest
 from datetime import date, timedelta
+import pandas as pd
 
-from engine.trend_segments import _legs_from_pivots, _zigzag_pivot_indices, _merge_sideways_runs, _run_to_segment, _absorb_short_segments, _combine_segments
+from engine.trend_segments import _legs_from_pivots, _zigzag_pivot_indices, _merge_sideways_runs, _run_to_segment, _absorb_short_segments, _combine_segments, PATTERN_LABELS, _classify_half, compute_trend_segments
 
 
 def test_zigzag_pivot_indices_finds_expected_swing_points():
@@ -157,3 +158,43 @@ def test_absorb_short_segments_cascades_through_multiple_merges():
     assert len(result) == 2
     assert result[0]["start_idx"] == 0 and result[0]["end_idx"] == 20
     assert result[1]["start_idx"] == 20 and result[1]["end_idx"] == 60
+
+
+def test_classify_half_uses_half_threshold():
+    closes = [100.0, 110.0, 96.0]
+    # idx0->idx1: +10% (threshold=10, half_threshold=5 → up)
+    assert _classify_half(closes, 0, 1, threshold_pct=10.0) == "up"
+    # idx1->idx2: 약 -12.7% (half_threshold=5 → down)
+    assert _classify_half(closes, 1, 2, threshold_pct=10.0) == "down"
+    # idx0->idx0: 변화 없음 → sideways
+    assert _classify_half(closes, 0, 0, threshold_pct=10.0) == "sideways"
+
+
+def test_pattern_labels_cover_all_nine_combinations():
+    trends = ["up", "down", "sideways"]
+    for first in trends:
+        for second in trends:
+            assert (first, second) in PATTERN_LABELS
+
+    assert PATTERN_LABELS[("up", "up")] == "지속형 상승"
+    assert PATTERN_LABELS[("up", "sideways")] == "상승 후 둔화"
+    assert PATTERN_LABELS[("sideways", "sideways")] == "지속형 횡보"
+
+
+def test_compute_trend_segments_end_to_end_with_synthetic_series():
+    closes = [100, 105, 110, 115, 120, 118, 114, 108, 102, 96, 90, 95, 100, 108, 115, 122, 130]
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="D", tz="UTC")
+    df = pd.DataFrame({"candle_time": dates, "close": closes})
+
+    segments = compute_trend_segments(df, threshold_pct=10.0)
+
+    assert len(segments) >= 1
+    for seg in segments:
+        assert seg["trend"] in ("up", "down", "sideways")
+        assert seg["pattern_label"] == PATTERN_LABELS[(seg["first_half_trend"], seg["second_half_trend"])]
+        assert seg["start_date"] < seg["end_date"]
+
+
+def test_compute_trend_segments_returns_empty_list_for_empty_df():
+    df = pd.DataFrame({"candle_time": pd.Series([], dtype="datetime64[ns, UTC]"), "close": pd.Series([], dtype=float)})
+    assert compute_trend_segments(df, threshold_pct=10.0) == []
