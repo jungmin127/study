@@ -34,6 +34,7 @@ from engine.cache import (
     remove_grid_search_result,
     run_backtest_cached,
     save_result,
+    update_backtest_run_metadata,
 )
 from engine.condition_strategy import ConditionTreeStrategy
 from engine.condition_tree import (
@@ -637,6 +638,9 @@ def get_backtest_detail(run_id: str) -> dict:
         "ohlcv": ohlcv,
         "trades": trades_out,
         "live_price_as_of": _to_utc_iso(live_price_as_of) if live_price_as_of else None,
+        "title": result["title"],
+        "description": result["description"],
+        "created_at": _to_utc_iso(result["created_at"]),
     }
 
 
@@ -659,6 +663,24 @@ def delete_backtest(run_id: str) -> dict:
     if not deleted:
         raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 결과를 찾을 수 없습니다")
     return {"deleted": True}
+
+
+class UpdateBacktestMetadataRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+
+
+@app.patch("/api/v1/backtests/{run_id}")
+def update_backtest_metadata_endpoint(run_id: str, req: UpdateBacktestMetadataRequest) -> dict:
+    updated = update_backtest_run_metadata(run_id, req.title, req.description)
+    if not updated:
+        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 결과를 찾을 수 없습니다")
+    result = load_result(run_id)
+    return {
+        "title": result["title"],
+        "description": result["description"],
+        "created_at": _to_utc_iso(result["created_at"]),
+    }
 
 
 @app.post("/api/v1/backtests/{run_id}/refresh")

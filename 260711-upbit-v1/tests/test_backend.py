@@ -214,6 +214,38 @@ def test_delete_backtest_returns_404_for_missing_run(monkeypatch, tmp_path):
     assert resp.status_code == 404
 
 
+def test_update_backtest_metadata_updates_title_and_description(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="원래 제목", description="원래 설명",
+    )
+
+    resp = client.patch("/api/v1/backtests/r1", json={"title": "새 제목", "description": "새 설명"})
+
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "새 제목"
+    assert resp.json()["description"] == "새 설명"
+
+    detail_resp = client.get("/api/v1/backtests/r1")
+    detail = detail_resp.json()
+    assert detail["title"] == "새 제목"
+    assert detail["description"] == "새 설명"
+    assert detail["created_at"].endswith("+00:00")
+
+
+def test_update_backtest_metadata_returns_404_for_missing_run(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.patch("/api/v1/backtests/does-not-exist", json={"title": "제목", "description": None})
+
+    assert resp.status_code == 404
+
+
 def test_refresh_backtest_returns_404_for_missing_run(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     resp = client.post("/api/v1/backtests/does-not-exist/refresh")
