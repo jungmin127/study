@@ -5,6 +5,7 @@ import PriceChart from '@/components/PriceChart';
 import MetricTile from '@/components/MetricTile';
 import RefreshBacktestButton from '@/components/RefreshBacktestButton';
 import GoLiveButton from '@/components/GoLiveButton';
+import BacktestMetaEditor from '@/components/BacktestMetaEditor';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { returnRateColor } from '@/lib/return-rate-color';
@@ -132,6 +133,7 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
   return (
     <div>
       <h1 className="mb-1 text-lg font-semibold">백테스트 상세</h1>
+      <BacktestMetaEditor runId={params.runId} title={detail.title} description={detail.description} />
       <div className="mb-1 flex flex-wrap items-center gap-3">
         <p className="text-sm text-muted-foreground">
           {detail.market} · {formatTimeframe(detail.timeframe)} · {detail.start.slice(0, 10)} ~ {detail.end.slice(0, 10)}

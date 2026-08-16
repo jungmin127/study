@@ -73,6 +73,16 @@ export function deleteBacktestRun(runId: string): Promise<{ deleted: boolean }> 
   });
 }
 
+export function updateBacktestRun(
+  runId: string,
+  req: { title: string | null; description: string | null },
+): Promise<{ title: string | null; description: string | null; created_at: string }> {
+  return apiFetch(`/api/v1/backtests/${runId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(req),
+  });
+}
+
 export function refreshBacktestRun(runId: string): Promise<{ run_id: string }> {
   return apiFetch<{ run_id: string }>(`/api/v1/backtests/${runId}/refresh`, {
     method: 'POST',

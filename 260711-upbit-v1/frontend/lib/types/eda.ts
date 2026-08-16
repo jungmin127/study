@@ -66,6 +66,9 @@ export interface BacktestDetail {
   ohlcv: OhlcvPoint[];
   trades: Trade[];
   live_price_as_of: string | null;
+  title: string | null;
+  description: string | null;
+  created_at: string;
 }
 
 export interface Market {
