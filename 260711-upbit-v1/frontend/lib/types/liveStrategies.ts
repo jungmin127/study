@@ -9,7 +9,6 @@ export interface LiveStrategyRiskConfig {
   position_sizing_mode: PositionSizingMode;
   position_sizing_value: number;
   max_position_per_market: number;
-  max_total_position: number;
   order_execution_mode: OrderExecutionMode;
   order_timeout_sec: number;
   manual_intervention_policy: ManualInterventionPolicy;

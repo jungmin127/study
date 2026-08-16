@@ -384,7 +384,6 @@ def _live_strategy_request(**overrides) -> dict:
             "position_sizing_mode": "fixed",
             "position_sizing_value": 100000,
             "max_position_per_market": 500000,
-            "max_total_position": 2000000,
             "order_execution_mode": "market",
             "order_timeout_sec": 10,
             "manual_intervention_policy": "all_stop",

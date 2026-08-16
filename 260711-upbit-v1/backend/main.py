@@ -1040,7 +1040,6 @@ class CreateLiveStrategyRiskConfig(BaseModel):
     position_sizing_mode: Literal["fixed", "percent"]
     position_sizing_value: float
     max_position_per_market: float
-    max_total_position: float
     order_execution_mode: Literal["market", "limit", "limit_timeout"]
     order_timeout_sec: int = 10
     manual_intervention_policy: Literal["all_stop", "acknowledge_and_continue"]
@@ -1087,8 +1086,6 @@ def _validate_live_strategy_request(req: CreateLiveStrategyRequest) -> list[str]
         errors.append("퍼센트 자금관리 값은 100 이하여야 합니다.")
     if risk.max_position_per_market <= 0:
         errors.append("코인당 최대 포지션 금액은 0보다 커야 합니다.")
-    if risk.max_total_position <= 0:
-        errors.append("전체 최대 포지션 금액은 0보다 커야 합니다.")
     if risk.order_execution_mode == "limit_timeout" and risk.order_timeout_sec <= 0:
         errors.append("지정가+타임아웃 모드에서는 타임아웃 초가 0보다 커야 합니다.")
     if risk.daily_loss_limit_pct >= 0:

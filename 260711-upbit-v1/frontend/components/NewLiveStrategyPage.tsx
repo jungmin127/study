@@ -21,7 +21,6 @@ const DEFAULT_RISK_CONFIG: LiveStrategyRiskConfig = {
   position_sizing_mode: 'fixed',
   position_sizing_value: 100000,
   max_position_per_market: 500000,
-  max_total_position: 2000000,
   order_execution_mode: 'limit_timeout',
   order_timeout_sec: 10,
   manual_intervention_policy: 'all_stop',
@@ -29,7 +28,7 @@ const DEFAULT_RISK_CONFIG: LiveStrategyRiskConfig = {
   consecutive_loss_limit: 3,
 };
 
-type AmountField = 'position_sizing_value' | 'max_position_per_market' | 'max_total_position';
+type AmountField = 'position_sizing_value' | 'max_position_per_market';
 
 export default function NewLiveStrategyPage() {
   const router = useRouter();
@@ -42,7 +41,6 @@ export default function NewLiveStrategyPage() {
   const [amountInputs, setAmountInputs] = useState({
     position_sizing_value: String(DEFAULT_RISK_CONFIG.position_sizing_value),
     max_position_per_market: String(DEFAULT_RISK_CONFIG.max_position_per_market),
-    max_total_position: String(DEFAULT_RISK_CONFIG.max_total_position),
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -135,14 +133,6 @@ export default function NewLiveStrategyPage() {
               type="text" inputMode="numeric"
               value={formatCapital(amountInputs.max_position_per_market)}
               onChange={(e) => updateAmountField('max_position_per_market', e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">전체 최대 포지션(원)</label>
-            <Input
-              type="text" inputMode="numeric"
-              value={formatCapital(amountInputs.max_total_position)}
-              onChange={(e) => updateAmountField('max_total_position', e.target.value)}
             />
           </div>
         </div>
