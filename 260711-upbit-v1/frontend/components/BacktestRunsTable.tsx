@@ -9,6 +9,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import BacktestCoinFilter from '@/components/BacktestCoinFilter';
+import BacktestRunCard from '@/components/BacktestRunCard';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,6 +29,15 @@ import type { BacktestRunSummary } from '@/lib/types/eda';
 
 type SortKey = 'return_rate' | 'created_at' | 'market' | 'timeframe' | 'max_drawdown';
 type SortDir = 'asc' | 'desc';
+
+const SORT_OPTIONS: { value: string; key: SortKey; dir: SortDir; label: string }[] = [
+  { value: 'created_at:desc', key: 'created_at', dir: 'desc', label: '실행 시각 (최신순)' },
+  { value: 'created_at:asc', key: 'created_at', dir: 'asc', label: '실행 시각 (오래된순)' },
+  { value: 'return_rate:desc', key: 'return_rate', dir: 'desc', label: '수익률 (높은순)' },
+  { value: 'return_rate:asc', key: 'return_rate', dir: 'asc', label: '수익률 (낮은순)' },
+  { value: 'max_drawdown:desc', key: 'max_drawdown', dir: 'desc', label: 'MDD (큰순)' },
+  { value: 'max_drawdown:asc', key: 'max_drawdown', dir: 'asc', label: 'MDD (작은순)' },
+];
 
 interface RunFilters {
   coin: string | null;
@@ -76,7 +86,7 @@ function LastTradeStatusBadge({ status }: { status: BacktestRunSummary['last_tra
   return <Badge variant="outline">청산</Badge>;
 }
 
-function buildCopyHref(run: BacktestRunSummary): string {
+export function buildCopyHref(run: BacktestRunSummary): string {
   const params = new URLSearchParams({
     market: run.market,
     timeframe: run.timeframe,
@@ -262,7 +272,8 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
         </AlertDialog>
       </div>
 
-      <Table>
+      <div className="hidden md:block">
+        <Table>
         <TableHeader>
           <TableRow>
             <TableHead className="w-8">
@@ -384,7 +395,46 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
             </TableRow>
           ))}
         </TableBody>
-      </Table>
+        </Table>
+      </div>
+
+      <div className="mb-3 md:hidden">
+        <select
+          className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          value={sortKey ? `${sortKey}:${sortDir}` : ''}
+          onChange={(e) => {
+            const opt = SORT_OPTIONS.find((o) => o.value === e.target.value);
+            if (opt) {
+              setSortKey(opt.key);
+              setSortDir(opt.dir);
+            } else {
+              setSortKey(null);
+            }
+          }}
+        >
+          <option value="">정렬: 기본</option>
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-3 md:hidden">
+        {sorted.length === 0 ? (
+          <p className="text-center text-sm text-muted-foreground">조건에 맞는 결과가 없습니다.</p>
+        ) : (
+          sorted.map((run) => (
+            <BacktestRunCard
+              key={run.run_id}
+              run={run}
+              marketName={marketNames[run.market]}
+              selected={selected.has(run.run_id)}
+              onToggleSelected={(checked) => toggleOne(run.run_id, checked)}
+            />
+          ))
+        )}
+      </div>
     </div>
   );
 }
