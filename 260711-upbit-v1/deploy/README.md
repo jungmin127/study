@@ -259,3 +259,78 @@ Budgets 알림(7-2)은 "임계값을 넘었는지"만 알려줄 뿐 항목별 �
 데서나(다른 리전, 다른 클라우드 제공자 등) 새로 만들고 위 2~5단계를 그대로
 반복하면 된다. 달라지는 건 `.env`/`frontend/.env.production`을 새로 채우는 것과,
 업비트 IP 화이트리스트를 새 IP로 바꾸는 것뿐이다.
+
+## 9. HTTPS + PWA(홈 화면 앱) 설정
+
+모바일 홈 화면에 아이콘을 추가해 브라우저 주소창 없이 앱처럼 쓰려면(PWA
+standalone 모드) HTTPS가 필수다(Chrome은 HTTP 사이트에서 standalone 설치를
+허용하지 않는다). 최초 1회만 하면 된다.
+
+### 9-1. Tailscale HTTPS 인증서 기능 켜기(최초 1회, 웹 콘솔)
+
+https://login.tailscale.com/admin/dns 접속 → "HTTPS Certificates" 섹션 →
+"Enable HTTPS" 클릭. 계정당 한 번만 켜면 된다.
+
+### 9-2. 인증서 발급 + nginx 설치
+
+서버에 SSH 접속 후:
+
+```bash
+sudo mkdir -p /etc/nginx/tailscale-certs
+sudo tailscale cert \
+  --cert-file=/etc/nginx/tailscale-certs/upbit-server.crt \
+  --key-file=/etc/nginx/tailscale-certs/upbit-server.key \
+  upbit-server.tailXXXX.ts.net   # 본인 Tailscale MagicDNS 주소로 교체
+
+sudo apt-get update && sudo apt-get install -y nginx
+```
+
+### 9-3. nginx 설정 배포
+
+저장소의 `deploy/nginx/upbit.conf`를 그대로 쓴다 — `server_name`을 본인 MagicDNS
+주소로 바꾼 뒤:
+
+```bash
+sudo cp deploy/nginx/upbit.conf /etc/nginx/sites-available/upbit.conf
+sudo ln -sf /etc/nginx/sites-available/upbit.conf /etc/nginx/sites-enabled/upbit.conf
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl enable nginx --now
+```
+
+`/api/`로 시작하는 요청은 backend(8000)로, 나머지는 frontend(3000)로 프록시된다.
+포트 3000/8000 직접 접속은 그대로 살아있다(막지 않음) — 443만 새로 추가되는
+경로다.
+
+### 9-4. 환경변수를 https로 바꾸고 재빌드
+
+`.env`의 `ALLOWED_ORIGIN`과 `frontend/.env.production`의 `NEXT_PUBLIC_API_URL`을
+포트 없는 `https://upbit-server.tailXXXX.ts.net`로 바꾼다(둘 다 443이 기본
+포트라 생략). **HTTPS 페이지에서 HTTP API를 부르면 브라우저가 mixed content로
+막으므로 이 변경은 선택이 아니라 필수다.** 이후:
+
+```bash
+cd frontend && npm run build
+sudo systemctl restart backend frontend
+```
+
+daemon은 건드릴 필요 없다(위 변경은 backend/frontend 설정일 뿐 실거래 로직과
+무관).
+
+### 9-5. 인증서 자동 갱신
+
+Tailscale HTTPS 인증서는 Let's Encrypt 기반이라 90일마다 만료된다.
+`deploy/nginx/renew-cert.sh`를 `/etc/cron.monthly/`에 넣어두면 매달 자동
+재발급된다:
+
+```bash
+sudo cp deploy/nginx/renew-cert.sh /etc/cron.monthly/tailscale-cert-renew
+sudo chmod +x /etc/cron.monthly/tailscale-cert-renew
+```
+
+(스크립트 안의 호스트명도 본인 MagicDNS 주소로 맞춰야 한다.)
+
+### 9-6. 확인 + 홈 화면에 추가
+
+`https://upbit-server.tailXXXX.ts.net`으로 접속해 정상 로딩되는지 확인한 뒤,
+핸드폰 Chrome에서 우측 상단 메뉴 → **"설치"**(바로가기 만들기 아님) → 홈
+화면 아이콘 생성. 탭하면 주소창 없이 `/journal`로 바로 랜딩된다.
