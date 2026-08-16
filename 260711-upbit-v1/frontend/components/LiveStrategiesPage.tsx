@@ -68,21 +68,21 @@ export default function LiveStrategiesPage() {
   return (
     <div className="space-y-4">
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
         {strategies.map((s) => (
-          <Card key={s.id}>
+          <Card key={s.id} className="py-3 gap-3 md:py-4 md:gap-4">
             <CardHeader>
-              <CardTitle className="flex items-center justify-between">
+              <CardTitle className="flex items-center justify-between max-md:text-sm">
                 <span>{s.market} · {formatTimeframe(s.timeframe)}</span>
                 <Badge variant={s.status === 'running' ? 'default' : 'secondary'}>{s.status}</Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
+            <CardContent className="space-y-1.5 md:space-y-2">
               {s.current_capital !== null && (
-                <p className="text-sm">현재 자금: {Math.round(s.current_capital).toLocaleString()}원</p>
+                <p className="text-xs md:text-sm">현재 자금: {Math.round(s.current_capital).toLocaleString()}원</p>
               )}
               {s.open_position && (
-                <div className="rounded-md bg-muted/50 p-2 text-sm">
+                <div className="rounded-md bg-muted/50 p-1.5 text-xs md:p-2 md:text-sm">
                   <p>열린 포지션: 진입가 {Math.round(s.open_position.entry_price).toLocaleString()}</p>
                   <p>
                     수량 {s.open_position.entry_qty} · 손익{' '}
@@ -90,7 +90,7 @@ export default function LiveStrategiesPage() {
                   </p>
                 </div>
               )}
-              <div className="flex flex-wrap gap-2 pt-2">
+              <div className="flex flex-wrap gap-2 pt-1.5 md:pt-2">
                 {s.status === 'draft' && (
                   <>
                     <Button

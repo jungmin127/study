@@ -83,28 +83,28 @@ export default function JournalPage() {
         <p className="text-sm text-muted-foreground">아직 실거래 이력이 없습니다.</p>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">누적손익</CardTitle>
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <Card className="gap-1 py-2 sm:gap-4 sm:py-4">
+              <CardHeader className="px-2 sm:px-4">
+                <CardTitle className="text-xs font-medium sm:text-sm">누적손익</CardTitle>
               </CardHeader>
-              <CardContent className="text-lg font-semibold">
+              <CardContent className="px-2 text-xs font-semibold sm:px-4 sm:text-lg">
                 {fmtKrw(summary.cumulative_pnl)} ({fmtPct(summary.cumulative_pnl_pct)})
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">MDD</CardTitle>
+            <Card className="gap-1 py-2 sm:gap-4 sm:py-4">
+              <CardHeader className="px-2 sm:px-4">
+                <CardTitle className="text-xs font-medium sm:text-sm">MDD</CardTitle>
               </CardHeader>
-              <CardContent className="text-lg font-semibold">
+              <CardContent className="px-2 text-xs font-semibold sm:px-4 sm:text-lg">
                 {fmtPct(summary.mdd_pct)}
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">승률</CardTitle>
+            <Card className="gap-1 py-2 sm:gap-4 sm:py-4">
+              <CardHeader className="px-2 sm:px-4">
+                <CardTitle className="text-xs font-medium sm:text-sm">승률</CardTitle>
               </CardHeader>
-              <CardContent className="text-lg font-semibold">
+              <CardContent className="px-2 text-xs font-semibold sm:px-4 sm:text-lg">
                 {summary.win_rate_pct.toFixed(1)}%
               </CardContent>
             </Card>

@@ -14,7 +14,7 @@ import type {
   OrderExecutionMode,
   PositionSizingMode,
 } from '@/lib/types/liveStrategies';
-import { formatTimeframe } from '@/lib/format';
+import { formatCapital, formatTimeframe } from '@/lib/format';
 import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 
 const DEFAULT_RISK_CONFIG: LiveStrategyRiskConfig = {
@@ -29,6 +29,8 @@ const DEFAULT_RISK_CONFIG: LiveStrategyRiskConfig = {
   consecutive_loss_limit: 3,
 };
 
+type AmountField = 'position_sizing_value' | 'max_position_per_market' | 'max_total_position';
+
 export default function NewLiveStrategyPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -37,6 +39,11 @@ export default function NewLiveStrategyPage() {
   const [config, setConfig] = useState<BacktestConfig | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [riskConfig, setRiskConfig] = useState<LiveStrategyRiskConfig>(DEFAULT_RISK_CONFIG);
+  const [amountInputs, setAmountInputs] = useState({
+    position_sizing_value: String(DEFAULT_RISK_CONFIG.position_sizing_value),
+    max_position_per_market: String(DEFAULT_RISK_CONFIG.max_position_per_market),
+    max_total_position: String(DEFAULT_RISK_CONFIG.max_total_position),
+  });
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -52,6 +59,12 @@ export default function NewLiveStrategyPage() {
 
   function updateRiskConfig<K extends keyof LiveStrategyRiskConfig>(key: K, value: LiveStrategyRiskConfig[K]) {
     setRiskConfig((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateAmountField(field: AmountField, raw: string) {
+    const digits = raw.replace(/[^0-9]/g, '');
+    setAmountInputs((prev) => ({ ...prev, [field]: digits }));
+    updateRiskConfig(field, digits === '' ? 0 : Number(digits));
   }
 
   async function handleSubmit() {
@@ -111,25 +124,25 @@ export default function NewLiveStrategyPage() {
               {riskConfig.position_sizing_mode === 'fixed' ? '금액(원)' : '비율(%)'}
             </label>
             <Input
-              type="number" min={0}
-              value={riskConfig.position_sizing_value}
-              onChange={(e) => updateRiskConfig('position_sizing_value', Number(e.target.value))}
+              type="text" inputMode="numeric"
+              value={formatCapital(amountInputs.position_sizing_value)}
+              onChange={(e) => updateAmountField('position_sizing_value', e.target.value)}
             />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium">코인당 최대 포지션(원)</label>
             <Input
-              type="number" min={0}
-              value={riskConfig.max_position_per_market}
-              onChange={(e) => updateRiskConfig('max_position_per_market', Number(e.target.value))}
+              type="text" inputMode="numeric"
+              value={formatCapital(amountInputs.max_position_per_market)}
+              onChange={(e) => updateAmountField('max_position_per_market', e.target.value)}
             />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium">전체 최대 포지션(원)</label>
             <Input
-              type="number" min={0}
-              value={riskConfig.max_total_position}
-              onChange={(e) => updateRiskConfig('max_total_position', Number(e.target.value))}
+              type="text" inputMode="numeric"
+              value={formatCapital(amountInputs.max_total_position)}
+              onChange={(e) => updateAmountField('max_total_position', e.target.value)}
             />
           </div>
         </div>
