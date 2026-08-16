@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import backend.main as backend_module
 import engine.cache as cache_module
+import engine.trend_segments as trend_segments_module
 from backend.main import app
 from engine.cache import save_result, save_sweep_result, finish_grid_search_job
 from engine.cache import save_segment_classification
@@ -2100,3 +2101,45 @@ def test_delete_grid_search_job_returns_404_for_missing_job(monkeypatch, tmp_pat
     client = _client(monkeypatch, tmp_path)
     resp = client.delete("/api/v1/grid-search/jobs/does-not-exist")
     assert resp.status_code == 404
+
+
+def test_get_trend_segments_endpoint_returns_segments_and_ohlcv(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    closes = [100, 130, 90, 140]
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="D", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": dates, "open": closes, "high": closes, "low": closes, "close": closes,
+    })
+    monkeypatch.setattr(trend_segments_module, "get_candles", lambda market, tf, start, end: df)
+    monkeypatch.setattr(backend_module, "get_candles", lambda market, tf, start, end: df)
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: 0.02)
+
+    resp = client.get("/api/v1/analysis/trend-segments/KRW-BTC")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["market"] == "KRW-BTC"
+    assert len(body["segments"]) >= 1
+    assert len(body["ohlcv"]) == 4
+    assert body["ohlcv"][0]["close"] == 100
+
+
+def test_refresh_trend_segments_endpoint_forces_recompute(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    closes = [100, 130, 90, 140]
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="D", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": dates, "open": closes, "high": closes, "low": closes, "close": closes,
+    })
+    monkeypatch.setattr(trend_segments_module, "get_candles", lambda market, tf, start, end: df)
+    monkeypatch.setattr(backend_module, "get_candles", lambda market, tf, start, end: df)
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: 0.02)
+
+    resp = client.post("/api/v1/analysis/trend-segments/KRW-BTC/refresh")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["market"] == "KRW-BTC"
+    assert len(body["segments"]) >= 1

@@ -55,6 +55,7 @@ from external_data_service import get_fear_greed_cmc, merge_fear_greed
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import VALID_TIMEFRAMES, calculate_metrics
 from engine.segment_analysis import run_segment_batch
+from engine.trend_segments import EARLIEST_CANDLE_START, get_or_compute_trend_segments
 from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
@@ -463,6 +464,30 @@ def get_markets() -> list[dict]:
 @app.get("/api/v1/analysis/segments/size")
 def get_segment_size_analysis() -> list[dict]:
     return list_segment_classification()
+
+
+def _trend_segment_ohlcv(market: str) -> list[dict]:
+    df = get_candles(market, "days", EARLIEST_CANDLE_START, datetime.now(timezone.utc))
+    return [
+        {
+            "time": _to_utc_iso(row.candle_time.isoformat()),
+            "open": float(row.open), "high": float(row.high),
+            "low": float(row.low), "close": float(row.close),
+        }
+        for row in df.itertuples()
+    ]
+
+
+@app.get("/api/v1/analysis/trend-segments/{market}")
+def get_trend_segments_endpoint(market: str) -> dict:
+    result = get_or_compute_trend_segments(market)
+    return {**result, "ohlcv": _trend_segment_ohlcv(market)}
+
+
+@app.post("/api/v1/analysis/trend-segments/{market}/refresh")
+def refresh_trend_segments_endpoint(market: str) -> dict:
+    result = get_or_compute_trend_segments(market, force_refresh=True)
+    return {**result, "ohlcv": _trend_segment_ohlcv(market)}
 
 
 @app.get("/api/v1/indicators/catalog")
