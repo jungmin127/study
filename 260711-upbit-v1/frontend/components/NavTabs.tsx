@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BarChart3, BookOpen, ClipboardList, FlaskConical, Grid3x3, Rocket, Settings } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
+import MobileNavDrawer from '@/components/MobileNavDrawer';
+import { isActive } from '@/lib/nav-active';
 
 const STEPS = [
   { href: '/', title: '백테스트 설정', icon: Settings },
@@ -15,17 +17,18 @@ const STEPS = [
   { href: '/guide', title: '지표 가이드', icon: BookOpen },
 ];
 
-function isActive(pathname: string, href: string): boolean {
-  if (href === '/') return pathname === '/';
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
 export default function NavTabs() {
   const pathname = usePathname();
+  const activeStep = STEPS.find((step) => isActive(pathname, step.href));
 
   return (
-    <header className="flex items-center justify-between border-b px-6">
-      <nav className="flex gap-6">
+    <header className="flex items-center justify-between border-b px-3 md:px-6">
+      <div className="flex w-full items-center justify-between py-2.5 md:hidden">
+        <span className="truncate text-sm font-semibold">{activeStep?.title ?? 'Upbit 전략 EDA'}</span>
+        <MobileNavDrawer steps={STEPS} />
+      </div>
+
+      <nav className="hidden gap-6 md:flex">
         {STEPS.map((step) => {
           const Icon = step.icon;
           const active = isActive(pathname, step.href);
@@ -45,7 +48,9 @@ export default function NavTabs() {
           );
         })}
       </nav>
-      <ThemeToggle />
+      <div className="hidden md:block">
+        <ThemeToggle />
+      </div>
     </header>
   );
 }
