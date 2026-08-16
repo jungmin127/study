@@ -99,6 +99,31 @@ def is_recent(created_at: str, max_age_sec: float) -> bool:
     return (datetime.now(timezone.utc) - created).total_seconds() <= max_age_sec
 
 
+def _predates_strategy_start(detail: dict, status: str, strategy: dict) -> bool:
+    """이미 종결된(done/cancel) 주문이 이 전략이 시작되기 전에 거래소에서 발생했다면
+    "외부 개입"이 아니라 그냥 이 마켓의 오래된 주문 이력이다 — 실제 사고 사례: DB 리셋
+    이후로 로컬 orders 테이블 기억에서 빠진 몇 주 전 실전 테스트 주문이, 같은 마켓에
+    새 전략을 만들 때마다 매번 "방금 발견한 외부주문"으로 오인돼 전략을 정지시켰다.
+    baseline_qty가 hydrate_state 시점의 실제 잔고를 그대로 캡처하므로, 그 이전에 이미
+    종결된 주문의 잔고 효과는 baseline에 이미 반영돼 있어 무시해도 안전하다. 아직
+    열려있는(wait) 주문은 나이와 무관하게 계속 추적 대상으로 남긴다 — 이후 체결/취소되며
+    baseline 캡처 이후의 실제 잔고를 바꿀 수 있기 때문이다. started_at/created_at 중
+    하나라도 없거나 파싱할 수 없으면(테스트 더블, 예상 밖 응답 형식) 안전한 쪽(기존
+    동작대로 계속 추적)으로 기울여 False를 반환한다."""
+    if status == "wait":
+        return False
+    started_at = strategy.get("started_at")
+    created_at = detail.get("created_at")
+    if not started_at or not created_at:
+        return False
+    try:
+        order_time = datetime.fromisoformat(created_at).astimezone(timezone.utc)
+        strategy_start = datetime.strptime(started_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return False
+    return order_time < strategy_start
+
+
 async def _detect_external_orders(
     strategy: dict, *, client: httpx.AsyncClient | None = None,
 ) -> list[dict]:
@@ -148,6 +173,8 @@ async def _detect_external_orders(
         status = "wait" if detail["state"] == "wait" else (
             "done" if detail["state"] == "done" else "cancel"
         )
+        if _predates_strategy_start(detail, status, strategy):
+            continue
 
         order_id = db.insert_external_order(
             strategy["id"], None, market, detail["side"], detail["ord_type"], upbit_uuid,

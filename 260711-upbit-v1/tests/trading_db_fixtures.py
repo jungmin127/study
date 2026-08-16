@@ -19,6 +19,7 @@ def insert_live_strategy(db_module, **overrides) -> str:
         "current_capital": 100000.0,
         "status": "running",
         "manual_pause": 0,
+        "started_at": None,
     }
     defaults.update(overrides)
 
@@ -27,9 +28,10 @@ def insert_live_strategy(db_module, **overrides) -> str:
         conn.execute(
             "INSERT INTO live_strategies "
             "(id, source_run_id, market, timeframe, buy_conditions_json, sell_conditions_json, "
-            "risk_config_json, current_capital, status, manual_pause) "
+            "risk_config_json, current_capital, status, manual_pause, started_at) "
             "VALUES (:id, :source_run_id, :market, :timeframe, :buy_conditions_json, "
-            ":sell_conditions_json, :risk_config_json, :current_capital, :status, :manual_pause)",
+            ":sell_conditions_json, :risk_config_json, :current_capital, :status, :manual_pause, "
+            ":started_at)",
             defaults,
         )
         conn.commit()

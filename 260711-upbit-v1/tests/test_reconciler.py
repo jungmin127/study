@@ -287,6 +287,139 @@ async def test_detect_external_orders_ignores_already_known_uuid(monkeypatch, tm
     assert calls["get_order"] == 0
 
 
+async def test_detect_external_orders_ignores_closed_order_that_predates_strategy_start(
+    monkeypatch, tmp_path,
+):
+    """실제 사고 재현 — DB 리셋 이후로 로컬 orders 테이블 기억에서 빠진 몇 주 전 실전
+    테스트 주문이, 새 전략을 만들 때마다 매번 "외부주문"으로 오인돼 정지시켰다. 이미
+    종결(done)됐고 전략 시작보다 훨씬 이전에 발생한 주문은 무시해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(
+        dbm, baseline_qty=0.0, manual_intervention_policy="all_stop",
+        started_at="2026-08-16 02:11:43",
+    )
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "stale-uuid"}]
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "side": "ask", "ord_type": "limit",
+                "created_at": "2026-08-12T05:00:36+09:00",
+                "executed_volume": "1.0", "remaining_volume": "0",
+                "paid_fee": "0", "trades": [{"funds": "100.0"}]}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert found == []
+    assert dbm.get_order_by_upbit_uuid("stale-uuid") is None
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "running"
+
+
+async def test_detect_external_orders_still_flags_closed_order_after_strategy_start(
+    monkeypatch, tmp_path,
+):
+    """나이 필터가 과하게 넓어져 진짜 동시 개입까지 숨기면 안 된다 — 전략 시작 이후
+    발생한 종결 주문은 여전히 외부주문으로 잡혀 정지해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(
+        dbm, baseline_qty=0.0, manual_intervention_policy="all_stop",
+        started_at="2026-08-16 02:11:43",
+    )
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "fresh-external-uuid"}]
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "side": "ask", "ord_type": "limit",
+                "created_at": "2026-08-16T02:12:07+00:00",
+                "executed_volume": "1.0", "remaining_volume": "0",
+                "paid_fee": "0", "trades": [{"funds": "100.0"}]}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert len(found) == 1
+    assert found[0]["upbit_uuid"] == "fresh-external-uuid"
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+
+
+async def test_detect_external_orders_still_flags_open_order_that_predates_strategy_start(
+    monkeypatch, tmp_path,
+):
+    """아직 열려있는(wait) 주문은 나이와 무관하게 계속 추적해야 한다 — 나중에 체결/취소
+    되며 baseline 캡처 이후의 실제 잔고를 바꿀 수 있기 때문이다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(
+        dbm, baseline_qty=0.0, manual_intervention_policy="all_stop",
+        started_at="2026-08-16 02:11:43",
+    )
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "old-still-open-uuid"}]
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "wait", "side": "bid", "ord_type": "limit",
+                "created_at": "2026-08-12T05:00:36+09:00",
+                "executed_volume": "0", "remaining_volume": "1.0",
+                "paid_fee": "0", "trades": []}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert len(found) == 1
+    assert found[0]["upbit_uuid"] == "old-still-open-uuid"
+
+
+async def test_detect_external_orders_flags_closed_order_when_strategy_started_at_missing(
+    monkeypatch, tmp_path,
+):
+    """started_at을 모르면(예상 밖 상태) 안전한 쪽으로 기울여 기존 동작대로 계속
+    추적한다 — 필터가 잘못된 침묵을 만들지 않도록."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")
+    assert strategy["started_at"] is None
+
+    async def fake_list_open_orders(*, market=None, states=None, client=None):
+        return []
+
+    async def fake_list_closed_orders(*, market=None, states=None, client=None):
+        return [{"uuid": "unknown-start-uuid"}]
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "side": "ask", "ord_type": "limit",
+                "created_at": "2026-08-12T05:00:36+09:00",
+                "executed_volume": "1.0", "remaining_volume": "0",
+                "paid_fee": "0", "trades": [{"funds": "100.0"}]}
+
+    monkeypatch.setattr(upbit_client, "list_open_orders", fake_list_open_orders)
+    monkeypatch.setattr(upbit_client, "list_closed_orders", fake_list_closed_orders)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    found = await reconciler._detect_external_orders(strategy)
+
+    assert len(found) == 1
+    assert found[0]["upbit_uuid"] == "unknown-start-uuid"
+
+
 import trading.position_manager as position_manager
 
 
