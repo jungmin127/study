@@ -11,6 +11,7 @@ import type {
   RunBacktestResponse,
   SegmentSizeEntry,
   SweepResult,
+  TrendSegmentAnalysis,
   ValidateBacktestResponse,
 } from '@/lib/types/eda';
 
@@ -80,6 +81,16 @@ export function refreshBacktestRun(runId: string): Promise<{ run_id: string }> {
 
 export function getSegmentSizeAnalysis(): Promise<SegmentSizeEntry[]> {
   return apiFetch<SegmentSizeEntry[]>('/api/v1/analysis/segments/size');
+}
+
+export function getTrendSegments(market: string): Promise<TrendSegmentAnalysis> {
+  return apiFetch<TrendSegmentAnalysis>(`/api/v1/analysis/trend-segments/${market}`);
+}
+
+export function refreshTrendSegments(market: string): Promise<TrendSegmentAnalysis> {
+  return apiFetch<TrendSegmentAnalysis>(`/api/v1/analysis/trend-segments/${market}/refresh`, {
+    method: 'POST',
+  });
 }
 
 export function createGridSearchJob(req: GridSearchJobRequest): Promise<GridSearchJob> {

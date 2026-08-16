@@ -90,6 +90,27 @@ export interface SegmentSizeEntry {
   computed_at: string;
 }
 
+export type TrendDirection = 'up' | 'down' | 'sideways';
+
+export interface TrendSegment {
+  start_date: string;
+  end_date: string;
+  days: number;
+  return_pct: number;
+  trend: TrendDirection;
+  first_half_trend: TrendDirection;
+  second_half_trend: TrendDirection;
+  pattern_label: string;
+}
+
+export interface TrendSegmentAnalysis {
+  market: string;
+  threshold_pct: number;
+  computed_at: string;
+  segments: TrendSegment[];
+  ohlcv: OhlcvPoint[];
+}
+
 export interface IndicatorParamDef {
   key: string;
   label: string;
