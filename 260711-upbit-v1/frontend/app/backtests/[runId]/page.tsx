@@ -70,7 +70,7 @@ function MetricsGrid({ metrics }: { metrics: BacktestMetrics }) {
   return (
     <div>
       <h2 className="mb-2 text-sm font-semibold">성과 지표</h2>
-      <div className="grid grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
         {tiles.map((tile) => (
           <MetricTile
             key={tile.label} label={tile.label} value={tile.value}
@@ -109,7 +109,7 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
             colorClass={returnRateColor(detail.metrics.total_return)} icon={Percent}
           />
         </div>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <MetricTile label="MDD" value={fmtPct(detail.metrics.mdd)} colorClass={returnRateColor(detail.metrics.mdd)} icon={Percent} />
           <MetricTile label="총 거래" value={`${detail.metrics.total_trades}건`} icon={Repeat} />
           <MetricTile label="최초 투입금" value={`${Math.round(detail.initial_capital).toLocaleString()}원`} />
