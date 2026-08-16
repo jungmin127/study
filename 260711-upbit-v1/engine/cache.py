@@ -189,7 +189,8 @@ def load_result(run_id: str) -> dict | None:
     try:
         row = conn.execute(
             "SELECT res.final_value, res.sharpe, res.max_drawdown, res.equity_curve_json, res.trades_json, "
-            "       r.market, r.timeframe, r.start, r.end, r.risk_config_json "
+            "       r.market, r.timeframe, r.start, r.end, r.risk_config_json, "
+            "       r.title, r.description, r.created_at "
             "FROM backtest_results res "
             "JOIN backtest_runs r ON r.id = res.run_id "
             "WHERE res.run_id = ?",
@@ -202,7 +203,8 @@ def load_result(run_id: str) -> dict | None:
         return None
 
     (final_value, sharpe, max_drawdown, equity_curve_json, trades_json,
-     market, timeframe, start, end, risk_config_json) = row
+     market, timeframe, start, end, risk_config_json,
+     title, description, created_at) = row
     risk_config = json.loads(risk_config_json)
     initial_capital = risk_config.get("initial_capital")
     commission_rate = risk_config.get("commission_rate", 0.0005)
@@ -218,6 +220,9 @@ def load_result(run_id: str) -> dict | None:
         "end": end,
         "initial_capital": initial_capital,
         "commission_rate": commission_rate,
+        "title": title,
+        "description": description,
+        "created_at": created_at,
         "from_cache": True,
     }
 
@@ -261,6 +266,25 @@ def delete_backtest_run(run_id: str) -> bool:
         cur = conn.execute("DELETE FROM backtest_runs WHERE id = ?", (run_id,))
         conn.commit()
         return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def update_backtest_run_metadata(run_id: str, title: str | None, description: str | None) -> bool:
+    """title/description을 수정하고 created_at도 함께 갱신한다. created_at을 갱신해야
+    scripts/import_backtest_results.py의 merge_databases()가 이 수정을 "더 최신"으로
+    인식해 라이브 서버의 기존 행(backtest_runs+backtest_results 전체)을 덮어쓴다 —
+    갱신하지 않으면 로컬에서 제목을 고쳐 push해도 created_at이 그대로라 서버에 반영되지
+    않는다."""
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE backtest_runs SET title = ?, description = ?, created_at = datetime('now') "
+            "WHERE id = ?",
+            (title, description, run_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
 

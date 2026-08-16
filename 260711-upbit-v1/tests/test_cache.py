@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 import engine.cache as cache_module
-from engine.cache import compute_cache_key, delete_backtest_run, get_run_config, load_result, save_result
+from engine.cache import compute_cache_key, delete_backtest_run, get_run_config, load_result, save_result, update_backtest_run_metadata
 from engine.cache import run_backtest_cached
 from engine.cache import (
     list_backtest_runs,
@@ -417,6 +417,34 @@ def test_delete_backtest_run_removes_run_and_result(monkeypatch, tmp_path):
 def test_delete_backtest_run_returns_false_for_missing_run(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     assert delete_backtest_run("does-not-exist") is False
+
+
+def test_update_backtest_run_metadata_updates_title_and_description(monkeypatch, tmp_path):
+    _save_condition_tree_run(monkeypatch, tmp_path, "run-1", title="원래 제목", description="원래 설명")
+
+    updated = update_backtest_run_metadata("run-1", "새 제목", "새 설명")
+
+    assert updated is True
+    runs = list_backtest_runs()
+    run = next(r for r in runs if r["run_id"] == "run-1")
+    assert run["title"] == "새 제목"
+    assert run["description"] == "새 설명"
+
+
+def test_update_backtest_run_metadata_returns_false_for_missing_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    assert update_backtest_run_metadata("does-not-exist", "제목", None) is False
+
+
+def test_load_result_includes_title_description_and_created_at(monkeypatch, tmp_path):
+    _save_condition_tree_run(monkeypatch, tmp_path, "run-1", title="제목", description="설명")
+
+    result = load_result("run-1")
+
+    assert result["title"] == "제목"
+    assert result["description"] == "설명"
+    assert result["created_at"] is not None
 
 
 def test_connect_migration_is_idempotent(monkeypatch, tmp_path):
