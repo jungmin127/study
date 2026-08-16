@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `frontend/` 웹 대시보드를 모바일 세로 화면에서 자연스럽게 쓸 수 있도록 반응형으로 개선한다. 특히 백테스트 결과 목록/상세, 라이브 전략, 매매일지는 카드형 UI로 재구성하고, 나머지 페이지는 가로 스크롤이 발생하지 않는 수준까지만 손본다. PC(≥768px) 레이아웃은 지금과 동일하게 유지한다.
+**Goal:** `frontend/` 웹 대시보드를 모바일 세로 화면에서 자연스럽게 쓸 수 있도록 반응형으로 개선한다. 특히 백테스트 결과 목록/상세, 라이브 전략, 매매일지는 카드형 UI로 재구성하고, 나머지 페이지는 가로 스크롤이 발생하지 않는 수준까지만 손본다. PC(≥768px) 레이아웃은 지금과 동일하게 유지한다. **단순히 breakpoint별 CSS 클래스를 나누는 것으로 끝내지 않고, 각 화면을 Playwright로 실제 모바일 뷰포트에서 조작해보며(탭, 스크롤, 드로어/모달 열고 닫기, 필터·정렬 등) 실사용 관점의 문제를 찾아 고치고 재검증하는 것까지가 이 작업의 완료 기준이다.**
 
 **Architecture:** Tailwind CSS(v4) 반응형 유틸리티 클래스(`sm:`/`md:`/`lg:`, 기본값 = 모바일)만으로 처리한다. 구조가 달라지는 곳(네비게이션, 표→카드)은 두 마크업을 함께 서버 렌더링하고 `hidden md:block` / `block md:hidden`(또는 `md:flex` 등)으로 전환한다. 새 JS 미디어쿼리 훅이나 라이브러리는 추가하지 않는다.
 
@@ -17,6 +17,7 @@
 - Breakpoint는 Tailwind 기본값을 그대로 쓴다: `sm`=640px, `md`=768px, `lg`=1024px.
 - 우선순위 페이지(백테스트 결과 목록/상세, 라이브 전략, 매매일지)는 카드형 UI로 재구성한다. 그 외 페이지(Grid Search, 세그먼트, 히트맵, 지표 가이드, 랭킹, 모델 정확도, 루트 `/`)는 가로 스크롤 방지 수준까지만 수정한다.
 - 모바일 폰트는 지금보다 작아도 된다(`text-sm`/`text-xs` 위주 유지) — 단 줄바꿈 시 텍스트가 겹치지 않도록 `line-height`를 확보한다.
+- 우선순위 페이지의 각 작업은 정적 검증(가로 스크롤 없음)만으로 끝내지 않고, Playwright로 실제 조작(탭/스크롤/드로어·모달 열기/필터·정렬)까지 수행해 문제를 발견 즉시 고치고 재검증한다(터치 타겟 최소 36px 높이, 인접 요소 최소 8px 간격 기준). 자세한 방법론은 스펙 §7 참고.
 - 참고 스펙: `docs/superpowers/specs/2026-08-16-mobile-responsive-design.md`
 
 ---
@@ -29,11 +30,17 @@
 - 떠 있지 않다면 `npm run dev`로 새로 띄운다(포그라운드로 띄우면 이후 명령이 막히므로 백그라운드 실행 방식 사용).
 - **`npm run build`는 실행하지 않는다** — 라이브 dev 서버의 `.next`를 손상시키는 것으로 이미 확인된 바 있다.
 - 백엔드(FastAPI) 서버도 함께 떠 있어야 페이지들이 정상적으로 데이터를 렌더링한다. 백엔드 실행 방법은 저장소 루트의 `deploy/` 문서 또는 기존 dev 워크플로를 따른다.
-- 각 작업의 "검증" 스텝은 Playwright MCP 브라우저 도구(`browser_navigate`, `browser_resize`, `browser_evaluate`, `browser_take_screenshot`)를 사용한다. 가로 스크롤 여부는 다음 스크립트로 확인한다:
-  ```js
-  () => document.documentElement.scrollWidth <= window.innerWidth
-  ```
-  `true`가 나와야 통과.
+- 각 작업의 "검증" 스텝은 단순히 화면이 안 깨지는지 보는 것에서 끝내지 않는다. **정적 검증(A)**과 **실사용 워크스루(B)** 두 층위를 모두 수행한다(스펙 `docs/superpowers/specs/2026-08-16-mobile-responsive-design.md` §7 참고). 사용 도구는 Playwright MCP 브라우저 도구: `browser_navigate`, `browser_resize`, `browser_click`, `browser_select_option`, `browser_fill_form`, `browser_evaluate`, `browser_take_screenshot`, `browser_snapshot`.
+  - **(A) 정적 검증:** 가로 스크롤 여부는 다음 스크립트로 확인한다 — `true`가 나와야 통과.
+    ```js
+    () => document.documentElement.scrollWidth <= window.innerWidth
+    ```
+  - **(B) 실사용 워크스루:** 375×812(모바일)에서 `browser_click`/`browser_select_option`/`browser_fill_form` 등으로 그 작업이 만든 UI를 실제로 조작한다(버튼 탭, 드로어 열기/닫기, 필터 적용, 카드 펼치기 등 — 각 Task의 Step에 구체적 시나리오가 있다). 터치 타겟은 다음 스크립트로 실제 렌더링 높이를 재서 36px 이상인지 확인한다(예: 특정 버튼의 `data-slot="button"` 선택자를 상황에 맞게 바꿔서 사용):
+    ```js
+    () => Array.from(document.querySelectorAll('[data-slot="button"]'))
+      .map((el) => ({ text: el.textContent?.trim(), height: el.getBoundingClientRect().height }))
+    ```
+  - **문제를 발견하면 그 자리에서 해당 파일을 수정하고, 같은 조작을 다시 수행해 재확인한 뒤에 다음 Step(Commit)으로 넘어간다.** "일단 커밋하고 나중에 고친다"는 허용하지 않는다.
 
 ---
 
@@ -245,9 +252,18 @@ export default function NavTabs() {
 }
 ```
 
-- [ ] **Step 4: dev 서버에서 확인**
+- [ ] **Step 4: dev 서버에서 확인 (정적 + 실사용 워크스루)**
 
-Playwright MCP로 375×812에서 아무 페이지나 열어 상단에 페이지 제목 + 햄버거 아이콘만 보이는지 확인. 햄버거를 클릭해 드로어가 우측에서 열리는지, 7개 메뉴가 세로로 나열되는지, 항목 클릭 시 이동하고 드로어가 닫히는지 확인. 1280×800에서는 기존과 동일하게 가로 탭 바 + ThemeToggle이 보이는지(`browser_take_screenshot`으로 비교) 확인.
+Playwright MCP로 375×812에서 아무 페이지나 열어 상단에 페이지 제목 + 햄버거 아이콘만 보이는지 확인한다. 이어서 실제 조작을 수행한다:
+
+1. `browser_click`으로 햄버거 아이콘을 클릭 → 드로어가 우측에서 슬라이드인하는지, 7개 메뉴가 세로로 나열되는지 확인.
+2. 드로어가 열린 상태에서 `browser_evaluate`로 `() => document.documentElement.scrollHeight === document.documentElement.clientHeight || getComputedStyle(document.body).overflow !== 'visible'` 류의 방식이 아니라, 실제로 `browser_evaluate`로 `window.scrollY`를 기록한 뒤 드로어 뒤 배경을 스크롤 시도(`browser_evaluate`로 `window.scrollBy(0, 200)` 실행)했을 때 `window.scrollY`가 그대로인지 확인(뒤 콘텐츠가 함께 스크롤되면 버그).
+3. 메뉴 항목 하나(예: "매매일지")를 `browser_click`으로 클릭 → 해당 페이지로 이동하고 드로어가 자동으로 닫히는지 확인.
+4. 다시 드로어를 열고 이번엔 배경(backdrop) 영역을 `browser_click`으로 클릭 → 드로어가 닫히는지 확인.
+5. `browser_evaluate`의 버튼 높이 측정 스크립트로 햄버거 트리거와 드로어 안 메뉴 항목의 렌더링 높이가 36px 이상인지 확인.
+6. 문제가 있으면 `MobileNavDrawer.tsx`/`NavTabs.tsx`를 수정하고 1~5를 다시 수행한다.
+
+1280×800에서는 기존과 동일하게 가로 탭 바 + ThemeToggle이 보이고 햄버거 UI는 전혀 렌더링되지 않는지(`hidden md:flex`가 적용됐는지) `browser_take_screenshot`으로 비교 확인.
 
 - [ ] **Step 5: Commit**
 
@@ -331,9 +347,16 @@ git commit -m "feat: 모바일 상단 네비게이션을 햄버거 드로어로 
     });
 ```
 
-- [ ] **Step 4: dev 서버에서 확인**
+- [ ] **Step 4: dev 서버에서 확인 (정적 + 실사용 워크스루)**
 
-Playwright MCP로 아무 백테스트 상세 페이지(`/backtests/<runId>`)를 열고 375×812에서 차트 높이가 눈에 띄게 낮아졌는지(약 240px), 캔들/마커가 정상 렌더링되는지 확인. 1280×800에서는 기존과 동일하게 320px 높이로 보이는지 확인.
+Playwright MCP로 거래 내역이 있는 백테스트 상세 페이지(`/backtests/<runId>`)를 375×812로 열어:
+
+1. 차트 컨테이너의 `getBoundingClientRect().height`가 약 240px인지, 화면 폭을 넘지 않는지(`width <= 375`) `browser_evaluate`로 확인.
+2. `browser_click`으로 차트 캔들 영역 중앙 부근을 클릭(탭)해 크로스헤어가 나타나는지 확인하고, 크로스헤어/가격 라벨이 뷰포트 오른쪽·아래 경계 밖으로 잘리는지 `browser_evaluate`로 해당 라벨 요소의 `getBoundingClientRect().right <= window.innerWidth` 등을 확인.
+3. 캔들/매수·매도 마커가 정상 렌더링되는지 `browser_take_screenshot`으로 확인.
+4. 문제가 있으면 `PriceChart.tsx`를 수정하고 1~3을 다시 수행한다.
+
+1280×800에서는 기존과 동일하게 320px 높이로 보이는지 확인.
 
 - [ ] **Step 5: Commit**
 
@@ -543,9 +566,21 @@ const SORT_OPTIONS: { value: string; key: SortKey; dir: SortDir; label: string }
 
 (모바일 정렬 셀렉트는 테이블 바로 위, 즉 `<div className="hidden md:block">...</div>` 다음, 카드 리스트 앞에 위치)
 
-- [ ] **Step 4: dev 서버에서 확인**
+- [ ] **Step 4: dev 서버에서 확인 (정적 + 실사용 워크스루)**
 
-Playwright MCP로 `/backtests`를 375×812로 열어: (1) 카드 리스트가 보이고 테이블은 안 보이는지, (2) 체크박스 선택 후 "선택 삭제"가 동작하는지, (3) 정렬 셀렉트를 바꾸면 카드 순서가 바뀌는지, (4) "매수/매도 조건 보기"를 탭하면 펼쳐지는지, (5) 필터바(코인 필터, 체크박스들)가 줄바꿈되며 화면을 벗어나지 않는지, (6) `document.documentElement.scrollWidth <= window.innerWidth`가 `true`인지 확인. 1280×800에서는 기존과 동일한 13컬럼 테이블이 그대로 보이는지 확인.
+Playwright MCP로 `/backtests`를 375×812로 열어 실제 사용 흐름을 그대로 수행한다:
+
+1. 카드 리스트가 보이고 테이블은 안 보이는지(`browser_snapshot`) 확인.
+2. 코인 필터를 `browser_click`으로 열고 코인 하나를 선택 → 카드 목록이 필터링되는지 확인. "전체 보기"로 해제.
+3. "수익률 양수만" 체크박스를 `browser_click`으로 토글 → 목록이 줄어드는지 확인.
+4. 모바일 정렬 `<select>`를 `browser_select_option`으로 "수익률 (높은순)"으로 바꿔 카드 순서가 바뀌는지 확인.
+5. 카드 하나의 "매수/매도 조건 보기"(`<details>`)를 `browser_click`으로 탭해 펼쳐지는지, 펼친 내용이 다음 카드와 겹치지 않는지 확인.
+6. 카드 2~3개의 체크박스를 `browser_click`으로 선택 → "선택 삭제" 버튼이 활성화되는지, 클릭 시 확인 다이얼로그가 뷰포트 안에 온전히 들어오는지 확인 후 "취소"로 닫는다(실제 삭제는 하지 않는다).
+7. `browser_evaluate`로 카드 안 "보기"/"복사" 두 버튼의 `getBoundingClientRect()`를 재서 높이 36px 이상, 두 버튼 사이 간격(gap)이 8px 이상인지 확인.
+8. 필터바가 여러 줄로 자연스럽게 줄바꿈되고 어떤 요소도 화면 오른쪽 밖으로 잘리지 않는지, `document.documentElement.scrollWidth <= window.innerWidth`가 `true`인지 확인.
+9. 문제가 있으면 `BacktestRunsTable.tsx`/`BacktestRunCard.tsx`를 수정하고 관련 스텝을 다시 수행한다.
+
+1280×800에서는 기존과 동일한 13컬럼 테이블이 그대로 보이고 카드/모바일 정렬 셀렉트는 렌더링되지 않는지 확인.
 
 - [ ] **Step 5: Commit**
 
@@ -593,9 +628,21 @@ git commit -m "feat: 백테스트 결과 목록에 모바일 카드 뷰 추가"
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
 ```
 
-- [ ] **Step 3: dev 서버에서 확인**
+- [ ] **Step 3: dev 서버에서 확인 (정적 + 실사용 워크스루)**
 
-Playwright MCP로 아무 백테스트 상세 페이지를 375×812로 열어 지표 타일이 2열로, 요약 카드도 2열로 배치되고 라벨/값이 잘리지 않는지 확인. 640×800(`sm`)에서 지표 타일이 3열로 바뀌는지 확인. 1280×800에서는 기존과 동일하게 지표 6열, 요약 4열인지 확인.
+Playwright MCP로 아무 백테스트 상세 페이지를 375×812로 열어 지표 타일이 2열로, 요약 카드도 2열로 배치되는지 확인한다. 이어서 `browser_evaluate`로 각 `MetricTile`의 라벨/값 텍스트 요소가 부모 타일의 `getBoundingClientRect().width`를 넘지 않는지(즉 잘리거나 타일 밖으로 겹쳐 나오지 않는지) 확인한다:
+
+```js
+() => Array.from(document.querySelectorAll('[class*="rounded-md border p-3"]')).map((tile) => {
+  const rect = tile.getBoundingClientRect();
+  const overflowing = Array.from(tile.querySelectorAll('p, div')).some(
+    (child) => child.getBoundingClientRect().right > rect.right + 1
+  );
+  return { overflowing, width: rect.width };
+})
+```
+
+숫자가 큰 값(예: 최초 투입금/최종 금액의 "10,000,000원")이 2열 타일 폭에서 줄바꿈되며 다음 줄 라벨과 겹치지 않는지 스크린샷으로도 확인한다. 640×800(`sm`)에서 지표 타일이 3열로 바뀌는지 확인. 문제가 있으면 클래스를 조정하고 다시 확인한다. 1280×800에서는 기존과 동일하게 지표 6열, 요약 4열인지 확인.
 
 - [ ] **Step 4: Commit**
 
@@ -716,9 +763,9 @@ function TradeCard({
       )}
 ```
 
-- [ ] **Step 4: dev 서버에서 확인**
+- [ ] **Step 4: dev 서버에서 확인 (정적 + 실사용 워크스루)**
 
-Playwright MCP로 거래 내역이 있는 백테스트 상세 페이지를 375×812로 열어 카드 리스트가 보이고(진입/청산/수익률/상태), 표는 숨겨지는지 확인. 1280×800에서는 기존 8컬럼 표가 그대로 보이는지 확인.
+Playwright MCP로 거래 내역이 있는 백테스트 상세 페이지를 375×812로 열어 카드 리스트가 보이고(진입/청산/수익률/상태), 표는 숨겨지는지 확인한다. 카드가 여러 개일 때 `browser_evaluate`로 인접 카드끼리 세로로 겹치지 않는지(카드 N의 `bottom` <= 카드 N+1의 `top`) 확인하고, `browser_take_screenshot`으로 스크롤하며 배지·텍스트가 잘리지 않는지 확인한다. 문제가 있으면 수정 후 재확인한다. 1280×800에서는 기존 8컬럼 표가 그대로 보이는지 확인.
 
 - [ ] **Step 5: Commit**
 
@@ -825,9 +872,9 @@ git commit -m "feat: 백테스트 상세 거래 내역에 모바일 카드 뷰 �
           </>
 ```
 
-- [ ] **Step 3: dev 서버에서 확인**
+- [ ] **Step 3: dev 서버에서 확인 (정적 + 실사용 워크스루)**
 
-Playwright MCP로 실거래 이력이 있는 매매일지 전략 상세를 375×812에서 열어(매매일지 페이지 → 전략 카드 클릭 → 상세 펼침) 비교 카드 4개와 매매일지 카드 리스트가 보이고 표는 숨겨지는지 확인. 1280×800에서는 기존 표가 그대로 보이는지 확인.
+Playwright MCP로 375×812에서 실제 흐름을 그대로 수행한다: `/journal`을 열고, 실거래 이력이 있는 전략 카드를 `browser_click`으로 탭해 상세를 펼친다. 비교 카드 4개와 매매일지 카드 리스트가 보이고 표는 숨겨지는지 확인. 같은 카드를 다시 `browser_click`으로 탭해 상세가 접히는지 확인(`JournalPage`의 토글 동작). 비교 카드 4개가 `grid-cols-2`로 배치되며 숫자·퍼센트 텍스트가 카드 폭을 넘겨 잘리지 않는지 `browser_evaluate`로 확인. 문제가 있으면 수정 후 재확인한다. 1280×800에서는 기존 표가 그대로 보이는지 확인.
 
 - [ ] **Step 4: Commit**
 
@@ -891,9 +938,9 @@ git commit -m "feat: 매매일지 상세에 모바일 카드 뷰 추가"
         </Button>
 ```
 
-- [ ] **Step 3: dev 서버에서 확인**
+- [ ] **Step 3: dev 서버에서 확인 (정적 + 실사용 워크스루)**
 
-Playwright MCP로 `/live-strategies`, `/journal`을 375×812로 열어 버튼들이 이전보다 세로로 더 여유 있게(약 36px 높이) 보이는지 확인. 1280×800에서는 버튼 높이가 기존과 동일한지(`max-md:` 접두사이므로 `md:` 이상에서는 미적용) 확인.
+Playwright MCP로 `/live-strategies`를 375×812로 열어, 상태가 `draft`/`running`/`paused`인 전략 카드가 있다면 각각 실제로 액션 버튼(승인/일시정지/중지/재개 중 해당하는 것)을 `browser_click`으로 눌러 상태가 실제로 바뀌는지 확인한다(주의: 테스트 데이터에만 수행하고, 되돌릴 수 있는 액션인지 먼저 확인). `browser_evaluate`의 버튼 높이 측정 스크립트로 버튼 높이가 36px 이상인지, 같은 카드 안 인접 버튼 사이 간격이 8px 이상인지 확인. `/journal`에서도 새로고침 버튼을 `browser_click`으로 눌러 정상 동작하는지, 높이가 36px 이상인지 확인. 문제가 있으면 수정 후 재확인한다. 1280×800에서는 버튼 높이가 기존과 동일한지(`max-md:` 접두사이므로 `md:` 이상에서는 미적용) 확인.
 
 - [ ] **Step 4: Commit**
 
@@ -950,6 +997,8 @@ Playwright MCP로 아래 7개 URL을 각각 375×812로 열고 `document.documen
 
 발견한 수정 사항을 위 "Files" 목록의 해당 파일에 반영하고, 반영할 때마다 같은 페이지를 다시 열어 `scrollWidth <= innerWidth`가 `true`가 될 때까지 반복한다.
 
+보조 페이지라도 조작 가능한 컨트롤(루트 `/`의 조건 빌더 select/input, Grid Search 폼의 입력창 등)이 있는 화면은 375px에서 `browser_click`/`browser_fill_form`으로 최소 1회 실제로 조작해, 겹침 때문에 클릭이 안 되거나 엉뚱한 요소가 클릭되는 문제가 없는지 확인한다(전체 폼을 제출까지 할 필요는 없다 — 인터랙션이 막히지 않는지만 확인).
+
 - [ ] **Step 3: 1280×800에서 회귀 확인**
 
 수정한 파일이 있다면 해당 페이지를 1280×800으로 열어 기존과 시각적으로 동일한지 스크린샷으로 확인한다.
@@ -996,8 +1045,49 @@ git commit -m "fix: 최종 반응형 QA에서 발견한 잔여 이슈 수정"
 
 ---
 
+### Task 11: 실사용 시나리오 기반 모바일 UX 워크스루 및 개선
+
+Task 1~10이 화면별로 나눠 처리한 것과 달리, 이 작업은 **실제 사용자가 앱을 켜서 하루를 시작하는 흐름을 그대로 재현**하며 지금까지의 개별 수정으로는 드러나지 않는 문제(여러 화면을 오가는 동안의 일관성, 이전 화면의 상태가 다음 화면에 남아있는 문제, 연속 조작 시의 지연/깜빡임 등)를 찾아 고친다. Task 1~10을 모두 마친 뒤에 수행한다.
+
+**Files:**
+- 없음(코드 변경 없음, 워크스루 전용 작업). 문제 발견 시 원인 파일을 수정한다.
+
+**Interfaces:**
+- 소비: Task 1~10의 모든 결과물.
+- 생산: 없음.
+
+- [ ] **Step 1: 시나리오 A — "출근길에 스마트폰으로 어젯밤 성과 확인"**
+
+Playwright MCP로 뷰포트를 375×812로 고정하고 다음을 순서대로 실제로 수행한다(각 단계 사이에 `browser_take_screenshot`):
+
+1. `/journal` 진입 → 계좌 전체 요약 카드 3개와 equity curve 차트가 한 화면에 자연스럽게 들어오는지(차트가 잘리거나 아래로 과도하게 밀리지 않는지) 확인.
+2. 전략별 매매일지 카드 중 하나를 탭해 상세를 펼침 → 비교 카드/매매일지 카드까지 스크롤해서 확인 → 다시 탭해 접음.
+3. 햄버거 드로어를 열고 "라이브 전략"으로 이동 → 실행 중인 전략이 있으면 카드의 열린 포지션 정보(진입가/수량/손익)가 잘리지 않고 읽히는지 확인.
+4. 드로어로 "백테스트 결과"로 이동 → 코인 필터로 특정 코인만 보이게 좁힘 → 카드 하나의 "보기"를 탭해 상세로 진입.
+5. 상세 페이지에서 차트를 탭해보고, 거래 내역을 스크롤해 카드가 잘 읽히는지 확인 → 뒤로 가기(`browser_navigate_back`)로 목록에 돌아왔을 때 방금 설정한 코인 필터가 유지되는지(또는 초기화되어도 목록이 깨지지 않는지) 확인.
+
+이 시나리오 전체에서 이상한 점(깜빡임, 스크롤 위치 튐, 탭했는데 반응 없음, 텍스트 겹침 등)을 기록하고, 발견 즉시 원인 파일을 고친 뒤 해당 단계부터 다시 수행한다.
+
+- [ ] **Step 2: 시나리오 B — "실행 중인 라이브 전략을 일시정지"**
+
+같은 375×812 뷰포트에서: `/live-strategies` 진입 → `running` 상태 전략 카드에서 "일시정지"를 탭 → 버튼이 처리 중(disabled) 상태로 바뀌는 게 보이는지 → 처리 후 배지가 `paused`로 바뀌는지 → "재개"를 탭해 다시 `running`으로 되돌리는지 확인. 각 상태 전환 사이 버튼 위치가 레이아웃 시프트 없이 안정적으로 유지되는지 스크린샷으로 비교. 문제가 있으면 수정 후 재수행.
+
+- [ ] **Step 3: 발견된 이슈 정리 및 반영**
+
+Step 1~2에서 코드를 수정했다면 어떤 파일을 왜 고쳤는지 커밋 메시지에 남긴다. 수정이 없었다면(=문제 없음) 이 스텝은 생략한다.
+
+- [ ] **Step 4: Commit (수정이 있었던 경우에만)**
+
+```bash
+git add <수정한 파일들>
+git commit -m "fix: 실사용 시나리오 워크스루에서 발견한 모바일 UX 이슈 수정"
+```
+
+---
+
 ## Self-Review 결과
 
-- **스펙 커버리지:** 스펙(§1~§7)의 모든 섹션에 대응하는 작업이 있다 — §1 공통 셸→Task 2, §2 백테스트 목록→Task 4, §3 백테스트 상세→Task 3/5/6, §4 라이브전략·매매일지→Task 7/8, §5 터치타겟→Task 4/6/8 내 `max-md:min-h-9` 처리, §6 보조 페이지→Task 9, §7 테스트 방법→각 작업의 검증 스텝 + Task 10. 스펙의 "영향받는 파일" 목록도 모두 어느 작업에서 다뤄지는지 확인됨(Task 1의 `globals.css` 포함).
-- **플레이스홀더 스캔:** "TBD"/"추후"/"적절히 처리" 류의 표현 없음. Task 9의 감사 스텝은 사전에 알 수 없는 대상(런타임에 실측)이라 절차와 구체적 수정 패턴 목록, 그리고 이미 확인된 구체적 수정 1건(PortSetupForm)을 명시해 placeholder가 아니게 작성함.
+- **스펙 커버리지:** 스펙(§1~§7)의 모든 섹션에 대응하는 작업이 있다 — §1 공통 셸→Task 2, §2 백테스트 목록→Task 4, §3 백테스트 상세→Task 3/5/6, §4 라이브전략·매매일지→Task 7/8, §5 터치타겟→Task 4/6/8 내 `max-md:min-h-9` 처리, §6 보조 페이지→Task 9, §7(A) 정적 검증→각 작업의 검증 스텝 + Task 10, §7(B) 실사용 워크스루→각 작업의 검증 스텝에 추가된 조작 시나리오 + Task 11(교차 페이지 시나리오). 스펙의 "영향받는 파일" 목록도 모두 어느 작업에서 다뤄지는지 확인됨(Task 1의 `globals.css` 포함).
+- **플레이스홀더 스캔:** "TBD"/"추후"/"적절히 처리" 류의 표현 없음. Task 9의 감사 스텝은 사전에 알 수 없는 대상(런타임에 실측)이라 절차와 구체적 수정 패턴 목록, 그리고 이미 확인된 구체적 수정 1건(PortSetupForm)을 명시해 placeholder가 아니게 작성함. Task 11도 마찬가지로 사전에 어떤 버그가 나올지는 알 수 없지만, 구체적인 조작 순서(시나리오 A/B의 각 스텝)와 "발견 시 즉시 수정 후 해당 단계부터 재수행"이라는 명확한 종료 조건이 있어 placeholder가 아니다.
 - **타입/시그니처 일관성:** `BacktestRunCard` props(`run`/`marketName`/`selected`/`onToggleSelected`)가 Task 4 Step 3의 호출부와 일치. `buildCopyHref`/`MobileNavStep`/`isActive`의 import 경로가 정의 파일과 일치. `TradeCard`가 쓰는 `Trade` 타입은 Task 6 Step 1에서 import 추가함.
+- **"CSS만 고치고 끝내지 않는다" 요구사항 반영:** 사용자가 명시적으로 요구한 "단순 media query 추가로 끝내지 말 것"을 반영해, (1) 사전 준비 섹션에 정적/실사용 2단계 검증 기준을 명시하고, (2) Task 1~9 각각의 검증 스텝에 해당 화면의 실제 조작 시나리오와 터치 타겟 크기·간격 측정을 추가했으며, (3) 개별 화면 단위로는 드러나지 않는 문제를 잡기 위해 여러 화면을 오가는 실사용 시나리오 전용 Task 11을 신설했다.
