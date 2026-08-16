@@ -140,8 +140,29 @@ export default function IndicatorGuideView({ catalog }: { catalog: IndicatorCata
   const selectedItem = catalog.find((item) => item.value === selected) ?? null;
 
   return (
-    <div className="flex gap-6">
-      <nav className="sticky top-20 flex w-56 shrink-0 flex-col gap-4 self-start overflow-y-auto" style={{ maxHeight: 'calc(100vh - 6rem)' }}>
+    <div className="flex flex-col gap-4 md:flex-row md:gap-6">
+      <div className="md:hidden">
+        <select
+          className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+        >
+          {categories.map((cat) => (
+            <optgroup key={cat.label} label={cat.label}>
+              {cat.items.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+
+      <nav
+        className="sticky top-20 hidden w-56 shrink-0 flex-col gap-4 self-start overflow-y-auto md:flex"
+        style={{ maxHeight: 'calc(100vh - 6rem)' }}
+      >
         {categories.map((cat) => {
           const Icon = CATEGORY_ICON[cat.label] ?? CATEGORY_ICON['추세'];
           const dotColor = CATEGORY_DOT_COLOR[cat.label] ?? 'bg-slate-400';
