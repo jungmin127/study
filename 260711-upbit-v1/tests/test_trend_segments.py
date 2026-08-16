@@ -140,3 +140,20 @@ def test_absorb_short_segments_keeps_single_segment_untouched():
     segments = [_segment(0, 5, 100, 101, "sideways", 0, 5)]
     result = _absorb_short_segments(segments, threshold_pct=10.0)
     assert result == segments
+
+
+def test_absorb_short_segments_cascades_through_multiple_merges():
+    # 두 개의 연속된 짧은 구간(각 5일)이 순차적으로 흡수되어 최종적으로 하나로
+    # 합쳐져야 한다(1회 병합 후에도 여전히 14일 미만이면 다시 흡수).
+    segments = [
+        _segment(0, 20, 100, 130, "up", 0, 20),
+        _segment(20, 25, 130, 132, "sideways", 20, 25),
+        _segment(25, 30, 132, 134, "sideways", 25, 30),
+        _segment(30, 60, 134, 90, "down", 30, 60),
+    ]
+
+    result = _absorb_short_segments(segments, threshold_pct=10.0)
+
+    assert len(result) == 2
+    assert result[0]["start_idx"] == 0 and result[0]["end_idx"] == 20
+    assert result[1]["start_idx"] == 20 and result[1]["end_idx"] == 60
