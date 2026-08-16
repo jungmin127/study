@@ -189,7 +189,9 @@ export default function LiveStrategiesPage() {
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>이 전략을 삭제하시겠습니까?</AlertDialogTitle>
-                        <AlertDialogDescription>삭제 후에는 되돌릴 수 없습니다.</AlertDialogDescription>
+                        <AlertDialogDescription>
+                          이 전략의 거래·주문 내역과 매매일지 기록도 함께 삭제되며, 되돌릴 수 없습니다.
+                        </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel>취소</AlertDialogCancel>

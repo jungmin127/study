@@ -246,6 +246,22 @@ def test_update_backtest_metadata_returns_404_for_missing_run(monkeypatch, tmp_p
     assert resp.status_code == 404
 
 
+def test_update_backtest_metadata_returns_422_when_field_omitted(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="원래 제목", description="원래 설명",
+    )
+
+    resp = client.patch("/api/v1/backtests/r1", json={"title": "새 제목"})
+
+    assert resp.status_code == 422
+
+
 def test_refresh_backtest_returns_404_for_missing_run(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     resp = client.post("/api/v1/backtests/does-not-exist/refresh")

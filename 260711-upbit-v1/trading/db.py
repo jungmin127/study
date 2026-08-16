@@ -730,9 +730,10 @@ def list_active_strategies() -> list[dict]:
 def delete_live_strategy(live_strategy_id: str) -> bool:
     """stopped 상태의 라이브 전략을 자식 행까지 포함해 완전히 삭제한다. FK 제약
     (PRAGMA foreign_keys = ON)이 켜져 있어 부모(live_strategies)보다 자식 테이블을
-    먼저 지워야 한다. 삭제 순서: signals(orders 참조) -> orders(positions 자기참조
-    포함, 단 같은 live_strategy_id의 orders는 한 문장으로 전부 지우므로 자기참조
-    문제 없음) -> positions -> daily_performance/circuit_breaker_state -> live_strategies.
+    먼저 지워야 한다. 삭제 순서: signals(orders 참조) -> orders(position_id로 positions
+    참조 + replaces_order_id로 같은 테이블을 자기참조하지만, 해당 전략의 orders를
+    한 문장으로 전부 지우므로 자기참조로 인한 FK 위반 없음) -> positions ->
+    daily_performance/circuit_breaker_state -> live_strategies.
     manual_intervention_events는 live_strategy_id를 FK로 참조하지 않으므로 건드리지
     않는다. status가 'stopped'가 아니면(또는 id가 없으면) 아무것도 지우지 않고
     False를 반환한다."""

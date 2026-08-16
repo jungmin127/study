@@ -666,8 +666,11 @@ def delete_backtest(run_id: str) -> dict:
 
 
 class UpdateBacktestMetadataRequest(BaseModel):
-    title: str | None = None
-    description: str | None = None
+    """title/description을 모두 명시적으로 요구한다(기본값 없음) — 한쪽만 보내면
+    없는 쪽이 NULL로 조용히 덮어써지는 사고를 막기 위해, 생략 시 422를 반환하게
+    한다. 필드를 실제로 비우고 싶으면 값으로 null을 명시적으로 보내면 된다."""
+    title: str | None
+    description: str | None
 
 
 @app.patch("/api/v1/backtests/{run_id}")
@@ -676,6 +679,8 @@ def update_backtest_metadata_endpoint(run_id: str, req: UpdateBacktestMetadataRe
     if not updated:
         raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 결과를 찾을 수 없습니다")
     result = load_result(run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 결과를 찾을 수 없습니다")
     return {
         "title": result["title"],
         "description": result["description"],
