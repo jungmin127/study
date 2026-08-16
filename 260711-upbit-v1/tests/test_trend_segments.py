@@ -1,6 +1,7 @@
 import pytest
+from datetime import date, timedelta
 
-from engine.trend_segments import _legs_from_pivots, _zigzag_pivot_indices, _merge_sideways_runs, _run_to_segment
+from engine.trend_segments import _legs_from_pivots, _zigzag_pivot_indices, _merge_sideways_runs, _run_to_segment, _absorb_short_segments, _combine_segments
 
 
 def test_zigzag_pivot_indices_finds_expected_swing_points():
@@ -84,3 +85,58 @@ def test_run_to_segment_classifies_up_down_sideways_by_threshold():
     assert _run_to_segment(up_run, threshold_pct=10.0)["trend"] == "up"
     assert _run_to_segment(down_run, threshold_pct=10.0)["trend"] == "down"
     assert _run_to_segment(sideways_run, threshold_pct=10.0)["trend"] == "sideways"
+
+
+def _segment(start_day, end_day, start_price, end_price, trend, start_idx=0, end_idx=1):
+    return {
+        "start_idx": start_idx, "end_idx": end_idx,
+        "start_date": date(2026, 1, 1) + timedelta(days=start_day),
+        "end_date": date(2026, 1, 1) + timedelta(days=end_day),
+        "start_price": start_price, "end_price": end_price,
+        "return_pct": (end_price - start_price) / start_price * 100,
+        "trend": trend,
+    }
+
+
+def test_combine_segments_recomputes_trend_over_full_range():
+    a = _segment(0, 5, 100, 130, "up", start_idx=0, end_idx=5)      # 5일, 30%
+    b = _segment(5, 8, 130, 133, "sideways", start_idx=5, end_idx=8)  # 3일, ~2.3%
+
+    combined = _combine_segments(a, b, threshold_pct=10.0)
+
+    assert combined["start_idx"] == 0 and combined["end_idx"] == 8
+    assert combined["trend"] == "up"
+    assert combined["return_pct"] == pytest.approx(33.0)
+
+
+def test_absorb_short_segments_merges_into_following_neighbor():
+    # 가운데 구간(3일)이 MIN_SEGMENT_DAYS(14) 미만 → 다음 구간에 흡수되어야 한다.
+    segments = [
+        _segment(0, 20, 100, 130, "up", 0, 20),
+        _segment(20, 23, 130, 132, "sideways", 20, 23),
+        _segment(23, 50, 132, 90, "down", 23, 50),
+    ]
+
+    result = _absorb_short_segments(segments, threshold_pct=10.0)
+
+    assert len(result) == 2
+    assert result[0]["end_idx"] == 20
+    assert result[1]["start_idx"] == 20 and result[1]["end_idx"] == 50
+
+
+def test_absorb_short_segments_merges_last_into_previous():
+    segments = [
+        _segment(0, 20, 100, 130, "up", 0, 20),
+        _segment(20, 25, 130, 132, "sideways", 20, 25),  # 5일, 마지막 구간
+    ]
+
+    result = _absorb_short_segments(segments, threshold_pct=10.0)
+
+    assert len(result) == 1
+    assert result[0]["start_idx"] == 0 and result[0]["end_idx"] == 25
+
+
+def test_absorb_short_segments_keeps_single_segment_untouched():
+    segments = [_segment(0, 5, 100, 101, "sideways", 0, 5)]
+    result = _absorb_short_segments(segments, threshold_pct=10.0)
+    assert result == segments

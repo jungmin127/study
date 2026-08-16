@@ -122,3 +122,39 @@ def _run_to_segment(run: list[dict], threshold_pct: float) -> dict:
         "start_price": start_price, "end_price": end_price,
         "return_pct": return_pct, "trend": _classify_return(return_pct, threshold_pct),
     }
+
+
+MIN_SEGMENT_DAYS = 14
+
+
+def _combine_segments(a: dict, b: dict, threshold_pct: float) -> dict:
+    first, second = (a, b) if a["start_idx"] <= b["start_idx"] else (b, a)
+    start_price = first["start_price"]
+    end_price = second["end_price"]
+    return_pct = (end_price - start_price) / start_price * 100
+    return {
+        "start_idx": first["start_idx"], "end_idx": second["end_idx"],
+        "start_date": first["start_date"], "end_date": second["end_date"],
+        "start_price": start_price, "end_price": end_price,
+        "return_pct": return_pct, "trend": _classify_return(return_pct, threshold_pct),
+    }
+
+
+def _absorb_short_segments(segments: list[dict], threshold_pct: float) -> list[dict]:
+    """MIN_SEGMENT_DAYS 미만인 구간을 이웃 구간에 흡수한다(다음 구간 우선, 마지막
+    구간이면 이전 구간). 흡수로 합쳐진 구간이 다시 짧으면 재귀적으로 계속 흡수된다."""
+    segments = list(segments)
+    changed = True
+    while changed and len(segments) > 1:
+        changed = False
+        for i, seg in enumerate(segments):
+            days = (seg["end_date"] - seg["start_date"]).days
+            if days >= MIN_SEGMENT_DAYS:
+                continue
+            neighbor_i = i + 1 if i < len(segments) - 1 else i - 1
+            lo, hi = sorted((i, neighbor_i))
+            merged = _combine_segments(segments[lo], segments[hi], threshold_pct)
+            segments = segments[:lo] + [merged] + segments[hi + 1:]
+            changed = True
+            break
+    return segments
