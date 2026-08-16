@@ -1,6 +1,6 @@
 'use client';
 
-import type { JournalStrategyDetail } from '@/lib/types/journal';
+import type { JournalMarketDetail } from '@/lib/types/journal';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -26,10 +26,10 @@ function fmtCloseReason(reason: string): string {
   return CLOSE_REASON_LABELS[reason] ?? reason;
 }
 
-export default function JournalStrategyDetailView({
+export default function JournalMarketDetailView({
   detail,
 }: {
-  detail: JournalStrategyDetail;
+  detail: JournalMarketDetail;
 }) {
   const comparison = detail.backtest_comparison;
 

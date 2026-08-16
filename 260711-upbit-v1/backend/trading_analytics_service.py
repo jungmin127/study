@@ -162,38 +162,96 @@ def _backtest_comparison(strategy: dict, m: dict) -> dict | None:
     }
 
 
-def get_strategy_journal(strategy_id: str) -> dict | None:
-    strategy = trading_db.get_live_strategy(strategy_id)
-    if strategy is None or strategy["approved_at"] is None:
+def _market_metrics(strategies: list[dict]) -> dict:
+    """여러 live_strategy 행(같은 market, 서로 다른 timeframe·세대 포함)을 하나로 합친
+    지표. 코인 단위 매매일지(달력/라인차트 포함)를 위해 _strategy_metrics를 전략별로
+    구해 날짜별 realized_pnl을 합산한 뒤, baseline부터 날짜순으로 누적하며 그날의
+    수익률(%)까지 함께 계산한다 — daily_performance에 이미 저장된 realized_pnl_pct는
+    전략 단위 기준이라 코인 합산 관점에서는 재계산이 필요하다."""
+    total_baseline = 0.0
+    all_closed: list[dict] = []
+    pnl_by_date: dict[str, float] = {}
+    for strategy in strategies:
+        m = _strategy_metrics(strategy)
+        total_baseline += m["baseline"]
+        all_closed.extend(m["closed_positions"])
+        for row in m["daily_rows"]:
+            pnl_by_date[row["trading_date"]] = pnl_by_date.get(row["trading_date"], 0.0) + row["realized_pnl"]
+
+    daily: list[dict] = []
+    running = total_baseline
+    for trading_date in sorted(pnl_by_date):
+        day_pnl = pnl_by_date[trading_date]
+        day_pct = (day_pnl / running * 100.0) if running else 0.0
+        running += day_pnl
+        daily.append({
+            "trading_date": trading_date,
+            "pnl": round(day_pnl, 4),
+            "pnl_pct": round(day_pct, 4),
+            "cumulative": round(running, 4),
+        })
+
+    cumulative_pnl = sum(p["realized_pnl"] for p in all_closed)
+    cumulative_pnl_pct = (cumulative_pnl / total_baseline * 100.0) if total_baseline else 0.0
+    mdd_series = [total_baseline] + [d["cumulative"] for d in daily]
+
+    return {
+        "closed_positions": all_closed,
+        "cumulative_pnl": cumulative_pnl,
+        "cumulative_pnl_pct": cumulative_pnl_pct,
+        "mdd_pct": _mdd_pct(mdd_series),
+        "win_rate_pct": _win_rate_pct(all_closed),
+        "daily": daily,
+    }
+
+
+def get_market_journal(market: str) -> dict | None:
+    """이 마켓(코인)에 대해 지금까지 만들어진 모든 승인된 live_strategy(타임프레임·
+    중지 후 재시작한 세대 전부 포함)를 하나로 합쳐 보여준다 — 개별 전략 단위 화면은
+    없고 코인 단위가 유일한 조회 단위다(사용자 결정: 코인만으로 합침)."""
+    strategies = [
+        s for s in trading_db.list_live_strategies()
+        if s["market"] == market and s["approved_at"] is not None
+    ]
+    if not strategies:
         return None
 
-    m = _strategy_metrics(strategy)
-    orders = trading_db.list_orders_for_strategy(strategy_id)
+    m = _market_metrics(strategies)
+
+    orders: list[dict] = []
+    for strategy in strategies:
+        orders.extend(trading_db.list_orders_for_strategy(strategy["id"]))
     slippages = [o["slippage_pct"] for o in orders if o["slippage_pct"] is not None]
     avg_slippage_pct = round(sum(slippages) / len(slippages), 4) if slippages else None
     max_slippage_pct = round(max(slippages, key=abs), 4) if slippages else None
 
-    trade_log = [
-        {
-            "position_id": p["id"],
-            "entry_time": p["entry_time"],
-            "entry_price": p["entry_price"],
-            "entry_qty": p["entry_qty"],
-            "exit_time": p["exit_time"],
-            "exit_price": p["exit_price"],
-            "exit_qty": p["exit_qty"],
-            "realized_pnl": p["realized_pnl"],
-            "realized_pnl_pct": p["realized_pnl_pct"],
-            "close_reason": p["close_reason"],
-        }
-        for p in m["closed_positions"]
-    ]
+    trade_log = sorted(
+        (
+            {
+                "position_id": p["id"],
+                "entry_time": p["entry_time"],
+                "entry_price": p["entry_price"],
+                "entry_qty": p["entry_qty"],
+                "exit_time": p["exit_time"],
+                "exit_price": p["exit_price"],
+                "exit_qty": p["exit_qty"],
+                "realized_pnl": p["realized_pnl"],
+                "realized_pnl_pct": p["realized_pnl_pct"],
+                "close_reason": p["close_reason"],
+            }
+            for p in m["closed_positions"]
+        ),
+        key=lambda t: t["entry_time"],
+    )
+
+    # list_live_strategies()는 created_at DESC라 strategies[0]가 가장 최근 세대 —
+    # 백테스트 비교는 "지금 쓰는 전략"과 비교하는 게 의미 있으므로 그 기준을 쓴다.
+    latest_strategy = strategies[0]
 
     return {
-        "id": strategy["id"],
-        "market": strategy["market"],
-        "timeframe": strategy["timeframe"],
-        "status": strategy["status"],
+        "market": market,
+        "timeframes": sorted({s["timeframe"] for s in strategies}),
+        "statuses": sorted({s["status"] for s in strategies}),
         "cumulative_pnl": round(m["cumulative_pnl"], 4),
         "cumulative_pnl_pct": round(m["cumulative_pnl_pct"], 4),
         "mdd_pct": round(m["mdd_pct"], 4),
@@ -201,6 +259,7 @@ def get_strategy_journal(strategy_id: str) -> dict | None:
         "avg_slippage_pct": avg_slippage_pct,
         "max_slippage_pct": max_slippage_pct,
         "trade_count": len(m["closed_positions"]),
-        "backtest_comparison": _backtest_comparison(strategy, m),
+        "backtest_comparison": _backtest_comparison(latest_strategy, m),
         "trade_log": trade_log,
+        "daily": m["daily"],
     }

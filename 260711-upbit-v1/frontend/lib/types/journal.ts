@@ -50,11 +50,17 @@ export interface JournalBacktestComparison {
   sample_size_warning: boolean;
 }
 
-export interface JournalStrategyDetail {
-  id: string;
+export interface JournalDailyCell {
+  trading_date: string;
+  pnl: number;
+  pnl_pct: number;
+  cumulative: number;
+}
+
+export interface JournalMarketDetail {
   market: string;
-  timeframe: string;
-  status: LiveStrategyStatus;
+  timeframes: string[];
+  statuses: LiveStrategyStatus[];
   cumulative_pnl: number;
   cumulative_pnl_pct: number;
   mdd_pct: number;
@@ -64,4 +70,5 @@ export interface JournalStrategyDetail {
   trade_count: number;
   backtest_comparison: JournalBacktestComparison | null;
   trade_log: JournalTradeLogEntry[];
+  daily: JournalDailyCell[];
 }

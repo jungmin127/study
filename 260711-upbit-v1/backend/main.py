@@ -68,7 +68,7 @@ from backend.grid_search_service import (
 import httpx
 
 import trading.db as trading_db
-from backend.trading_analytics_service import get_journal_summary, get_strategy_journal
+from backend.trading_analytics_service import get_journal_summary, get_market_journal
 import trading.position_manager as position_manager
 import trading.upbit_client as upbit_client
 from trading.upbit_client import UpbitCredentialsError, UpbitRateLimitError
@@ -1274,9 +1274,9 @@ def get_journal_summary_endpoint() -> dict:
     return get_journal_summary()
 
 
-@app.get("/api/v1/journal/strategies/{strategy_id}")
-def get_journal_strategy_endpoint(strategy_id: str) -> dict:
-    detail = get_strategy_journal(strategy_id)
+@app.get("/api/v1/journal/markets/{market}")
+def get_journal_market_endpoint(market: str) -> dict:
+    detail = get_market_journal(market)
     if detail is None:
-        raise HTTPException(status_code=404, detail="실거래 이력이 없는 전략입니다")
+        raise HTTPException(status_code=404, detail="실거래 이력이 없는 코인입니다")
     return detail

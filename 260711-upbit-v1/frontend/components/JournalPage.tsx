@@ -1,17 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { ApiError } from '@/lib/api/client';
-import { getJournalStrategyDetail, getJournalSummary } from '@/lib/api/journal';
-import type { JournalStrategyDetail, JournalSummary } from '@/lib/types/journal';
-import { Badge } from '@/components/ui/badge';
+import { getJournalSummary, getMarketJournal } from '@/lib/api/journal';
+import type { JournalMarketDetail, JournalSummary } from '@/lib/types/journal';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatTimeframe } from '@/lib/format';
-import JournalStrategyDetailView from '@/components/JournalStrategyDetail';
+import JournalCalendar from '@/components/JournalCalendar';
+import JournalMarketDetailView from '@/components/JournalMarketDetail';
 
 function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
@@ -25,12 +25,12 @@ export default function JournalPage() {
   const [summary, setSummary] = useState<JournalSummary | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<JournalStrategyDetail | null>(null);
+  const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
+  const [detail, setDetail] = useState<JournalMarketDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refreshSummary = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getJournalSummary();
@@ -44,27 +44,41 @@ export default function JournalPage() {
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    refreshSummary();
+  }, [refreshSummary]);
 
-  async function selectStrategy(id: string) {
-    if (selectedId === id) {
-      setSelectedId(null);
-      setDetail(null);
-      return;
+  const markets = useMemo(() => {
+    if (!summary) return [];
+    return Array.from(new Set(summary.strategies.map((s) => s.market))).sort();
+  }, [summary]);
+
+  useEffect(() => {
+    if (selectedMarket === null && markets.length > 0) {
+      setSelectedMarket(markets[0]);
     }
-    setSelectedId(id);
-    setDetail(null);
+  }, [markets, selectedMarket]);
+
+  const loadDetail = useCallback(async (market: string) => {
     setDetailError(null);
     setDetailLoading(true);
     try {
-      const data = await getJournalStrategyDetail(id);
+      const data = await getMarketJournal(market);
       setDetail(data);
     } catch (err) {
-      setDetailError(err instanceof ApiError ? err.message : '전략 상세를 불러오지 못했습니다.');
+      setDetail(null);
+      setDetailError(err instanceof ApiError ? err.message : '코인별 매매일지를 불러오지 못했습니다.');
     } finally {
       setDetailLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (selectedMarket) loadDetail(selectedMarket);
+  }, [selectedMarket, loadDetail]);
+
+  async function refreshAll() {
+    await refreshSummary();
+    if (selectedMarket) await loadDetail(selectedMarket);
   }
 
   if (loadError) return <p className="text-sm text-destructive">{loadError}</p>;
@@ -74,7 +88,7 @@ export default function JournalPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold">계좌 전체 요약</h2>
-        <Button size="sm" variant="outline" className="max-md:min-h-9" disabled={loading} onClick={refresh}>
+        <Button size="sm" variant="outline" className="max-md:min-h-9" disabled={loading} onClick={refreshAll}>
           새로고침
         </Button>
       </div>
@@ -132,37 +146,54 @@ export default function JournalPage() {
             </ResponsiveContainer>
           )}
 
-          <h2 className="text-base font-semibold">전략별 매매일지</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {summary.strategies.map((s) => (
-              <Card
-                key={s.id}
-                className={`cursor-pointer ${selectedId === s.id ? 'border-primary' : ''}`}
-                onClick={() => selectStrategy(s.id)}
-              >
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span>
-                      {s.market} · {formatTimeframe(s.timeframe)}
-                    </span>
-                    <Badge variant="secondary">{s.status}</Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-1 text-sm">
-                  <p>
-                    누적손익: {fmtKrw(s.cumulative_pnl)} ({fmtPct(s.cumulative_pnl_pct)})
-                  </p>
-                  <p>거래횟수: {s.trade_count}건</p>
-                </CardContent>
-              </Card>
-            ))}
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold">코인별 매매일지</h2>
+            <select
+              className="rounded-md border bg-background px-3 py-2 text-sm max-md:min-h-9"
+              value={selectedMarket ?? ''}
+              onChange={(e) => setSelectedMarket(e.target.value)}
+            >
+              {markets.map((market) => (
+                <option key={market} value={market}>
+                  {market}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {selectedId && (
-            <div>
-              {detailLoading && <p className="text-sm text-muted-foreground">불러오는 중...</p>}
-              {detailError && <p className="text-sm text-destructive">{detailError}</p>}
-              {detail && <JournalStrategyDetailView detail={detail} />}
+          {detailLoading && <p className="text-sm text-muted-foreground">불러오는 중...</p>}
+          {detailError && <p className="text-sm text-destructive">{detailError}</p>}
+          {detail && (
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                {detail.timeframes.map(formatTimeframe).join(', ')} · {detail.statuses.join(', ')}
+              </p>
+
+              <JournalCalendar daily={detail.daily} />
+
+              {detail.daily.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  아직 청산된 거래가 없어 그래프를 표시할 수 없습니다.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={240}>
+                  <LineChart data={detail.daily}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="trading_date" tick={{ fontSize: 11 }} />
+                    <YAxis dataKey="cumulative" tick={{ fontSize: 11 }} />
+                    <Tooltip />
+                    <Line
+                      type="monotone"
+                      dataKey="cumulative"
+                      stroke="var(--color-primary)"
+                      name={`${detail.market} 누적자산`}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+
+              <JournalMarketDetailView detail={detail} />
             </div>
           )}
         </>

@@ -84,18 +84,18 @@ def test_journal_summary_known_limitation_resolved_after_strategy_stops(monkeypa
     assert last_point["value"] == 150_000.0 + 1000.0  # s1의 과거 이익이 그대로 남아있어야 함
 
 
-def test_strategy_journal_returns_none_for_missing_strategy(monkeypatch, tmp_path):
+def test_market_journal_returns_none_for_missing_market(monkeypatch, tmp_path):
     _fresh(monkeypatch, tmp_path)
-    assert svc.get_strategy_journal("does-not-exist") is None
+    assert svc.get_market_journal("KRW-DOGE") is None
 
 
-def test_strategy_journal_returns_none_for_unapproved_draft(monkeypatch, tmp_path):
+def test_market_journal_returns_none_when_only_unapproved_draft(monkeypatch, tmp_path):
     db = _fresh(monkeypatch, tmp_path)
-    strategy_id = insert_live_strategy(db, status="draft")
-    assert svc.get_strategy_journal(strategy_id) is None
+    insert_live_strategy(db, status="draft", market="KRW-DOGE")
+    assert svc.get_market_journal("KRW-DOGE") is None
 
 
-def test_strategy_journal_includes_trade_log_and_metrics(monkeypatch, tmp_path):
+def test_market_journal_includes_trade_log_and_metrics(monkeypatch, tmp_path):
     db = _fresh(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db, status="draft", market="KRW-DOGE")
     _approve(db, strategy_id, 100_000.0)
@@ -109,9 +109,10 @@ def test_strategy_journal_includes_trade_log_and_metrics(monkeypatch, tmp_path):
     )
     db.update_order_filled(order_id, "uuid-1", 300.06, 300.0, 30.0, 0.02, "done")
 
-    detail = svc.get_strategy_journal(strategy_id)
+    detail = svc.get_market_journal("KRW-DOGE")
 
-    assert detail["id"] == strategy_id
+    assert detail["market"] == "KRW-DOGE"
+    assert detail["timeframes"] == ["minutes60"]
     assert detail["trade_count"] == 1
     assert detail["win_rate_pct"] == 100.0
     assert detail["avg_slippage_pct"] == 0.02
@@ -119,9 +120,40 @@ def test_strategy_journal_includes_trade_log_and_metrics(monkeypatch, tmp_path):
     assert len(detail["trade_log"]) == 1
     assert detail["trade_log"][0]["close_reason"] == "sell_signal"
     assert detail["backtest_comparison"] is None  # source_run_id 없음
+    assert detail["daily"] == [
+        {"trading_date": "2026-08-14", "pnl": 1053.0, "pnl_pct": 1.053, "cumulative": 101_053.0},
+    ]
 
 
-def test_strategy_journal_backtest_comparison_present_with_source_run(monkeypatch, tmp_path):
+def test_market_journal_merges_stopped_and_restarted_strategies_for_same_market(monkeypatch, tmp_path):
+    """사용자 결정 — 같은 코인은 타임프레임이 달라도, 중지 후 재시작한 세대여도 전부
+    하나로 합친다(전략 단위 상세 화면은 없앰)."""
+    db = _fresh(monkeypatch, tmp_path)
+    s1 = insert_live_strategy(db, status="draft", market="KRW-DOGE", timeframe="minutes60")
+    _approve(db, s1, 100_000.0)
+    p1 = db.insert_position(s1, "KRW-DOGE", 300.0, 300.0)
+    db.close_position_row(p1, 303.51, 300.0, 1053.0, 1.17, "sell_signal")
+    db.upsert_daily_performance(s1, "2026-08-10", 1053.0, 1.17, 1, 1, 0, 100_000.0, 101_053.0)
+    db.stop_live_strategy_if_no_open_position(s1)
+
+    s2 = insert_live_strategy(db, status="draft", market="KRW-DOGE", timeframe="minutes240")
+    _approve(db, s2, 50_000.0)
+    p2 = db.insert_position(s2, "KRW-DOGE", 310.0, 160.0)
+    db.close_position_row(p2, 300.0, 160.0, -1600.0, -3.23, "stop_loss")
+    db.upsert_daily_performance(s2, "2026-08-11", -1600.0, -3.2, 1, 0, 1, 50_000.0, 48_400.0)
+
+    detail = svc.get_market_journal("KRW-DOGE")
+
+    assert detail["timeframes"] == ["minutes240", "minutes60"]
+    assert detail["trade_count"] == 2
+    assert detail["win_rate_pct"] == 50.0
+    assert [d["trading_date"] for d in detail["daily"]] == ["2026-08-10", "2026-08-11"]
+    # 8/10: 원금합(150,000) 기준 +1053 = +0.702%, 8/11: 누적(151,053) 기준 -1600 = 약 -1.0592%
+    assert detail["daily"][0]["pnl_pct"] == 0.702
+    assert round(detail["daily"][1]["pnl_pct"], 4) == -1.0592
+
+
+def test_market_journal_backtest_comparison_present_with_source_run(monkeypatch, tmp_path):
     db = _fresh(monkeypatch, tmp_path)
     from engine.cache import save_result
     from datetime import datetime, timezone
@@ -158,7 +190,7 @@ def test_strategy_journal_backtest_comparison_present_with_source_run(monkeypatc
     position_id = db.insert_position(strategy_id, "KRW-DOGE", 300.0, 300.0)
     db.close_position_row(position_id, 303.51, 300.0, 1053.0, 1.17, "sell_signal")
 
-    detail = svc.get_strategy_journal(strategy_id)
+    detail = svc.get_market_journal("KRW-DOGE")
 
     comparison = detail["backtest_comparison"]
     assert comparison is not None
