@@ -1,0 +1,98 @@
+# 모바일 반응형(Responsive) 개선 설계
+
+- 날짜: 2026-08-16
+- 배경: AWS 서버(`http://upbit-server.tailb1c1e9.ts.net:3000`)를 PC와 모바일에서 함께 접속해 상황을 확인 중. PC 화면은 문제없지만 모바일 UI/UX가 심각하게 어긋남. AWS 서버에서는 Grid Search를 거의 실행하지 않으므로, 모바일에서는 **백테스트 결과 · 라이브 전략 · 매매일지**를 주로 보게 될 것으로 예상.
+
+## 목표
+
+- 기존 기능·데이터 처리·API·비즈니스 로직은 변경하지 않는다.
+- PC 레이아웃은 지금과 동일하게 유지한다.
+- 모바일(세로 화면 기준)에서 가로 스크롤(페이지 전체 horizontal overflow)이 발생하지 않는다.
+- 모바일 우선 사용 페이지(백테스트 결과 목록/상세, 라이브 전략, 매매일지)는 카드형 UI 등으로 실제로 편하게 쓸 수 있게 재구성한다.
+- 그 외 페이지(Grid Search, 세그먼트, 히트맵, 지표 가이드, 랭킹, 모델 정확도, 루트 `/` 백테스트 설정)는 "깨지지 않는" 수준까지만 손본다.
+
+## 비목표
+
+- 새 디자인 시스템 도입, 새 UI 라이브러리 추가.
+- PC 레이아웃 변경.
+- 백엔드/데이터/비즈니스 로직 변경.
+- 보조 페이지(Grid Search 등)의 카드형 재구성 — 가로 스크롤 방지 수준만 다룬다.
+
+## 기술 접근
+
+Tailwind CSS(v4) 반응형 유틸리티 클래스만으로 처리한다. 두 가지 안을 검토했다.
+
+- **채택: Tailwind 반응형 유틸리티 + 이중 마크업.** 기존 클래스를 breakpoint 접두사(`sm:` 640px / `md:` 768px / `lg:` 1024px)로 감싸 "접두사 없는 기본값 = 모바일, `md:` 이상 = 지금의 PC 레이아웃"으로 재구성한다. 구조 자체가 달라지는 곳(네비게이션, 테이블→카드)은 두 마크업을 함께 서버에서 렌더링하고 `hidden md:block` / `block md:hidden`으로 전환한다. 이미 프로젝트가 쓰는 패턴(`JournalPage`, `LiveStrategiesPage`의 `sm:grid-cols-2` 등)의 확장이며, 새 의존성이 없고 SSR 시 양쪽 마크업이 모두 렌더링되므로 hydration 불일치나 깜빡임이 없다.
+- **기각: JS 미디어쿼리 훅으로 모바일 여부 판단 후 조건부 렌더링.** 서버는 뷰포트를 모르므로 초기 렌더 시 깜빡임/hydration 경고 위험이 있고, 순수 CSS로 충분한 문제에 상태 관리를 추가하는 것이라 불필요하게 복잡하다.
+
+## 설계 상세
+
+### 1. 공통 셸 — `app/layout.tsx`, `components/NavTabs.tsx`
+
+- `NavTabs`: `md:` 이상은 현재와 동일한 가로 탭 바(7개 탭 + ThemeToggle)를 그대로 유지.
+  `md:` 미만에서는 좌측에 현재 페이지 제목, 우측에 햄버거 아이콘 버튼만 보이는 얇은 헤더로 전환. 버튼을 누르면 드로어(패널)가 열리고 7개 메뉴 항목이 세로 리스트로 나열되며, 항목을 탭하면 해당 페이지로 이동하고 드로어가 자동으로 닫힌다. `ThemeToggle`은 드로어 안에 포함시킨다.
+  드로어는 `components/ui/dialog.tsx` 또는 base-ui의 별도 프리미티브(예: Drawer/Sheet 성격의 컴포넌트)를 활용하되, 프로젝트에 이미 있는 `Dialog` 패턴(`DialogPortal`/`DialogOverlay`/`DialogPrimitive.Popup`)을 재사용해 새 라이브러리를 추가하지 않는다. 구현 단계에서 base-ui에 Sheet/Drawer 전용 프리미티브가 있는지 확인 후, 없으면 `Dialog`를 좌우 슬라이드 형태로 스타일링해 재사용한다.
+- `<main className="p-6">` → `className="p-3 sm:p-4 md:p-6"`로 좁은 화면에서 여백을 축소.
+- `<html>`/`<body>`에 `overflow-x-hidden` 안전망을 추가해, 개별 요소가 실수로 넘치더라도 페이지 자체는 가로 스크롤되지 않도록 한다.
+
+### 2. 백테스트 결과 목록 — `components/BacktestRunsTable.tsx`
+
+- `md:` 이상: 지금의 13컬럼 테이블(`Table`/`TableHeader`/`TableBody`) 그대로 유지.
+- `md:` 미만: 같은 데이터를 카드 리스트로 렌더링한다.
+  - 카드 1개 = 러닝(run) 1건.
+  - 카드 상단: 제목(없으면 "(제목 없음)") · 코인/봉타입 · 기간.
+  - 강조 영역: 수익률(색상 유지), MDD, 상태 배지(보유중/청산).
+  - 매수/매도 전략 요약(`summarizeGroup`)은 하단에 작게 표시하거나 탭하면 펼쳐지는 접기 영역으로 배치(기본 접힘).
+  - 하단: "보기"/"복사" 버튼을 나란히 배치.
+  - 체크박스 선택(개별/전체) 및 "선택 삭제"는 카드 상단 좌측에 체크박스, 목록 위 액션바에 "선택 삭제" 버튼을 유지.
+- 필터바(코인 필터, 수익만/손실만/청산/보유중 체크박스, 전체 보기)는 `flex-wrap`이 이미 있으므로 좁은 화면에서 자연스럽게 줄바꿈되도록 gap/padding만 조정.
+- 정렬(현재 테이블 헤더 클릭 방식)은 모바일 카드 뷰에서 상단의 별도 `<select>` 드롭다운(정렬 기준 + asc/desc)으로 대체.
+- `filterRuns`/`sortRuns`/선택 상태 관리 등 기존 로직은 그대로 재사용하고, 렌더링 부분만 `md:` 기준으로 테이블/카드 두 갈래로 분기한다. 로직 중복 없음.
+
+### 3. 백테스트 상세 페이지 — `app/backtests/[runId]/page.tsx`
+
+- 상단 액션 영역(기간 표시, 새로고침, 실전투입 버튼): `flex-wrap`을 유지하되, 모바일에서 버튼이 `flex-1`을 갖도록 해 자연스럽게 줄바꿈되게 한다.
+- 요약 카드(총수익률 큰 타일 + MDD/총거래/투입금/최종금액 4열 `MetricTile`): PC `grid-cols-4` → 모바일 `grid-cols-2`.
+- `MetricsGrid`(12개 지표 타일, PC `grid-cols-6`): 모바일 `grid-cols-2` → `sm:grid-cols-3` → `md:grid-cols-6`로 단계적으로 확장.
+- `PriceChart`: 이미 `containerRef.current.clientWidth` 기반이라 폭 대응은 되어 있음. 높이(현재 고정 320px)만 모바일에서 축소(예: 240px)하고 좌우 여백 없이 꽉 차게 배치.
+- 거래 내역 표(8컬럼): 목록 페이지와 동일한 패턴으로, `md:` 미만에서 카드 리스트로 전환(진입 시각/가격, 청산 시각/가격, 수익률, 보유기간, 상태 배지를 카드 안에 배치).
+
+### 4. 라이브 전략 / 매매일지 페이지
+
+- `LiveStrategiesPage`, `JournalPage`: 이미 `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` 카드 그리드이므로 구조 변경은 불필요. 카드 내부 버튼 줄바꿈(`flex-wrap gap-2`)도 이미 있음 — 폰트 크기·패딩만 모바일에서 축소.
+- `JournalStrategyDetailView`의 "백테스트 vs 실매매" 비교 표(4컬럼)와 매매일지 표(4컬럼)도 §2/§3과 동일한 패턴으로 `md:` 미만에서 카드 리스트로 전환.
+- 요약 지표 그리드(`grid-cols-2 sm:grid-cols-4`)는 이미 반응형이므로 유지.
+
+### 5. 터치 타겟 & 타이포그래피
+
+- 버튼: 기존 `size="sm"`(h-7)/`default`(h-8) 체계는 유지하되, 모바일에서 자주 탭하는 액션 버튼(승인/중지/일시정지, 카드의 "보기"/"복사" 등)은 모바일 한정으로 `min-h-9`~`min-h-10`(36~40px) 정도로 높이고 버튼 사이 `gap`을 늘려 오탭을 방지한다.
+- 체크박스: 모바일에서 클릭 가능한 패딩 영역을 확장(예: 감싸는 `label`/`div`에 `p-1.5` 추가).
+- 본문 폰트: 사용자 확인대로 모바일에서 지금보다 작아도 무방하므로 `text-sm`/`text-xs` 위주를 유지한다. 다만 좁은 화면에서 줄바꿈 시 텍스트가 겹치지 않도록 `line-height`를 `leading-relaxed` 수준으로 살짝 넉넉하게 조정한다.
+
+### 6. 나머지 페이지(안 깨짐 수준만)
+
+대상: `app/grid-search`, `app/analysis`, `app/heatmap`, `app/guide`, `app/ranking`, `app/model-accuracy`, `app/page.tsx`(루트, `PortSetupForm`).
+
+- 카드/테이블 재구성 없이, 고정 `width`나 `grid-cols-N` 등으로 인해 375px 화면을 벗어나는 요소만 최소 수정한다(예: `max-w-full`, `flex-wrap`, 좁은 화면 전용 열 수 축소).
+- 이번 스펙에서 컴포넌트별로 항목을 미리 나열하지 않고, 구현 단계에서 각 페이지를 375px/768px로 실측하며 실제로 넘치는 요소만 대응한다.
+
+### 7. 테스트 방법
+
+- 브라우저 devtools 반응형 모드로 375px(모바일 세로) / 768px(태블릿) / 1280px(PC) 세 구간에서 확인.
+- 우선순위: 네비게이션 드로어, 백테스트 결과 목록/상세, 라이브 전략, 매매일지 페이지를 스크린샷으로 검증.
+- 각 페이지에서 `document.documentElement.scrollWidth > window.innerWidth` 여부로 가로 스크롤 발생 여부 확인.
+- PC 1280px 화면에서 변경 전/후 시각적으로 동일한지 비교(레이아웃 diff 없음 확인).
+- 보조 페이지(§6 대상)는 375px에서 가로 스크롤만 없는지 확인.
+
+## 영향받는 파일(예상)
+
+- `frontend/app/layout.tsx`
+- `frontend/components/NavTabs.tsx` (+ 필요 시 신규 `MobileNavDrawer.tsx` 또는 내부 분기)
+- `frontend/components/BacktestRunsTable.tsx` (+ 필요 시 신규 `BacktestRunCard.tsx`)
+- `frontend/app/backtests/[runId]/page.tsx`
+- `frontend/components/MetricTile.tsx` (그리드 클래스 조정 지점만)
+- `frontend/components/PriceChart.tsx` (높이 조정)
+- `frontend/components/JournalStrategyDetail.tsx`
+- `frontend/components/LiveStrategiesPage.tsx`, `frontend/components/JournalPage.tsx` (경미한 조정)
+- `frontend/app/globals.css` (`overflow-x-hidden` 등)
+- 보조 페이지 각각(§6) — 실측 후 필요한 곳만
