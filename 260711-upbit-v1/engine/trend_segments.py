@@ -7,7 +7,13 @@ docs/superpowers/specs/2026-08-16-trend-segment-analysis-design.md
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pandas as pd
+
+from engine.cache import list_trend_segments, save_trend_segments
+from engine.segment_analysis import _compute_volatility
+from upbit_data_service import get_candles
 
 
 def _zigzag_pivot_indices(closes: list[float], threshold_pct: float) -> list[int]:
@@ -220,3 +226,55 @@ def compute_trend_segments(df: pd.DataFrame, threshold_pct: float) -> list[dict]
             "pattern_label": PATTERN_LABELS[(first_half_trend, second_half_trend)],
         })
     return result
+
+
+THRESHOLD_MULTIPLIER = 6.0
+MIN_THRESHOLD_PCT = 5.0
+MAX_THRESHOLD_PCT = 25.0
+
+# 업비트 정식 서비스 시작(2017-10-24) 이전 시점 근사치. get_candles()는 이 시점부터
+# 실제 상장일까지는 빈 결과를 반환하므로, 코인마다 정확한 상장일을 몰라도 안전하게
+# "상장일부터 전체"를 표현할 수 있다.
+EARLIEST_CANDLE_START = datetime(2017, 10, 24, tzinfo=timezone.utc)
+
+
+def _compute_threshold_pct(market: str) -> float:
+    volatility = _compute_volatility(market)
+    if volatility is None:
+        return MIN_THRESHOLD_PCT
+    pct = volatility * 100 * THRESHOLD_MULTIPLIER
+    return max(MIN_THRESHOLD_PCT, min(MAX_THRESHOLD_PCT, pct))
+
+
+def get_or_compute_trend_segments(market: str, force_refresh: bool = False) -> dict:
+    """market의 추세 구간을 캐시에서 읽거나(없으면) 새로 계산해 저장한다.
+    force_refresh=True면 캐시를 무시하고 항상 새로 계산한다."""
+    if not force_refresh:
+        cached = list_trend_segments(market)
+        if cached:
+            return {
+                "market": market,
+                "threshold_pct": cached[0]["threshold_pct"],
+                "computed_at": cached[0]["computed_at"],
+                "segments": [
+                    {k: v for k, v in row.items() if k not in ("market", "threshold_pct", "computed_at")}
+                    for row in cached
+                ],
+            }
+
+    df = get_candles(market, "days", EARLIEST_CANDLE_START, datetime.now(timezone.utc))
+    threshold_pct = _compute_threshold_pct(market)
+    segments = compute_trend_segments(df, threshold_pct)
+    computed_at = datetime.now(timezone.utc).isoformat()
+
+    save_trend_segments(market, [
+        {**seg, "market": market, "threshold_pct": threshold_pct, "computed_at": computed_at}
+        for seg in segments
+    ])
+
+    return {
+        "market": market,
+        "threshold_pct": threshold_pct,
+        "computed_at": computed_at,
+        "segments": segments,
+    }

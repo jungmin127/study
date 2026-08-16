@@ -2,7 +2,8 @@ import pytest
 from datetime import date, timedelta
 import pandas as pd
 
-from engine.trend_segments import _legs_from_pivots, _zigzag_pivot_indices, _merge_sideways_runs, _run_to_segment, _absorb_short_segments, _combine_segments, PATTERN_LABELS, _classify_half, compute_trend_segments
+import engine.trend_segments as trend_segments_module
+from engine.trend_segments import _legs_from_pivots, _zigzag_pivot_indices, _merge_sideways_runs, _run_to_segment, _absorb_short_segments, _combine_segments, PATTERN_LABELS, _classify_half, compute_trend_segments, _compute_threshold_pct, get_or_compute_trend_segments
 
 
 def test_zigzag_pivot_indices_finds_expected_swing_points():
@@ -198,3 +199,84 @@ def test_compute_trend_segments_end_to_end_with_synthetic_series():
 def test_compute_trend_segments_returns_empty_list_for_empty_df():
     df = pd.DataFrame({"candle_time": pd.Series([], dtype="datetime64[ns, UTC]"), "close": pd.Series([], dtype=float)})
     assert compute_trend_segments(df, threshold_pct=10.0) == []
+
+
+def test_compute_threshold_pct_scales_with_volatility_and_clamps(monkeypatch):
+    # volatility 0.01(=1%) * 100 * multiplier(6) = 6% → MIN(5)~MAX(25) 사이라 그대로.
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: 0.01)
+    assert _compute_threshold_pct("KRW-BTC") == pytest.approx(6.0)
+
+    # volatility가 매우 커도 MAX_THRESHOLD_PCT(25)로 clamp.
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: 0.5)
+    assert _compute_threshold_pct("KRW-JUNK") == 25.0
+
+    # volatility가 매우 작아도 MIN_THRESHOLD_PCT(5)로 clamp.
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: 0.001)
+    assert _compute_threshold_pct("KRW-STABLE") == 5.0
+
+
+def test_compute_threshold_pct_falls_back_to_min_when_volatility_unavailable(monkeypatch):
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: None)
+    assert _compute_threshold_pct("KRW-NEW") == 5.0
+
+
+def test_get_or_compute_trend_segments_uses_cache_when_present(monkeypatch):
+    cached_rows = [{
+        "market": "KRW-BTC", "start_date": "2026-01-01", "end_date": "2026-02-01",
+        "days": 31, "return_pct": 10.0, "trend": "up", "first_half_trend": "up",
+        "second_half_trend": "up", "pattern_label": "지속형 상승",
+        "threshold_pct": 8.0, "computed_at": "2026-08-16T00:00:00+00:00",
+    }]
+    monkeypatch.setattr(trend_segments_module, "list_trend_segments", lambda market: cached_rows)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("캐시가 있으면 get_candles를 호출하면 안 된다")
+    monkeypatch.setattr(trend_segments_module, "get_candles", _fail_if_called)
+
+    result = get_or_compute_trend_segments("KRW-BTC")
+
+    assert result["market"] == "KRW-BTC"
+    assert result["threshold_pct"] == 8.0
+    assert result["computed_at"] == "2026-08-16T00:00:00+00:00"
+    assert len(result["segments"]) == 1
+    assert result["segments"][0]["pattern_label"] == "지속형 상승"
+
+
+def test_get_or_compute_trend_segments_computes_and_saves_when_no_cache(monkeypatch):
+    monkeypatch.setattr(trend_segments_module, "list_trend_segments", lambda market: [])
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: 0.02)
+
+    closes = [100, 130, 90, 140]
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="D", tz="UTC")
+    df = pd.DataFrame({"candle_time": dates, "close": closes})
+    monkeypatch.setattr(trend_segments_module, "get_candles", lambda market, tf, start, end: df)
+
+    saved = {}
+    monkeypatch.setattr(
+        trend_segments_module, "save_trend_segments",
+        lambda market, rows: saved.setdefault("rows", (market, rows)),
+    )
+
+    result = get_or_compute_trend_segments("KRW-BTC")
+
+    assert result["market"] == "KRW-BTC"
+    assert len(result["segments"]) >= 1
+    assert saved["rows"][0] == "KRW-BTC"
+    assert len(saved["rows"][1]) == len(result["segments"])
+
+
+def test_get_or_compute_trend_segments_force_refresh_ignores_cache(monkeypatch):
+    def _fail_if_called(market):
+        raise AssertionError("force_refresh=True면 캐시를 조회하면 안 된다")
+    monkeypatch.setattr(trend_segments_module, "list_trend_segments", _fail_if_called)
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: 0.02)
+
+    closes = [100, 130, 90, 140]
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="D", tz="UTC")
+    df = pd.DataFrame({"candle_time": dates, "close": closes})
+    monkeypatch.setattr(trend_segments_module, "get_candles", lambda market, tf, start, end: df)
+    monkeypatch.setattr(trend_segments_module, "save_trend_segments", lambda market, rows: None)
+
+    result = get_or_compute_trend_segments("KRW-BTC", force_refresh=True)
+
+    assert result["market"] == "KRW-BTC"
