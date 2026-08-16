@@ -25,6 +25,7 @@ export default function TrendSegmentView({ markets }: { markets: Market[] }) {
     let ignore = false;
     setLoading(true);
     setError(null);
+    setData(null);
     getTrendSegments(selectedMarket)
       .then((d) => {
         if (!ignore) setData(d);

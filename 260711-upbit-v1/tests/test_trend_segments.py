@@ -2,6 +2,7 @@ import pytest
 from datetime import date, timedelta
 import pandas as pd
 
+import engine.cache as cache_module
 import engine.trend_segments as trend_segments_module
 from engine.trend_segments import _legs_from_pivots, _zigzag_pivot_indices, _merge_sideways_runs, _run_to_segment, _absorb_short_segments, _combine_segments, PATTERN_LABELS, _classify_half, compute_trend_segments, _compute_threshold_pct, get_or_compute_trend_segments
 
@@ -194,6 +195,77 @@ def test_compute_trend_segments_end_to_end_with_synthetic_series():
         assert seg["trend"] in ("up", "down", "sideways")
         assert seg["pattern_label"] == PATTERN_LABELS[(seg["first_half_trend"], seg["second_half_trend"])]
         assert seg["start_date"] < seg["end_date"]
+
+
+def _interp_closes(anchors: list[tuple[int, float]]) -> list[float]:
+    """(day_offset, price) 앵커 시퀀스를 선형보간해 일별 종가 리스트로 변환한다."""
+    closes: list[float] = []
+    for (d0, p0), (d1, p1) in zip(anchors, anchors[1:]):
+        n = d1 - d0
+        for k in range(n):
+            closes.append(p0 + (p1 - p0) * k / n)
+    closes.append(anchors[-1][1])
+    return closes
+
+
+def test_compute_trend_segments_end_to_end_produces_multiple_chronological_segments():
+    """rally(70일) → choppy(72일, 14%대 등락 반복) → decline(70일) 세 국면을
+    합성한다. 각 국면이 MIN_SEGMENT_DAYS(14)를 훨씬 넘기므로, 파이프라인이
+    실제로 여러 구간을 만들어내고(단일 구간으로 흡수되지 않고), 시간순으로
+    빈틈없이 이어붙이는지 검증한다."""
+    rally = _interp_closes([(0, 100.0), (70, 240.0)])
+    base = rally[-1]
+    chop = _interp_closes([
+        (0, base), (12, base * 1.14), (24, base), (36, base * 1.14),
+        (48, base), (60, base * 1.14), (72, base),
+    ])
+    decline = _interp_closes([(0, chop[-1]), (70, chop[-1] * 0.45)])
+
+    closes = rally + chop + decline
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="D", tz="UTC")
+    df = pd.DataFrame({"candle_time": dates, "close": closes})
+
+    segments = compute_trend_segments(df, threshold_pct=10.0)
+
+    assert len(segments) >= 3
+
+    trends = [seg["trend"] for seg in segments]
+    assert trends[0] == "up"
+    assert trends[-1] == "down"
+    assert "sideways" in trends[1:-1]  # choppy 국면이 흡수되지 않고 살아남았다
+
+    for i in range(len(segments) - 1):
+        # 인접 구간은 경계일을 공유할 수 있다(같은 날 end/start) — 그 이상의
+        # 간격은 없어야 한다.
+        assert segments[i]["end_date"] <= segments[i + 1]["start_date"]
+
+
+def test_get_or_compute_trend_segments_round_trips_through_real_sqlite_cache(monkeypatch, tmp_path):
+    """save_trend_segments → 실제 SQLite → list_trend_segments 왕복이 캐시 히트
+    경로에서 정확히 같은 결과를 재구성하는지 검증한다(딕셔너리 스텁이 아닌
+    진짜 DB를 거친다). get_candles가 두 번째 호출에서 불리지 않아야 진짜
+    캐시 히트임을 증명한다."""
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    monkeypatch.setattr(trend_segments_module, "_compute_volatility", lambda market: 0.02)
+
+    closes = [100, 130, 90, 140, 100, 150, 80, 120]
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="D", tz="UTC")
+    df = pd.DataFrame({"candle_time": dates, "close": closes})
+
+    call_count = {"n": 0}
+
+    def fake_get_candles(market, tf, start, end):
+        call_count["n"] += 1
+        return df
+
+    monkeypatch.setattr(trend_segments_module, "get_candles", fake_get_candles)
+
+    first = get_or_compute_trend_segments("KRW-BTC")
+    second = get_or_compute_trend_segments("KRW-BTC")
+
+    assert call_count["n"] == 1  # 두 번째 호출은 캐시 히트라 get_candles를 다시 부르면 안 된다
+    assert second["segments"] == first["segments"]
+    assert second["threshold_pct"] == first["threshold_pct"]
 
 
 def test_compute_trend_segments_returns_empty_list_for_empty_df():

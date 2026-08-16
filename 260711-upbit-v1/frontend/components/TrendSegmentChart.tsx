@@ -40,6 +40,7 @@ export default function TrendSegmentChart({ ohlcv, segments }: TrendSegmentChart
     const upColor = resolveColor('--price-up');
     const downColor = resolveColor('--price-down');
     const sidewaysColor = resolveColor('--marker-boundary');
+    const unclassifiedColor = resolveColor('--trend-unclassified');
     const background = resolveColor('--background');
     const foreground = resolveColor('--foreground');
     const border = resolveColor('--border');
@@ -67,11 +68,11 @@ export default function TrendSegmentChart({ ohlcv, segments }: TrendSegmentChart
       .map((bar) => {
         const day = bar.time.split('T')[0];
         const trend = trendForDay(day, segments);
-        const color = trend ? trendColor[trend] : undefined;
+        const color = trend ? trendColor[trend] : unclassifiedColor;
         return {
           time: day as DayString,
           open: bar.open, high: bar.high, low: bar.low, close: bar.close,
-          ...(color ? { color, borderColor: color, wickColor: color } : {}),
+          color, borderColor: color, wickColor: color,
         };
       })
       .sort((a, b) => String(a.time).localeCompare(String(b.time)))
@@ -109,6 +110,10 @@ export default function TrendSegmentChart({ ohlcv, segments }: TrendSegmentChart
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--marker-boundary)' }} />
           횡보 구간
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--trend-unclassified)' }} />
+          미분류(최신)
         </span>
       </div>
       <div ref={containerRef} className="h-60 w-full rounded-lg overflow-hidden border md:h-80" />
