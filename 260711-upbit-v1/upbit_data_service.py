@@ -19,18 +19,33 @@ REQUEST_DELAY_SECONDS = 0.15
 _CANDLE_COLUMNS = ["candle_time", "open", "high", "low", "close", "volume", "trade_value"]
 
 
+_CANDLE_TIME_UNIT = "us"  # parquet 캐시 왕복 후 기본으로 떨어지는 해상도와 맞춘다.
+
+
 def _concat_candles(frames: list[pd.DataFrame]) -> pd.DataFrame:
-    """빈 프레임(placeholder pd.DataFrame(columns=_CANDLE_COLUMNS) 등)을 제외하고 concat한다.
+    """빈 프레임(placeholder pd.DataFrame(columns=_CANDLE_COLUMNS) 등)을 제외하고, candle_time
+    해상도를 통일한 뒤 concat한다.
 
     pandas 3.0부터 concat이 빈/전부-NA 프레임도 dtype 추론에 포함시키도록 바뀌어서,
     candle_time이 object dtype인 빈 placeholder와 tz-aware datetime64 실데이터를 그대로
     concat하면 결과 컬럼이 object로 붕괴해 이후 .dt/.tz 접근이 깨진다(캐시가 아직 없는
-    마켓의 첫 조회에서 실제로 발생 확인). 빈 프레임을 미리 걸러내면 pandas 버전과 무관하게
-    안전하다."""
+    마켓의 첫 조회에서 실제로 발생 확인) — 빈 프레임을 미리 걸러내 해결했다.
+
+    이와 별개로, 두 프레임 모두 비어있지 않아도 해상도가 다르면(parquet에서 읽은 캐시는
+    us, pd.to_datetime()로 갓 파싱한 라이브 데이터는 ns) pandas 2.3.3에서 동일하게
+    candle_time이 object로 붕괴하는 것을 실제 운영 서버에서 확인했다(보유중 포지션을
+    현재가로 재평가하려 캐시+라이브 gap을 합치는 경로 — KRW-DOGE 상세 조회 500 에러로
+    재현). concat 전에 모든 프레임을 같은 해상도로 맞추면 pandas가 dtype을 추론할
+    필요가 없어져 버전과 무관하게 안전하다."""
     non_empty = [f for f in frames if not f.empty]
     if not non_empty:
         return pd.DataFrame(columns=_CANDLE_COLUMNS)
-    return pd.concat(non_empty)
+    aligned = []
+    for f in non_empty:
+        if f["candle_time"].dt.unit != _CANDLE_TIME_UNIT:
+            f = f.assign(candle_time=f["candle_time"].dt.as_unit(_CANDLE_TIME_UNIT))
+        aligned.append(f)
+    return pd.concat(aligned)
 
 
 class _SyncTokenBucket:

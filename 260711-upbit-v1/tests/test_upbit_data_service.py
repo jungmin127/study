@@ -231,6 +231,31 @@ def test_concat_candles_excludes_empty_placeholder_from_dtype_inference():
     assert merged.set_index("candle_time").index.tz is not None
 
 
+def test_concat_candles_preserves_dtype_when_resolutions_differ():
+    """캐시(parquet 왕복 후 us 해상도)와 방금 새로 fetch한 데이터(pd.to_datetime 기본
+    ns 해상도)는 둘 다 비어있지 않은데도, 실제 운영 서버(pandas 2.3.3)에서 concat 시
+    candle_time이 object dtype으로 붕괴하는 것을 확인했다(보유중 포지션을 현재가로
+    재평가하려 캐시+라이브 gap을 합치는 경로 — KRW-DOGE 상세 조회 500 에러로 재현,
+    AttributeError: Can only use .dt accessor with datetimelike values). 로컬 pandas
+    2.2.0에서는 이 조합이 우연히 정상 승격되어 이 테스트만으로는 회귀를 못 잡지만,
+    _concat_candles()가 해상도를 명시적으로 맞추게 해 pandas 버전과 무관하게 안전한
+    코드가 되도록 강제한다."""
+    cached = pd.DataFrame({
+        "candle_time": pd.to_datetime(["2026-08-15T23:00:00"], utc=True).as_unit("us"),
+        "open": [1], "high": [1], "low": [1], "close": [1], "volume": [1], "trade_value": [1],
+    })
+    fresh = pd.DataFrame({
+        "candle_time": pd.to_datetime(["2026-08-16T00:00:00"], utc=True),
+        "open": [2], "high": [2], "low": [2], "close": [2], "volume": [2], "trade_value": [2],
+    })
+    assert cached["candle_time"].dt.unit != fresh["candle_time"].dt.unit
+
+    merged = _concat_candles([cached, fresh])
+
+    assert merged["candle_time"].dt.tz is not None
+    assert len(merged) == 2
+
+
 def test_concat_candles_all_empty_returns_empty_with_schema():
     result = _concat_candles([pd.DataFrame(columns=uds._CANDLE_COLUMNS)])
     assert list(result.columns) == uds._CANDLE_COLUMNS
