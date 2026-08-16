@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { formatDateTime, formatHoldingPeriod, formatTimeframe } from '@/lib/format';
-import type { BacktestMetrics } from '@/lib/types/eda';
+import type { BacktestMetrics, Trade } from '@/lib/types/eda';
 
 function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
@@ -82,6 +82,50 @@ function MetricsGrid({ metrics }: { metrics: BacktestMetrics }) {
   );
 }
 
+function TradeCard({
+  trade,
+  timeframe,
+  hasLivePrice,
+}: {
+  trade: Trade;
+  timeframe: string;
+  hasLivePrice: boolean;
+}) {
+  return (
+    <div className="rounded-md border p-3 text-sm">
+      <div className="mb-1 flex items-center justify-between">
+        <span className={`font-semibold ${returnRateColor(trade.returnRate)}`}>
+          {trade.returnRate.toFixed(2)}%
+        </span>
+        {trade.forceClosed ? (
+          <Badge
+            variant="secondary"
+            title={
+              hasLivePrice
+                ? '매도 조건을 만족하지 못한 채 아직 보유 중입니다. 현재가로 재평가된 수익률입니다.'
+                : '매도 조건을 만족하지 못해 백테스트 종료 시점 종가로 평가된 상태입니다.'
+            }
+          >
+            보유중(기간종료)
+          </Badge>
+        ) : (
+          <Badge variant="outline">청산됨</Badge>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        진입 {formatDateTime(trade.entryTime)} · {trade.entryPrice.toLocaleString()}원
+      </p>
+      <p className="text-xs text-muted-foreground">
+        청산 {formatDateTime(trade.exitTime)} · {trade.exitPrice.toLocaleString()}원
+      </p>
+      <p className="mt-1 text-xs">
+        수익금 <span className={returnRateColor(trade.pnl)}>{Math.round(trade.pnl).toLocaleString()}원</span>
+        {' · '}보유기간 {formatHoldingPeriod(trade.holdingPeriod, timeframe)}
+      </p>
+    </div>
+  );
+}
+
 export default async function BacktestDetailPage({ params }: { params: { runId: string } }) {
   const detail = await getBacktestDetail(params.runId);
 
@@ -128,49 +172,58 @@ export default async function BacktestDetailPage({ params }: { params: { runId: 
       {detail.trades.length === 0 ? (
         <p className="text-muted-foreground">거래 내역이 없습니다.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>진입</TableHead>
-              <TableHead>청산</TableHead>
-              <TableHead>수익률(%)</TableHead>
-              <TableHead>매수가</TableHead>
-              <TableHead>매도가</TableHead>
-              <TableHead>수익금</TableHead>
-              <TableHead>보유기간</TableHead>
-              <TableHead>상태</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <>
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>진입</TableHead>
+                  <TableHead>청산</TableHead>
+                  <TableHead>수익률(%)</TableHead>
+                  <TableHead>매수가</TableHead>
+                  <TableHead>매도가</TableHead>
+                  <TableHead>수익금</TableHead>
+                  <TableHead>보유기간</TableHead>
+                  <TableHead>상태</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {detail.trades.map((t, i) => (
+                  <TableRow key={i}>
+                    <TableCell>{formatDateTime(t.entryTime)}</TableCell>
+                    <TableCell>{formatDateTime(t.exitTime)}</TableCell>
+                    <TableCell className={returnRateColor(t.returnRate)}>{t.returnRate.toFixed(2)}</TableCell>
+                    <TableCell>{t.entryPrice.toLocaleString()}</TableCell>
+                    <TableCell>{t.exitPrice.toLocaleString()}</TableCell>
+                    <TableCell className={returnRateColor(t.pnl)}>{Math.round(t.pnl).toLocaleString()}</TableCell>
+                    <TableCell>{formatHoldingPeriod(t.holdingPeriod, detail.timeframe)}</TableCell>
+                    <TableCell>
+                      {t.forceClosed ? (
+                        <Badge
+                          variant="secondary"
+                          title={
+                            detail.live_price_as_of
+                              ? '매도 조건을 만족하지 못한 채 아직 보유 중입니다. 현재가로 재평가된 수익률입니다.'
+                              : '매도 조건을 만족하지 못해 백테스트 종료 시점 종가로 평가된 상태입니다.'
+                          }
+                        >
+                          보유중(기간종료)
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">청산됨</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="space-y-2 md:hidden">
             {detail.trades.map((t, i) => (
-              <TableRow key={i}>
-                <TableCell>{formatDateTime(t.entryTime)}</TableCell>
-                <TableCell>{formatDateTime(t.exitTime)}</TableCell>
-                <TableCell className={returnRateColor(t.returnRate)}>{t.returnRate.toFixed(2)}</TableCell>
-                <TableCell>{t.entryPrice.toLocaleString()}</TableCell>
-                <TableCell>{t.exitPrice.toLocaleString()}</TableCell>
-                <TableCell className={returnRateColor(t.pnl)}>{Math.round(t.pnl).toLocaleString()}</TableCell>
-                <TableCell>{formatHoldingPeriod(t.holdingPeriod, detail.timeframe)}</TableCell>
-                <TableCell>
-                  {t.forceClosed ? (
-                    <Badge
-                      variant="secondary"
-                      title={
-                        detail.live_price_as_of
-                          ? '매도 조건을 만족하지 못한 채 아직 보유 중입니다. 현재가로 재평가된 수익률입니다.'
-                          : '매도 조건을 만족하지 못해 백테스트 종료 시점 종가로 평가된 상태입니다.'
-                      }
-                    >
-                      보유중(기간종료)
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline">청산됨</Badge>
-                  )}
-                </TableCell>
-              </TableRow>
+              <TradeCard key={i} trade={t} timeframe={detail.timeframe} hasLivePrice={!!detail.live_price_as_of} />
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </>
       )}
     </div>
   );
