@@ -69,7 +69,7 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 320,
+      height: containerRef.current.clientHeight,
       layout: { background: { type: ColorType.Solid, color: background }, textColor: foreground },
       crosshair: { mode: CrosshairMode.Normal },
       timeScale: { timeVisible: true, secondsVisible: false, borderColor: border },
@@ -155,7 +155,11 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
     chart.timeScale().fitContent();
 
     const resizeObserver = new ResizeObserver(() => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+      if (!containerRef.current) return;
+      chart.applyOptions({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight,
+      });
     });
     resizeObserver.observe(containerRef.current);
 
@@ -181,7 +185,7 @@ export default function PriceChart({ ohlcv, trades, timeframe, backtestEnd }: Pr
           백테스트 종료
         </span>
       </div>
-      <div ref={containerRef} className="w-full rounded-lg overflow-hidden border" />
+      <div ref={containerRef} className="h-60 w-full rounded-lg overflow-hidden border md:h-80" />
     </div>
   );
 }
