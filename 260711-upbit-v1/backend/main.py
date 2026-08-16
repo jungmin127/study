@@ -1299,6 +1299,17 @@ def stop_live_strategy_endpoint(strategy_id: str) -> dict:
     return _full_live_strategy_response(strategy_id)
 
 
+@app.delete("/api/v1/live-strategies/{strategy_id}")
+def delete_live_strategy_endpoint(strategy_id: str) -> dict:
+    strategy = trading_db.get_live_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    if strategy["status"] != "stopped":
+        raise HTTPException(status_code=409, detail="중지된 전략만 삭제할 수 있습니다")
+    trading_db.delete_live_strategy(strategy_id)
+    return {"deleted": True}
+
+
 @app.get("/api/v1/journal/summary")
 def get_journal_summary_endpoint() -> dict:
     return get_journal_summary()
