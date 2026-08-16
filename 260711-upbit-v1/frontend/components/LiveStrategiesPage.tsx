@@ -1,18 +1,30 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Check, Pause, Play, Square, X } from 'lucide-react';
+import { Check, Pause, Play, Square, Trash2, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import {
   approveLiveStrategy,
+  deleteLiveStrategy,
   getLiveStrategies,
   pauseLiveStrategy,
   resumeLiveStrategy,
   stopLiveStrategy,
 } from '@/lib/api/liveStrategies';
 import type { LiveStrategy } from '@/lib/types/liveStrategies';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { formatTimeframe } from '@/lib/format';
 import { returnRateColor } from '@/lib/return-rate-color';
@@ -51,7 +63,7 @@ export default function LiveStrategiesPage() {
 
   useVisiblePolling(refresh, POLL_INTERVAL_MS);
 
-  async function runAction(id: string, action: (id: string) => Promise<LiveStrategy>) {
+  async function runAction<T>(id: string, action: (id: string) => Promise<T>) {
     setActionError(null);
     setPendingId(id);
     try {
@@ -159,6 +171,34 @@ export default function LiveStrategiesPage() {
                       <Square />
                     </Button>
                   </>
+                )}
+                {s.status === 'stopped' && (
+                  <AlertDialog>
+                    {/* AlertDialogTrigger has no asChild in this project's base-ui-backed
+                        shadcn style; apply Button's own class-variance styles directly
+                        (same pattern as BacktestRunsTable.tsx). */}
+                    <AlertDialogTrigger
+                      type="button"
+                      className={buttonVariants({ variant: 'destructive', size: 'icon-lg' })}
+                      aria-label="삭제"
+                      title="삭제"
+                      disabled={pendingId === s.id}
+                    >
+                      <Trash2 />
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>이 전략을 삭제하시겠습니까?</AlertDialogTitle>
+                        <AlertDialogDescription>삭제 후에는 되돌릴 수 없습니다.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>취소</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => runAction(s.id, deleteLiveStrategy)}>
+                          삭제
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 )}
               </div>
             </div>

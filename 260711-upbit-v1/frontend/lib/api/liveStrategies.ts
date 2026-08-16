@@ -35,3 +35,7 @@ export function resumeLiveStrategy(id: string): Promise<LiveStrategy> {
 export function stopLiveStrategy(id: string): Promise<LiveStrategy> {
   return apiFetch<LiveStrategy>(`/api/v1/live-strategies/${id}/stop`, { method: 'POST' });
 }
+
+export function deleteLiveStrategy(id: string): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>(`/api/v1/live-strategies/${id}`, { method: 'DELETE' });
+}
