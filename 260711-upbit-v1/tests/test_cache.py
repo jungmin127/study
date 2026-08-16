@@ -18,6 +18,8 @@ from engine.cache import (
     list_sweep_history,
     save_segment_classification,
     save_sweep_result,
+    list_trend_segments,
+    save_trend_segments,
 )
 from engine.cache import (
     create_grid_search_job,
@@ -750,3 +752,77 @@ def test_delete_grid_search_job_removes_the_job(monkeypatch, tmp_path):
 def test_delete_grid_search_job_returns_false_for_missing_job(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     assert delete_grid_search_job("does-not-exist") is False
+
+
+def test_save_and_list_trend_segments_round_trips(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    rows = [
+        {
+            "market": "KRW-BTC",
+            "start_date": "2026-01-05",
+            "end_date": "2026-03-20",
+            "days": 75,
+            "return_pct": 42.3,
+            "trend": "up",
+            "first_half_trend": "up",
+            "second_half_trend": "up",
+            "pattern_label": "지속형 상승",
+            "threshold_pct": 8.5,
+            "computed_at": "2026-08-16T00:00:00+00:00",
+        },
+        {
+            "market": "KRW-BTC",
+            "start_date": "2026-03-21",
+            "end_date": "2026-04-10",
+            "days": 20,
+            "return_pct": 8.1,
+            "trend": "up",
+            "first_half_trend": "up",
+            "second_half_trend": "sideways",
+            "pattern_label": "상승 후 둔화",
+            "threshold_pct": 8.5,
+            "computed_at": "2026-08-16T00:00:00+00:00",
+        },
+    ]
+
+    save_trend_segments("KRW-BTC", rows)
+    result = list_trend_segments("KRW-BTC")
+
+    assert len(result) == 2
+    assert result[0]["start_date"] == "2026-01-05"
+    assert result[0]["pattern_label"] == "지속형 상승"
+    assert result[1]["pattern_label"] == "상승 후 둔화"
+
+
+def test_save_trend_segments_replaces_only_that_market(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    save_trend_segments("KRW-BTC", [{
+        "market": "KRW-BTC", "start_date": "2026-01-01", "end_date": "2026-02-01",
+        "days": 31, "return_pct": 10.0, "trend": "up", "first_half_trend": "up",
+        "second_half_trend": "up", "pattern_label": "지속형 상승",
+        "threshold_pct": 8.0, "computed_at": "2026-08-16T00:00:00+00:00",
+    }])
+    save_trend_segments("KRW-ETH", [{
+        "market": "KRW-ETH", "start_date": "2026-01-01", "end_date": "2026-02-01",
+        "days": 31, "return_pct": -10.0, "trend": "down", "first_half_trend": "down",
+        "second_half_trend": "down", "pattern_label": "지속형 하락",
+        "threshold_pct": 9.0, "computed_at": "2026-08-16T00:00:00+00:00",
+    }])
+    # KRW-BTC를 다시 저장하면 KRW-ETH 행은 그대로 남아 있어야 한다.
+    save_trend_segments("KRW-BTC", [{
+        "market": "KRW-BTC", "start_date": "2026-02-01", "end_date": "2026-03-01",
+        "days": 28, "return_pct": 5.0, "trend": "sideways", "first_half_trend": "sideways",
+        "second_half_trend": "sideways", "pattern_label": "지속형 횡보",
+        "threshold_pct": 8.0, "computed_at": "2026-08-16T01:00:00+00:00",
+    }])
+
+    assert len(list_trend_segments("KRW-BTC")) == 1
+    assert list_trend_segments("KRW-BTC")[0]["start_date"] == "2026-02-01"
+    assert len(list_trend_segments("KRW-ETH")) == 1
+
+
+def test_list_trend_segments_returns_empty_list_when_not_computed(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    assert list_trend_segments("KRW-XRP") == []

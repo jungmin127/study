@@ -94,6 +94,24 @@ CREATE TABLE IF NOT EXISTS grid_search_jobs (
 );
 """
 
+_SCHEMA += """
+CREATE TABLE IF NOT EXISTS trend_segments (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    market            TEXT NOT NULL,
+    start_date        TEXT NOT NULL,
+    end_date          TEXT NOT NULL,
+    days              INTEGER NOT NULL,
+    return_pct        REAL NOT NULL,
+    trend             TEXT NOT NULL,
+    first_half_trend  TEXT NOT NULL,
+    second_half_trend TEXT NOT NULL,
+    pattern_label     TEXT NOT NULL,
+    threshold_pct     REAL NOT NULL,
+    computed_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trend_segments_market ON trend_segments(market);
+"""
+
 
 _JSON_PRIMITIVES = (str, int, float, bool, type(None))
 
@@ -553,6 +571,47 @@ def list_segment_classification() -> list[dict]:
             "volatility_percentile": r[6],
             "is_caution": bool(r[7]),
             "computed_at": r[8],
+        }
+        for r in rows
+    ]
+
+
+def save_trend_segments(market: str, rows: list[dict]) -> None:
+    """추세 구간 분류 결과를 market 단위로 교체 저장한다. 히스토리는 보관하지
+    않고 해당 market의 최신 1회분만 유지한다."""
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM trend_segments WHERE market = ?", (market,))
+        conn.executemany(
+            "INSERT INTO trend_segments "
+            "(market, start_date, end_date, days, return_pct, trend, first_half_trend, "
+            " second_half_trend, pattern_label, threshold_pct, computed_at) "
+            "VALUES (:market, :start_date, :end_date, :days, :return_pct, :trend, "
+            " :first_half_trend, :second_half_trend, :pattern_label, :threshold_pct, :computed_at)",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_trend_segments(market: str) -> list[dict]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT market, start_date, end_date, days, return_pct, trend, first_half_trend, "
+            "       second_half_trend, pattern_label, threshold_pct, computed_at "
+            "FROM trend_segments WHERE market = ? ORDER BY start_date",
+            (market,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            "market": r[0], "start_date": r[1], "end_date": r[2], "days": r[3],
+            "return_pct": r[4], "trend": r[5], "first_half_trend": r[6],
+            "second_half_trend": r[7], "pattern_label": r[8],
+            "threshold_pct": r[9], "computed_at": r[10],
         }
         for r in rows
     ]
