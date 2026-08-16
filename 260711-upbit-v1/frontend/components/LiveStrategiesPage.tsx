@@ -93,30 +93,64 @@ export default function LiveStrategiesPage() {
               <div className="flex flex-wrap gap-2 pt-2">
                 {s.status === 'draft' && (
                   <>
-                    <Button size="sm" disabled={pendingId === s.id} onClick={() => runAction(s.id, approveLiveStrategy)}>
+                    <Button
+                      size="sm"
+                      className="max-md:min-h-9"
+                      disabled={pendingId === s.id}
+                      onClick={() => runAction(s.id, approveLiveStrategy)}
+                    >
                       승인
                     </Button>
-                    <Button size="sm" variant="outline" disabled={pendingId === s.id} onClick={() => runAction(s.id, stopLiveStrategy)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="max-md:min-h-9"
+                      disabled={pendingId === s.id}
+                      onClick={() => runAction(s.id, stopLiveStrategy)}
+                    >
                       취소
                     </Button>
                   </>
                 )}
                 {s.status === 'running' && (
                   <>
-                    <Button size="sm" variant="outline" disabled={pendingId === s.id} onClick={() => runAction(s.id, pauseLiveStrategy)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="max-md:min-h-9"
+                      disabled={pendingId === s.id}
+                      onClick={() => runAction(s.id, pauseLiveStrategy)}
+                    >
                       일시정지
                     </Button>
-                    <Button size="sm" variant="destructive" disabled={pendingId === s.id} onClick={() => runAction(s.id, stopLiveStrategy)}>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="max-md:min-h-9"
+                      disabled={pendingId === s.id}
+                      onClick={() => runAction(s.id, stopLiveStrategy)}
+                    >
                       중지
                     </Button>
                   </>
                 )}
                 {s.status === 'paused' && (
                   <>
-                    <Button size="sm" disabled={pendingId === s.id} onClick={() => runAction(s.id, resumeLiveStrategy)}>
+                    <Button
+                      size="sm"
+                      className="max-md:min-h-9"
+                      disabled={pendingId === s.id}
+                      onClick={() => runAction(s.id, resumeLiveStrategy)}
+                    >
                       재개
                     </Button>
-                    <Button size="sm" variant="destructive" disabled={pendingId === s.id} onClick={() => runAction(s.id, stopLiveStrategy)}>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="max-md:min-h-9"
+                      disabled={pendingId === s.id}
+                      onClick={() => runAction(s.id, stopLiveStrategy)}
+                    >
                       중지
                     </Button>
                   </>

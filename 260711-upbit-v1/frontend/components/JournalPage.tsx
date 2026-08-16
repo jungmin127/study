@@ -74,7 +74,7 @@ export default function JournalPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold">계좌 전체 요약</h2>
-        <Button size="sm" variant="outline" disabled={loading} onClick={refresh}>
+        <Button size="sm" variant="outline" className="max-md:min-h-9" disabled={loading} onClick={refresh}>
           새로고침
         </Button>
       </div>
