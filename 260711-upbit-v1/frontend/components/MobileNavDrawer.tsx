@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
@@ -20,6 +20,21 @@ export interface MobileNavStep {
 export default function MobileNavDrawer({ steps }: { steps: MobileNavStep[] }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+
+  // md: 이상(768px+)으로 리사이즈되면 드로어가 열린 채로 남아있지 않도록 자동으로 닫는다.
+  useEffect(() => {
+    const mql = window.matchMedia('(min-width: 768px)');
+    if (mql.matches) {
+      setOpen(false);
+    }
+    const handleChange = (e: MediaQueryListEvent) => {
+      if (e.matches) {
+        setOpen(false);
+      }
+    };
+    mql.addEventListener('change', handleChange);
+    return () => mql.removeEventListener('change', handleChange);
+  }, []);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
