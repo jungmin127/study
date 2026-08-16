@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Upbit 전략 EDA 대시보드',
-    short_name: 'Upbit 전략',
+    name: 'Quant Trading',
+    short_name: 'Quant Trading',
     description: '백테스트·그리드서치·라이브 전략·매매일지 대시보드',
     start_url: '/journal',
     display: 'standalone',
