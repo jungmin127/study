@@ -79,3 +79,46 @@ def _legs_from_pivots(closes: list[float], dates: list, pivots: list[int]) -> li
             "return_pct": (end_price - start_price) / start_price * 100,
         })
     return legs
+
+
+SIDEWAYS_LEG_CAP_RATIO = 1.5
+
+
+def _merge_sideways_runs(legs: list[dict], threshold_pct: float) -> list[list[dict]]:
+    """연속된 레그를 훑으며 묶음 시작가 대비 누적 순변화율이 threshold_pct 미만인
+    동안 계속 묶는다(순방향 진행 없이 등락만 반복되는 구간 = 횡보 후보). 단, 레그
+    개별 크기가 threshold_pct * SIDEWAYS_LEG_CAP_RATIO 이상이면 강한 단일 돌파로
+    보고 흡수하지 않는다."""
+    if not legs:
+        return []
+    cap_pct = threshold_pct * SIDEWAYS_LEG_CAP_RATIO
+    runs: list[list[dict]] = [[legs[0]]]
+    for leg in legs[1:]:
+        run = runs[-1]
+        run_start_price = run[0]["start_price"]
+        candidate_net_pct = abs((leg["end_price"] - run_start_price) / run_start_price * 100)
+        if abs(leg["return_pct"]) < cap_pct and candidate_net_pct < threshold_pct:
+            run.append(leg)
+        else:
+            runs.append([leg])
+    return runs
+
+
+def _classify_return(return_pct: float, threshold_pct: float) -> str:
+    if return_pct >= threshold_pct:
+        return "up"
+    if return_pct <= -threshold_pct:
+        return "down"
+    return "sideways"
+
+
+def _run_to_segment(run: list[dict], threshold_pct: float) -> dict:
+    start_price = run[0]["start_price"]
+    end_price = run[-1]["end_price"]
+    return_pct = (end_price - start_price) / start_price * 100
+    return {
+        "start_idx": run[0]["start_idx"], "end_idx": run[-1]["end_idx"],
+        "start_date": run[0]["start_date"], "end_date": run[-1]["end_date"],
+        "start_price": start_price, "end_price": end_price,
+        "return_pct": return_pct, "trend": _classify_return(return_pct, threshold_pct),
+    }
