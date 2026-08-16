@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import CoinSelect from '@/components/CoinSelect';
 import TrendSegmentChart from '@/components/TrendSegmentChart';
@@ -14,24 +14,44 @@ export default function TrendSegmentView({ markets }: { markets: Market[] }) {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectedMarketRef = useRef(selectedMarket);
+
+  useEffect(() => {
+    selectedMarketRef.current = selectedMarket;
+  }, [selectedMarket]);
 
   useEffect(() => {
     if (!selectedMarket) return;
+    let ignore = false;
     setLoading(true);
     setError(null);
     getTrendSegments(selectedMarket)
-      .then(setData)
-      .catch(() => setError('구간 분석을 불러오지 못했습니다.'))
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (!ignore) setData(d);
+      })
+      .catch(() => {
+        if (!ignore) setError('구간 분석을 불러오지 못했습니다.');
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
   }, [selectedMarket]);
 
   function handleRefresh() {
     if (!selectedMarket) return;
+    const requestedMarket = selectedMarket;
     setRefreshing(true);
     setError(null);
-    refreshTrendSegments(selectedMarket)
-      .then(setData)
-      .catch(() => setError('갱신에 실패했습니다.'))
+    refreshTrendSegments(requestedMarket)
+      .then((d) => {
+        if (selectedMarketRef.current === requestedMarket) setData(d);
+      })
+      .catch(() => {
+        if (selectedMarketRef.current === requestedMarket) setError('갱신에 실패했습니다.');
+      })
       .finally(() => setRefreshing(false));
   }
 
