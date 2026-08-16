@@ -973,3 +973,42 @@ def test_list_orders_for_strategy_returns_all_orders(monkeypatch, tmp_path):
 
     assert len(rows) == 1
     assert rows[0]["slippage_pct"] == 0.02
+
+
+def test_delete_live_strategy_removes_strategy_and_child_rows(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="stopped")
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    order_id = db.insert_order(
+        strategy_id, position_id, "KRW-BTC", "buy", "market", None, None, 50_000_000.0,
+    )
+    db.insert_signal(strategy_id, "buy", "2026-08-17T00:00:00", "{}")
+    db.upsert_daily_performance(
+        strategy_id, "2026-08-17", 0.0, 0.0, 0, 0, 0, 100000.0, 100000.0,
+    )
+    db.upsert_circuit_breaker_state(strategy_id, "2026-08-17", 0, 0)
+
+    deleted = db.delete_live_strategy(strategy_id)
+
+    assert deleted is True
+    assert db.get_live_strategy(strategy_id) is None
+    assert db.get_position(position_id) is None
+    assert db.get_order_by_id(order_id) is None
+    assert db.get_circuit_breaker_state(strategy_id) is None
+    assert db.get_daily_performance(strategy_id, "2026-08-17") is None
+
+
+def test_delete_live_strategy_rejects_non_stopped_status(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    deleted = db.delete_live_strategy(strategy_id)
+
+    assert deleted is False
+    assert db.get_live_strategy(strategy_id) is not None
+
+
+def test_delete_live_strategy_returns_false_for_missing_id(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+
+    assert db.delete_live_strategy("does-not-exist") is False
