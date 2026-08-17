@@ -11,7 +11,7 @@ import {
   resumeLiveStrategy,
   stopLiveStrategy,
 } from '@/lib/api/liveStrategies';
-import type { LiveStrategy } from '@/lib/types/liveStrategies';
+import type { LiveStrategy, LiveStrategyRiskConfig } from '@/lib/types/liveStrategies';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,7 +44,7 @@ function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
-const RISK_CONFIG_LABELS: Record<string, string> = {
+const RISK_CONFIG_LABELS: Record<keyof LiveStrategyRiskConfig, string> = {
   position_sizing_mode: '포지션 사이징 방식',
   position_sizing_value: '포지션 사이징 값',
   max_position_per_market: '코인당 최대 포지션',
@@ -57,7 +57,7 @@ const RISK_CONFIG_LABELS: Record<string, string> = {
 
 const POSITION_SIZING_MODE_LABELS: Record<string, string> = {
   fixed: '고정 금액',
-  percent: '자본 비율(%)',
+  percent: '계좌잔고 비율(%)',
 };
 
 const ORDER_EXECUTION_MODE_LABELS: Record<string, string> = {
@@ -153,7 +153,7 @@ export default function LiveStrategiesPage() {
                   >
                     <CircleHelp />
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>
                         {s.market} · {formatTimeframe(s.timeframe)} 전략 설정
@@ -175,14 +175,14 @@ export default function LiveStrategiesPage() {
                       <div>
                         <p className="mb-1 font-medium text-muted-foreground">리스크 관리</p>
                         <div className="space-y-1 rounded-md bg-muted/50 p-2">
-                          {Object.entries(RISK_CONFIG_LABELS).map(([key, label]) => (
-                            <div key={key} className="flex justify-between gap-2">
-                              <span className="text-muted-foreground">{label}</span>
-                              <span className="tabular-nums">
-                                {formatRiskConfigValue(key, s.risk_config[key as keyof typeof s.risk_config])}
-                              </span>
-                            </div>
-                          ))}
+                          {(Object.entries(RISK_CONFIG_LABELS) as [keyof LiveStrategyRiskConfig, string][]).map(
+                            ([key, label]) => (
+                              <div key={key} className="flex justify-between gap-2">
+                                <span className="text-muted-foreground">{label}</span>
+                                <span className="tabular-nums">{formatRiskConfigValue(key, s.risk_config[key])}</span>
+                              </div>
+                            ),
+                          )}
                         </div>
                       </div>
                     </div>
