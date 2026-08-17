@@ -1425,6 +1425,58 @@ def test_get_backtests_includes_strategy_condition_summaries(monkeypatch, tmp_pa
     assert body[0]["is_live"] is False
 
 
+def test_get_backtests_includes_top_trade_contribution_pct(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={
+            "final_value": 10920.0, "sharpe": None, "max_drawdown": None, "equity_curve": [],
+            "trades": [
+                {
+                    "entryTime": "2026-01-01T00:00:00", "exitTime": "2026-01-02T00:00:00",
+                    "entryPrice": 100.0, "exitPrice": 190.0, "returnRate": 90.0,
+                    "holdingPeriod": 1, "pnl": 900.0, "forceClosed": False, "size": 100.0,
+                },
+                {
+                    "entryTime": "2026-01-03T00:00:00", "exitTime": "2026-01-04T00:00:00",
+                    "entryPrice": 100.0, "exitPrice": 105.0, "returnRate": 5.0,
+                    "holdingPeriod": 1, "pnl": 50.0, "forceClosed": False, "size": 100.0,
+                },
+                {
+                    "entryTime": "2026-01-05T00:00:00", "exitTime": "2026-01-06T00:00:00",
+                    "entryPrice": 100.0, "exitPrice": 95.0, "returnRate": -5.0,
+                    "holdingPeriod": 1, "pnl": -30.0, "forceClosed": False, "size": 100.0,
+                },
+            ],
+        },
+    )
+
+    resp = client.get("/api/v1/backtests")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["top_trade_contribution_pct"] == pytest.approx(900 / 950 * 100.0)
+
+
+def test_get_backtests_top_trade_contribution_pct_none_without_wins(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10000.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    resp = client.get("/api/v1/backtests")
+    body = resp.json()
+    assert body[0]["top_trade_contribution_pct"] is None
+
+
 def test_get_backtests_created_at_has_utc_offset(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     save_result(

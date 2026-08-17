@@ -55,7 +55,7 @@ from binance_data_service import (
 )
 from external_data_service import get_fear_greed_cmc, merge_fear_greed
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
-from engine.metrics import VALID_TIMEFRAMES, calculate_metrics
+from engine.metrics import VALID_TIMEFRAMES, calculate_metrics, top_trade_contribution_pct
 from engine.segment_analysis import run_segment_batch
 from engine.trend_segments import EARLIEST_CANDLE_START, get_or_compute_trend_segments
 from engine.strategies import SignalStrategy
@@ -549,6 +549,7 @@ def get_backtest_runs() -> list[dict]:
             "return_rate": return_rate,
             "sharpe": r["sharpe"],
             "max_drawdown": r["max_drawdown"],
+            "top_trade_contribution_pct": top_trade_contribution_pct(trades),
             "is_live": is_live,
             "last_trade_status": last_trade_status,
             "buy_conditions": r["buy_conditions"],
