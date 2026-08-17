@@ -7,6 +7,7 @@ Run: uvicorn backend.main:app --reload --port 8000  (저장소 루트에서 실�
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 from datetime import datetime, timezone
@@ -1350,13 +1351,18 @@ def update_live_strategy_capital_endpoint(strategy_id: str, req: UpdateLiveStrat
         raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
     if strategy["status"] not in ("running", "paused"):
         raise HTTPException(status_code=409, detail="running 또는 paused 상태의 전략만 시드를 변경할 수 있습니다")
-    if trading_db.get_open_position(strategy_id) is not None:
+    if not math.isfinite(req.new_capital) or req.new_capital <= 0:
+        raise HTTPException(status_code=400, detail="시드는 0보다 큰 유한한 숫자여야 합니다")
+    max_position = json.loads(strategy["risk_config_json"]).get("max_position_per_market")
+    if max_position is not None and req.new_capital > max_position:
+        raise HTTPException(
+            status_code=400,
+            detail=f"코인당 최대 포지션 금액({max_position:,.0f}원)을 초과하는 시드로는 변경할 수 없습니다. 먼저 최대 포지션 설정을 올리세요.",
+        )
+    if not trading_db.adjust_live_strategy_capital_if_no_open_position(
+        strategy_id, strategy["current_capital"], req.new_capital
+    ):
         raise HTTPException(status_code=400, detail="포지션 보유 중에는 시드를 변경할 수 없습니다")
-    if req.new_capital <= 0:
-        raise HTTPException(status_code=400, detail="시드는 0보다 커야 합니다")
-
-    trading_db.insert_capital_adjustment(strategy_id, strategy["current_capital"], req.new_capital)
-    trading_db.update_live_strategy_capital(strategy_id, req.new_capital)
     return _full_live_strategy_response(strategy_id)
 
 

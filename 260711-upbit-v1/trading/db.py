@@ -767,6 +767,40 @@ def list_capital_adjustments(live_strategy_id: str) -> list[dict]:
         conn.close()
 
 
+def adjust_live_strategy_capital_if_no_open_position(
+    live_strategy_id: str, previous_capital: float, new_capital: float,
+) -> bool:
+    """포지션 없음 확인과 자본 조정 기록+갱신을 한 커넥션(단일 트랜잭션)으로 묶는다 —
+    stop_live_strategy_if_no_open_position()과 동일 패턴. 별도 프로세스인 트레이딩
+    데몬이 포지션 확인 이후 갱신 이전 사이에 끼어들어 포지션을 여는 경쟁을 막는다.
+    포지션이 있으면 아무것도 쓰지 않고 False를 반환한다."""
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        open_position = conn.execute(
+            "SELECT id FROM positions WHERE live_strategy_id = ? AND status = 'open'",
+            (live_strategy_id,),
+        ).fetchone()
+        if open_position is not None:
+            return False
+
+        adjustment_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO capital_adjustments "
+            "(id, live_strategy_id, previous_capital, new_capital, delta) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (adjustment_id, live_strategy_id, previous_capital, new_capital, new_capital - previous_capital),
+        )
+        conn.execute(
+            "UPDATE live_strategies SET current_capital = ? WHERE id = ?",
+            (new_capital, live_strategy_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def delete_live_strategy(live_strategy_id: str) -> bool:
     """stopped 상태의 라이브 전략을 자식 행까지 포함해 완전히 삭제한다. FK 제약
     (PRAGMA foreign_keys = ON)이 켜져 있어 부모(live_strategies)보다 자식 테이블을

@@ -611,15 +611,15 @@ def test_list_live_strategies_includes_capital_adjustment_history(monkeypatch, t
     monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
     strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
     client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
-    client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 800000})
+    client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 300000})
 
     resp = client.get("/api/v1/live-strategies")
 
     adjustments = resp.json()[0]["capital_adjustments"]
     assert len(adjustments) == 1
     assert adjustments[0]["previous_capital"] == 100000
-    assert adjustments[0]["new_capital"] == 800000
-    assert adjustments[0]["delta"] == 700000
+    assert adjustments[0]["new_capital"] == 300000
+    assert adjustments[0]["delta"] == 200000
     assert adjustments[0]["adjusted_at"].endswith(("+00:00", "Z"))
 
 
@@ -901,10 +901,10 @@ def test_update_capital_succeeds_when_no_open_position(monkeypatch, tmp_path):
     strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
     client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
 
-    resp = client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 800000})
+    resp = client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 300000})
 
     assert resp.status_code == 200
-    assert resp.json()["current_capital"] == 800000
+    assert resp.json()["current_capital"] == 300000
 
 
 def test_update_capital_rejects_when_open_position_exists(monkeypatch, tmp_path):
@@ -915,7 +915,7 @@ def test_update_capital_rejects_when_open_position_exists(monkeypatch, tmp_path)
     client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
     trading_db_module.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
 
-    resp = client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 800000})
+    resp = client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 300000})
 
     assert resp.status_code == 400
 
@@ -948,6 +948,63 @@ def test_update_capital_returns_404_for_missing_id(monkeypatch, tmp_path):
     resp = client.patch("/api/v1/live-strategies/does-not-exist/capital", json={"new_capital": 800000})
 
     assert resp.status_code == 404
+
+
+def test_update_capital_rejects_when_exceeds_max_position_per_market(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    resp = client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 600000})
+
+    assert resp.status_code == 400
+
+
+def test_update_capital_rejects_stopped_status(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+
+    resp = client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 300000})
+
+    assert resp.status_code == 409
+
+
+def test_update_capital_rejects_infinite_value(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    resp = client.patch(
+        f"/api/v1/live-strategies/{strategy_id}/capital",
+        content='{"new_capital": Infinity}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_update_capital_rejects_nan_value(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+
+    resp = client.patch(
+        f"/api/v1/live-strategies/{strategy_id}/capital",
+        content='{"new_capital": NaN}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 400
 
 
 def test_stop_live_strategy_returns_409_when_already_stopped(monkeypatch, tmp_path):

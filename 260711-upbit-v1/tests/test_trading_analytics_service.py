@@ -59,6 +59,7 @@ def test_journal_summary_aggregates_across_strategies(monkeypatch, tmp_path):
     summary = svc.get_journal_summary()
 
     assert summary["cumulative_pnl"] == -1000.0  # 1000 - 2000
+    assert summary["cumulative_pnl_pct"] == pytest.approx(-1000.0 / 300000.0 * 100.0, abs=0.0001)
     assert summary["win_rate_pct"] == 50.0  # 1승 1패
     assert len(summary["equity_curve"]) == 1
     assert summary["equity_curve"][0]["value"] == 300_000.0 - 1000.0  # 원금합 - 순손실
@@ -126,6 +127,38 @@ def test_market_journal_reflects_twr_after_capital_adjustment(monkeypatch, tmp_p
 
     # TWR: (1.10 * 0.95) - 1 = 4.5%. 단순 계산(순손실 -2500 / 원금 500000 = -0.5%)과는 다르다.
     assert journal["cumulative_pnl_pct"] == pytest.approx(4.5, abs=0.01)
+
+
+def test_journal_summary_reflects_twr_when_strategy_has_capital_adjustment(monkeypatch, tmp_path):
+    db = _fresh(monkeypatch, tmp_path)
+    s1 = insert_live_strategy(db, market="KRW-BTC", status="draft")
+    _approve(db, s1, 500_000.0)
+
+    p1 = db.insert_position(s1, "KRW-BTC", 50_000_000.0, 0.01)
+    db.close_position_row(p1, 55_000_000.0, 0.01, 50_000.0, 10.0, "take_profit")
+    db.insert_capital_adjustment(s1, 550_000.0, 1_050_000.0)
+    p2 = db.insert_position(s1, "KRW-BTC", 50_000_000.0, 0.021)
+    db.close_position_row(p2, 47_500_000.0, 0.021, -52_500.0, -5.0, "stop_loss")
+
+    conn = db._connect()
+    try:
+        rows = conn.execute(
+            "SELECT id FROM positions WHERE live_strategy_id = ? ORDER BY rowid ASC", (s1,),
+        ).fetchall()
+        conn.execute("UPDATE positions SET exit_time = '2026-08-01 10:00:00' WHERE id = ?", (rows[0][0],))
+        conn.execute("UPDATE positions SET exit_time = '2026-08-03 10:00:00' WHERE id = ?", (rows[1][0],))
+        conn.execute(
+            "UPDATE capital_adjustments SET adjusted_at = '2026-08-02 09:00:00' WHERE live_strategy_id = ?",
+            (s1,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = svc.get_journal_summary()
+
+    assert summary["cumulative_pnl_pct"] == pytest.approx(4.5, abs=0.01)
+    assert summary["strategies"][0]["cumulative_pnl_pct"] == pytest.approx(4.5, abs=0.01)
 
 
 def test_market_journal_includes_trade_log_and_metrics(monkeypatch, tmp_path):
