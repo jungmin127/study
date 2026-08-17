@@ -307,6 +307,7 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
                 MDD(%) <SortIcon sortKeyOf="max_drawdown" />
               </button>
             </TableHead>
+            <TableHead className="text-right">최대거래 기여도(%)</TableHead>
             <TableHead>상태</TableHead>
             <TableHead>
               <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('created_at')}>
@@ -320,7 +321,7 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
         <TableBody>
           {sorted.length === 0 && (
             <TableRow>
-              <TableCell colSpan={13} className="text-center text-muted-foreground">
+              <TableCell colSpan={14} className="text-center text-muted-foreground">
                 조건에 맞는 결과가 없습니다.
               </TableCell>
             </TableRow>
@@ -359,6 +360,9 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
                 {run.is_live && <span className="ml-1 text-xs text-muted-foreground">(실시간)</span>}
               </TableCell>
               <TableCell className="text-right tabular-nums">{run.max_drawdown?.toFixed(2) ?? '-'}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {run.top_trade_contribution_pct != null ? `${run.top_trade_contribution_pct.toFixed(1)}%` : '-'}
+              </TableCell>
               <TableCell>
                 <LastTradeStatusBadge status={run.last_trade_status} />
               </TableCell>

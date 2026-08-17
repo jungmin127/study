@@ -166,6 +166,7 @@ export interface BacktestRunSummary {
   return_rate: number | null;
   sharpe: number | null;
   max_drawdown: number | null;
+  top_trade_contribution_pct: number | null;
   is_live: boolean;
   last_trade_status: 'open' | 'closed' | 'none';
   buy_conditions: ConditionGroup;

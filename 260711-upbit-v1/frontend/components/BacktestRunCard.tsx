@@ -54,6 +54,9 @@ export default function BacktestRunCard({ run, marketName, selected, onToggleSel
           {run.is_live && <span className="ml-1 text-xs text-muted-foreground">(실시간)</span>}
         </span>
         <span className="text-muted-foreground">MDD {run.max_drawdown?.toFixed(2) ?? '-'}%</span>
+        <span className="text-muted-foreground">
+          최대거래 기여도 {run.top_trade_contribution_pct != null ? `${run.top_trade_contribution_pct.toFixed(1)}%` : '-'}
+        </span>
         <LastTradeStatusBadge status={run.last_trade_status} />
       </div>
 
