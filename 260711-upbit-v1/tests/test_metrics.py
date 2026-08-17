@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from engine.metrics import calculate_metrics
+from engine.metrics import calculate_metrics, top_trade_contribution_pct
 
 
 def _df(closes: list[float]) -> pd.DataFrame:
@@ -64,6 +64,7 @@ def test_empty_equity_curve_returns_zeroed_metrics():
     assert result["total_trades"] == 0
     assert result["total_return"] == 0.0
     assert result["max_consecutive_loss"] == 0
+    assert result["top_trade_contribution_pct"] is None
 
 
 def test_sharpe_and_sortino_ratios_reflect_return_distribution():
@@ -124,3 +125,42 @@ def test_cagr_does_not_overflow_for_extreme_ratio_over_short_period():
     ]
     result = calculate_metrics(equity_curve, [], 10000.0, _df([100, 100]), "days")
     assert result["cagr"] == 0.0
+
+
+def test_top_trade_contribution_pct_none_when_no_wins():
+    trades = [{"pnl": -10.0}, {"pnl": -5.0}]
+    assert top_trade_contribution_pct(trades) is None
+
+
+def test_top_trade_contribution_pct_none_when_no_trades():
+    assert top_trade_contribution_pct([]) is None
+
+
+def test_top_trade_contribution_pct_even_distribution_is_low():
+    trades = [{"pnl": 100.0}, {"pnl": 100.0}, {"pnl": 100.0}, {"pnl": 100.0}]
+    assert top_trade_contribution_pct(trades) == pytest.approx(25.0)
+
+
+def test_top_trade_contribution_pct_dominant_trade_is_high():
+    trades = [{"pnl": 900.0}, {"pnl": 50.0}, {"pnl": 50.0}, {"pnl": -30.0}]
+    # gross_profit = 900+50+50 = 1000, 최대 이긴 거래 900 -> 90%
+    assert top_trade_contribution_pct(trades) == pytest.approx(90.0)
+
+
+def test_calculate_metrics_includes_top_trade_contribution_pct():
+    equity_curve = [{"timestamp": "2026-01-01T00:00:00", "value": 10000.0}]
+    trades = [
+        {"pnl": 900.0, "holdingPeriod": 1},
+        {"pnl": 50.0, "holdingPeriod": 1},
+        {"pnl": 50.0, "holdingPeriod": 1},
+        {"pnl": -30.0, "holdingPeriod": 1},
+    ]
+    result = calculate_metrics(equity_curve, trades, 10000.0, _df([100]), "days")
+    assert result["top_trade_contribution_pct"] == pytest.approx(90.0)
+
+
+def test_calculate_metrics_top_trade_contribution_pct_none_without_wins():
+    equity_curve = [{"timestamp": "2026-01-01T00:00:00", "value": 10000.0}]
+    trades = [{"pnl": -10.0, "holdingPeriod": 1}]
+    result = calculate_metrics(equity_curve, trades, 10000.0, _df([100]), "days")
+    assert result["top_trade_contribution_pct"] is None

@@ -91,6 +91,7 @@ def calculate_metrics(
     profit_factor = 0.0
     avg_holding_period = 0.0
     max_consecutive_loss = 0
+    top_trade_contribution_pct_value: float | None = None
 
     if trades:
         pnls = [float(t.get("pnl", 0.0)) for t in trades]
@@ -101,6 +102,8 @@ def calculate_metrics(
         gross_profit = sum(wins)
         gross_loss = abs(sum(losses))
         profit_factor = _safe_div(gross_profit, gross_loss) if gross_loss > 0 else 999.0
+        if wins and gross_profit > 0:
+            top_trade_contribution_pct_value = max(wins) / gross_profit * 100.0
 
         holding_periods = [bars_to_days(int(t.get("holdingPeriod", 0)), timeframe) for t in trades]
         avg_holding_period = float(np.mean(holding_periods)) if holding_periods else 0.0
@@ -126,6 +129,11 @@ def calculate_metrics(
         "avg_holding_period": round(avg_holding_period, 2),
         "max_consecutive_loss": max_consecutive_loss,
         "buy_and_hold_return": round(buy_and_hold_return, 4),
+        "top_trade_contribution_pct": (
+            round(top_trade_contribution_pct_value, 4)
+            if top_trade_contribution_pct_value is not None
+            else None
+        ),
         "total_trades": total_trades,
     }
 
@@ -135,7 +143,8 @@ def _empty_metrics() -> dict:
         "total_return": 0.0, "cagr": 0.0, "mdd": 0.0,
         "sharpe_ratio": 0.0, "sortino_ratio": 0.0, "calmar_ratio": 0.0,
         "win_rate": 0.0, "profit_factor": 0.0, "avg_holding_period": 0.0,
-        "max_consecutive_loss": 0, "buy_and_hold_return": 0.0, "total_trades": 0,
+        "max_consecutive_loss": 0, "buy_and_hold_return": 0.0,
+        "top_trade_contribution_pct": None, "total_trades": 0,
     }
 
 
@@ -170,4 +179,15 @@ def _max_consecutive_loss(pnls: list[float]) -> int:
     return max_consec
 
 
-__all__ = ["calculate_metrics", "bars_to_days"]
+def top_trade_contribution_pct(trades: list[dict]) -> float | None:
+    """총 이익(gross profit) 중 가장 큰 단일 거래의 pnl이 차지하는 비중(%).
+    이긴 거래가 없으면 None. 분모를 총수익률이 아니라 gross_profit으로 잡아,
+    전략이 순손실이어도 '이긴 거래들 중 쏠림 정도'를 안정적으로 보여준다."""
+    wins = [float(t.get("pnl", 0.0)) for t in trades if t.get("pnl", 0.0) > 0]
+    if not wins:
+        return None
+    gross_profit = sum(wins)
+    return max(wins) / gross_profit * 100.0 if gross_profit > 0 else None
+
+
+__all__ = ["calculate_metrics", "bars_to_days", "top_trade_contribution_pct"]
