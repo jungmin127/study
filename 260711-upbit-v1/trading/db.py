@@ -22,6 +22,7 @@ TABLE_NAMES = (
     "daily_performance",
     "circuit_breaker_state",
     "manual_intervention_events",
+    "capital_adjustments",
 )
 
 _initialized_paths: set[Path] = set()
@@ -131,6 +132,15 @@ CREATE TABLE IF NOT EXISTS manual_intervention_events (
     description    TEXT NOT NULL,
     action_taken   TEXT NOT NULL,
     resolved_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS capital_adjustments (
+    id                TEXT PRIMARY KEY,
+    live_strategy_id  TEXT NOT NULL REFERENCES live_strategies(id),
+    adjusted_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    previous_capital  REAL NOT NULL,
+    new_capital       REAL NOT NULL,
+    delta             REAL NOT NULL
 );
 """
 
@@ -727,13 +737,43 @@ def list_active_strategies() -> list[dict]:
         conn.close()
 
 
+def insert_capital_adjustment(live_strategy_id: str, previous_capital: float, new_capital: float) -> str:
+    adjustment_id = str(uuid.uuid4())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO capital_adjustments "
+            "(id, live_strategy_id, previous_capital, new_capital, delta) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (adjustment_id, live_strategy_id, previous_capital, new_capital, new_capital - previous_capital),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return adjustment_id
+
+
+def list_capital_adjustments(live_strategy_id: str) -> list[dict]:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM capital_adjustments WHERE live_strategy_id = ? "
+            "ORDER BY adjusted_at ASC, rowid ASC",
+            (live_strategy_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def delete_live_strategy(live_strategy_id: str) -> bool:
     """stopped 상태의 라이브 전략을 자식 행까지 포함해 완전히 삭제한다. FK 제약
     (PRAGMA foreign_keys = ON)이 켜져 있어 부모(live_strategies)보다 자식 테이블을
     먼저 지워야 한다. 삭제 순서: signals(orders 참조) -> orders(position_id로 positions
     참조 + replaces_order_id로 같은 테이블을 자기참조하지만, 해당 전략의 orders를
     한 문장으로 전부 지우므로 자기참조로 인한 FK 위반 없음) -> positions ->
-    daily_performance/circuit_breaker_state -> live_strategies.
+    daily_performance/circuit_breaker_state/capital_adjustments -> live_strategies.
     manual_intervention_events는 live_strategy_id를 FK로 참조하지 않으므로 건드리지
     않는다. status가 'stopped'가 아니면(또는 id가 없으면) 아무것도 지우지 않고
     False를 반환한다."""
@@ -751,6 +791,7 @@ def delete_live_strategy(live_strategy_id: str) -> bool:
         conn.execute("DELETE FROM positions WHERE live_strategy_id = ?", (live_strategy_id,))
         conn.execute("DELETE FROM daily_performance WHERE live_strategy_id = ?", (live_strategy_id,))
         conn.execute("DELETE FROM circuit_breaker_state WHERE live_strategy_id = ?", (live_strategy_id,))
+        conn.execute("DELETE FROM capital_adjustments WHERE live_strategy_id = ?", (live_strategy_id,))
         cursor = conn.execute(
             "DELETE FROM live_strategies WHERE id = ? AND status = 'stopped'",
             (live_strategy_id,),

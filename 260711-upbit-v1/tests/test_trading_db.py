@@ -10,7 +10,7 @@ def _fresh_db(monkeypatch, tmp_path):
     return db_module
 
 
-def test_connect_creates_all_seven_tables(monkeypatch, tmp_path):
+def test_connect_creates_all_tables(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     conn = db._connect()
     try:
@@ -987,6 +987,7 @@ def test_delete_live_strategy_removes_strategy_and_child_rows(monkeypatch, tmp_p
         strategy_id, "2026-08-17", 0.0, 0.0, 0, 0, 0, 100000.0, 100000.0,
     )
     db.upsert_circuit_breaker_state(strategy_id, "2026-08-17", 0, 0)
+    db.insert_capital_adjustment(strategy_id, 100000.0, 200000.0)
 
     deleted = db.delete_live_strategy(strategy_id)
 
@@ -996,6 +997,7 @@ def test_delete_live_strategy_removes_strategy_and_child_rows(monkeypatch, tmp_p
     assert db.get_order_by_id(order_id) is None
     assert db.get_circuit_breaker_state(strategy_id) is None
     assert db.get_daily_performance(strategy_id, "2026-08-17") is None
+    assert db.list_capital_adjustments(strategy_id) == []
 
 
 def test_delete_live_strategy_rejects_non_stopped_status(monkeypatch, tmp_path):
@@ -1012,3 +1014,49 @@ def test_delete_live_strategy_returns_false_for_missing_id(monkeypatch, tmp_path
     db = _fresh_db(monkeypatch, tmp_path)
 
     assert db.delete_live_strategy("does-not-exist") is False
+
+
+def test_insert_capital_adjustment_persists_fields(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    adjustment_id = db.insert_capital_adjustment(strategy_id, 500_000.0, 800_000.0)
+
+    rows = db.list_capital_adjustments(strategy_id)
+    assert len(rows) == 1
+    assert rows[0]["id"] == adjustment_id
+    assert rows[0]["previous_capital"] == 500_000.0
+    assert rows[0]["new_capital"] == 800_000.0
+    assert rows[0]["delta"] == 300_000.0
+
+
+def test_list_capital_adjustments_orders_ascending_by_adjusted_at(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    first_id = db.insert_capital_adjustment(strategy_id, 500_000.0, 1_000_000.0)
+    second_id = db.insert_capital_adjustment(strategy_id, 1_000_000.0, 800_000.0)
+
+    conn = db._connect()
+    try:
+        conn.execute(
+            "UPDATE capital_adjustments SET adjusted_at = '2026-08-01 09:00:00' WHERE id = ?",
+            (first_id,),
+        )
+        conn.execute(
+            "UPDATE capital_adjustments SET adjusted_at = '2026-08-02 09:00:00' WHERE id = ?",
+            (second_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = db.list_capital_adjustments(strategy_id)
+
+    assert [r["id"] for r in rows] == [first_id, second_id]
+
+
+def test_list_capital_adjustments_returns_empty_for_strategy_with_none(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    assert db.list_capital_adjustments(strategy_id) == []
