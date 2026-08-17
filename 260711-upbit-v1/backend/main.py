@@ -1329,6 +1329,27 @@ def stop_live_strategy_endpoint(strategy_id: str) -> dict:
     return _full_live_strategy_response(strategy_id)
 
 
+class UpdateLiveStrategyCapitalRequest(BaseModel):
+    new_capital: float
+
+
+@app.patch("/api/v1/live-strategies/{strategy_id}/capital")
+def update_live_strategy_capital_endpoint(strategy_id: str, req: UpdateLiveStrategyCapitalRequest) -> dict:
+    strategy = trading_db.get_live_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    if strategy["status"] not in ("running", "paused"):
+        raise HTTPException(status_code=409, detail="running 또는 paused 상태의 전략만 시드를 변경할 수 있습니다")
+    if trading_db.get_open_position(strategy_id) is not None:
+        raise HTTPException(status_code=400, detail="포지션 보유 중에는 시드를 변경할 수 없습니다")
+    if req.new_capital <= 0:
+        raise HTTPException(status_code=400, detail="시드는 0보다 커야 합니다")
+
+    trading_db.insert_capital_adjustment(strategy_id, strategy["current_capital"], req.new_capital)
+    trading_db.update_live_strategy_capital(strategy_id, req.new_capital)
+    return _full_live_strategy_response(strategy_id)
+
+
 @app.delete("/api/v1/live-strategies/{strategy_id}")
 def delete_live_strategy_endpoint(strategy_id: str) -> dict:
     strategy = trading_db.get_live_strategy(strategy_id)
