@@ -525,8 +525,9 @@ def get_backtest_runs() -> list[dict]:
         is_live = False
         final_value = r["final_value"]
         return_rate = r["return_rate"]
+        trades = r["trades"]
         if live_price is not None and has_revaluable_open_trade(r["trades"]):
-            _, delta = revalue_open_trades(
+            revalued, delta = revalue_open_trades(
                 r["trades"], live_price, datetime.now(timezone.utc).isoformat(), r["commission_rate"],
             )
             if delta != 0.0:
@@ -534,7 +535,7 @@ def get_backtest_runs() -> list[dict]:
                 initial_capital = r["initial_capital"]
                 return_rate = (final_value - initial_capital) / initial_capital * 100 if initial_capital else None
                 is_live = True
-        trades = r["trades"]
+                trades = revalued
         last_trade_status = "open" if (trades and trades[-1].get("forceClosed")) else ("closed" if trades else "none")
         result.append({
             "run_id": r["run_id"],

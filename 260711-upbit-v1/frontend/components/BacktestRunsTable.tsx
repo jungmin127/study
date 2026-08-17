@@ -361,7 +361,7 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
               </TableCell>
               <TableCell className="text-right tabular-nums">{run.max_drawdown?.toFixed(2) ?? '-'}</TableCell>
               <TableCell className="text-right tabular-nums">
-                {run.top_trade_contribution_pct != null ? `${run.top_trade_contribution_pct.toFixed(1)}%` : '-'}
+                {run.top_trade_contribution_pct != null ? run.top_trade_contribution_pct.toFixed(1) : '-'}
               </TableCell>
               <TableCell>
                 <LastTradeStatusBadge status={run.last_trade_status} />

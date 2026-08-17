@@ -1398,6 +1398,41 @@ def test_get_backtests_marks_is_live_and_updates_return_rate_for_open_position(m
     assert body[0]["return_rate"] != 5.0
 
 
+def test_get_backtests_top_trade_contribution_pct_uses_revalued_open_trade(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _patch_get_current_prices(monkeypatch, {"KRW-BTC": 200.0})
+
+    save_result(
+        run_id="r-open-contrib", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000, "commission_rate": 0.0},
+        result={
+            "final_value": 10050.0, "sharpe": None, "max_drawdown": None, "equity_curve": [],
+            "trades": [
+                {
+                    "entryTime": "2026-01-01T00:00:00", "exitTime": "2026-01-02T00:00:00",
+                    "entryPrice": 100.0, "exitPrice": 105.0, "returnRate": 5.0,
+                    "holdingPeriod": 1, "pnl": 50.0, "forceClosed": False, "size": 100.0,
+                },
+                {
+                    "entryTime": "2026-01-05T00:00:00", "exitTime": "2026-01-10T00:00:00",
+                    "entryPrice": 100.0, "exitPrice": 100.0, "returnRate": 0.0,
+                    "holdingPeriod": 5, "pnl": 0.0, "forceClosed": True, "size": 10.0,
+                },
+            ],
+        },
+    )
+
+    resp = client.get("/api/v1/backtests")
+    assert resp.status_code == 200
+    body = resp.json()
+    # open trade revalued at live_price=200.0: (200.0 - 100.0) * 10.0 = 1000.0
+    # gross_profit = 50.0 (closed win) + 1000.0 (revalued open win) = 1050.0
+    assert body[0]["top_trade_contribution_pct"] == pytest.approx(1000.0 / 1050.0 * 100.0)
+
+
 def test_get_backtests_includes_strategy_condition_summaries(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     save_result(

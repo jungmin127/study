@@ -183,11 +183,12 @@ def top_trade_contribution_pct(trades: list[dict]) -> float | None:
     """총 이익(gross profit) 중 가장 큰 단일 거래의 pnl이 차지하는 비중(%).
     이긴 거래가 없으면 None. 분모를 총수익률이 아니라 gross_profit으로 잡아,
     전략이 순손실이어도 '이긴 거래들 중 쏠림 정도'를 안정적으로 보여준다."""
-    wins = [float(t.get("pnl", 0.0)) for t in trades if t.get("pnl", 0.0) > 0]
+    wins = [float(t.get("pnl", 0.0)) for t in trades]
+    wins = [p for p in wins if p > 0]
     if not wins:
         return None
     gross_profit = sum(wins)
-    return max(wins) / gross_profit * 100.0 if gross_profit > 0 else None
+    return round(max(wins) / gross_profit * 100.0, 4) if gross_profit > 0 else None
 
 
 __all__ = ["calculate_metrics", "bars_to_days", "top_trade_contribution_pct"]
