@@ -43,6 +43,9 @@ export interface LiveStrategy {
   started_at: string | null;
   stopped_at: string | null;
   open_position: LiveStrategyOpenPosition | null;
+  buy_conditions: ConditionGroup;
+  sell_conditions: ConditionGroup;
+  risk_config: LiveStrategyRiskConfig;
 }
 
 export interface BacktestConfig {
