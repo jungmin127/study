@@ -595,6 +595,34 @@ def test_list_live_strategies_includes_buy_sell_conditions_and_risk_config(monke
     assert body["risk_config"]["daily_loss_limit_pct"] == -5.0
 
 
+def test_list_live_strategies_includes_empty_capital_adjustments_by_default(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    client.post("/api/v1/live-strategies", json=_live_strategy_request())
+
+    resp = client.get("/api/v1/live-strategies")
+
+    assert resp.json()[0]["capital_adjustments"] == []
+
+
+def test_list_live_strategies_includes_capital_adjustment_history(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+    client.patch(f"/api/v1/live-strategies/{strategy_id}/capital", json={"new_capital": 800000})
+
+    resp = client.get("/api/v1/live-strategies")
+
+    adjustments = resp.json()[0]["capital_adjustments"]
+    assert len(adjustments) == 1
+    assert adjustments[0]["previous_capital"] == 100000
+    assert adjustments[0]["new_capital"] == 800000
+    assert adjustments[0]["delta"] == 700000
+    assert adjustments[0]["adjusted_at"].endswith(("+00:00", "Z"))
+
+
 def _accounts_with_krw_balance(balance: float):
     async def _fake(*args, **kwargs):
         return [{"currency": "KRW", "balance": str(balance), "locked": "0"}]

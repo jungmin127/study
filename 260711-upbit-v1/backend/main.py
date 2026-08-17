@@ -1179,6 +1179,16 @@ def _live_strategy_response(strategy: dict, position: dict | None, current_price
         "buy_conditions": json.loads(strategy["buy_conditions_json"]),
         "sell_conditions": json.loads(strategy["sell_conditions_json"]),
         "risk_config": json.loads(strategy["risk_config_json"]),
+        "capital_adjustments": [
+            {
+                "id": adj["id"],
+                "adjusted_at": _to_utc_iso(adj["adjusted_at"]),
+                "previous_capital": adj["previous_capital"],
+                "new_capital": adj["new_capital"],
+                "delta": adj["delta"],
+            }
+            for adj in trading_db.list_capital_adjustments(strategy["id"])
+        ],
     }
 
 
