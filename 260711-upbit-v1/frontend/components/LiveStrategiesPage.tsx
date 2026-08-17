@@ -36,8 +36,8 @@ import {
 import { summarizeGroup } from '@/lib/condition-summary';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { formatDateTime, formatTimeframe } from '@/lib/format';
-import { INPUT_CLASS } from '@/lib/ui-classes';
+import { formatCapital, formatDateTime, formatTimeframe } from '@/lib/format';
+import { Input } from '@/components/ui/input';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling';
 
@@ -102,16 +102,29 @@ function ChangeCapitalDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const parsedValue = value === '' ? null : Number(value);
+  const delta =
+    parsedValue !== null && strategy.current_capital !== null ? parsedValue - strategy.current_capital : null;
+
+  function updateValue(raw: string) {
+    setValue(raw.replace(/[^0-9]/g, ''));
+  }
+
+  function closeAndReset() {
+    setOpen(false);
+    setValue('');
+    setError(null);
+  }
+
   async function handleSubmit() {
-    const newCapital = Number(value);
-    if (!Number.isFinite(newCapital) || newCapital <= 0) {
+    if (parsedValue === null || !Number.isFinite(parsedValue) || parsedValue <= 0) {
       setError('0보다 큰 숫자를 입력하세요.');
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
-      await updateLiveStrategyCapital(strategy.id, newCapital);
+      await updateLiveStrategyCapital(strategy.id, parsedValue);
       await onChanged();
       setOpen(false);
       setValue('');
@@ -120,12 +133,6 @@ function ChangeCapitalDialog({
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function closeAndReset() {
-    setOpen(false);
-    setValue('');
-    setError(null);
   }
 
   return (
@@ -160,14 +167,20 @@ function ChangeCapitalDialog({
                 : '-'}
             </span>
           </p>
-          <input
-            type="number"
-            inputMode="decimal"
-            className={INPUT_CLASS}
+          <Input
+            type="text"
+            inputMode="numeric"
             placeholder="새 시드 금액(원)"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
+            value={formatCapital(value)}
+            onChange={(e) => updateValue(e.target.value)}
           />
+          {delta !== null && strategy.current_capital !== null && (
+            <p className="text-xs text-muted-foreground">
+              {Math.round(strategy.current_capital).toLocaleString()}원 → {Math.round(parsedValue!).toLocaleString()}
+              원 ({delta >= 0 ? '+' : ''}
+              {Math.round(delta).toLocaleString()}원)
+            </p>
+          )}
           {error && <p className="text-destructive">{error}</p>}
         </div>
         <DialogFooter>
