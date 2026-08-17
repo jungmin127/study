@@ -578,6 +578,23 @@ def test_list_live_strategies_open_position_is_null_when_no_position(monkeypatch
     assert resp.json()[0]["open_position"] is None
 
 
+def test_list_live_strategies_includes_buy_sell_conditions_and_risk_config(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    client.post("/api/v1/live-strategies", json=_live_strategy_request())
+
+    resp = client.get("/api/v1/live-strategies")
+
+    assert resp.status_code == 200
+    body = resp.json()[0]
+    assert body["buy_conditions"] == _VALID_BUY
+    assert body["sell_conditions"] == _VALID_SELL
+    assert body["risk_config"]["position_sizing_mode"] == "fixed"
+    assert body["risk_config"]["position_sizing_value"] == 100000
+    assert body["risk_config"]["daily_loss_limit_pct"] == -5.0
+
+
 def _accounts_with_krw_balance(balance: float):
     async def _fake(*args, **kwargs):
         return [{"currency": "KRW", "balance": str(balance), "locked": "0"}]

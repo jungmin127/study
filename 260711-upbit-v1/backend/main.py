@@ -1176,6 +1176,9 @@ def _live_strategy_response(strategy: dict, position: dict | None, current_price
         "started_at": strategy["started_at"],
         "stopped_at": strategy["stopped_at"],
         "open_position": _open_position_summary(position, current_price) if position else None,
+        "buy_conditions": json.loads(strategy["buy_conditions_json"]),
+        "sell_conditions": json.loads(strategy["sell_conditions_json"]),
+        "risk_config": json.loads(strategy["risk_config_json"]),
     }
 
 
