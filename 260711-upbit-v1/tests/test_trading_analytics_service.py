@@ -1,3 +1,4 @@
+import pytest
 import pandas as pd
 
 import backend.trading_analytics_service as svc
@@ -93,6 +94,38 @@ def test_market_journal_returns_none_when_only_unapproved_draft(monkeypatch, tmp
     db = _fresh(monkeypatch, tmp_path)
     insert_live_strategy(db, status="draft", market="KRW-DOGE")
     assert svc.get_market_journal("KRW-DOGE") is None
+
+
+def test_market_journal_reflects_twr_after_capital_adjustment(monkeypatch, tmp_path):
+    db = _fresh(monkeypatch, tmp_path)
+    s1 = insert_live_strategy(db, market="KRW-BTC", status="draft")
+    _approve(db, s1, 500_000.0)
+
+    p1 = db.insert_position(s1, "KRW-BTC", 50_000_000.0, 0.01)
+    db.close_position_row(p1, 55_000_000.0, 0.01, 50_000.0, 10.0, "take_profit")
+    db.insert_capital_adjustment(s1, 550_000.0, 1_050_000.0)
+    p2 = db.insert_position(s1, "KRW-BTC", 50_000_000.0, 0.021)
+    db.close_position_row(p2, 47_500_000.0, 0.021, -52_500.0, -5.0, "stop_loss")
+
+    conn = db._connect()
+    try:
+        rows = conn.execute(
+            "SELECT id FROM positions WHERE live_strategy_id = ? ORDER BY rowid ASC", (s1,),
+        ).fetchall()
+        conn.execute("UPDATE positions SET exit_time = '2026-08-01 10:00:00' WHERE id = ?", (rows[0][0],))
+        conn.execute("UPDATE positions SET exit_time = '2026-08-03 10:00:00' WHERE id = ?", (rows[1][0],))
+        conn.execute(
+            "UPDATE capital_adjustments SET adjusted_at = '2026-08-02 09:00:00' WHERE live_strategy_id = ?",
+            (s1,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    journal = svc.get_market_journal("KRW-BTC")
+
+    # TWR: (1.10 * 0.95) - 1 = 4.5%. 단순 계산(순손실 -2500 / 원금 500000 = -0.5%)과는 다르다.
+    assert journal["cumulative_pnl_pct"] == pytest.approx(4.5, abs=0.01)
 
 
 def test_market_journal_includes_trade_log_and_metrics(monkeypatch, tmp_path):
@@ -198,3 +231,67 @@ def test_market_journal_backtest_comparison_present_with_source_run(monkeypatch,
     assert comparison["backtest"]["win_rate_pct"] == 50.0
     assert comparison["live"]["trade_count"] == 1
     assert comparison["sample_size_warning"] is True  # 1건 < MIN_SAMPLE_SIZE
+
+
+def test_twr_pct_matches_simple_calc_when_no_adjustments():
+    closed = [
+        {"realized_pnl": 50_000.0, "exit_time": "2026-08-01 10:00:00"},
+        {"realized_pnl": -20_000.0, "exit_time": "2026-08-02 10:00:00"},
+    ]
+
+    result = svc._twr_pct(closed, 500_000.0, [])
+
+    assert result == pytest.approx((30_000.0 / 500_000.0) * 100.0)
+
+
+def test_twr_pct_returns_zero_when_baseline_is_zero_and_no_adjustments():
+    result = svc._twr_pct([], 0.0, [])
+    assert result == 0.0
+
+
+def test_twr_pct_chains_segment_returns_around_single_capital_increase():
+    """50만 원 시작 -> +10%(55만) -> 50만 증액(105만) -> -5%(99.75만).
+    TWR = (1.10 * 0.95) - 1 = +4.5%. 단순 계산(순손실 -2500 / 50만 = -0.5%)과는 다르다."""
+    closed = [
+        {"realized_pnl": 50_000.0, "exit_time": "2026-08-01 10:00:00"},
+        {"realized_pnl": -52_500.0, "exit_time": "2026-08-03 10:00:00"},
+    ]
+    adjustments = [
+        {"adjusted_at": "2026-08-02 09:00:00", "new_capital": 1_050_000.0},
+    ]
+
+    result = svc._twr_pct(closed, 500_000.0, adjustments)
+
+    assert result == pytest.approx(4.5, abs=0.01)
+
+
+def test_twr_pct_chains_multiple_adjustments_with_trades_in_each_segment():
+    closed = [
+        {"realized_pnl": 10_000.0, "exit_time": "2026-08-01 10:00:00"},   # 구간1: 100000 -> +10%
+        {"realized_pnl": -6_000.0, "exit_time": "2026-08-05 10:00:00"},   # 구간2: 200000 -> -3%
+        {"realized_pnl": 9_700.0, "exit_time": "2026-08-10 10:00:00"},    # 구간3: 194000 -> +5%
+    ]
+    adjustments = [
+        {"adjusted_at": "2026-08-02 09:00:00", "new_capital": 200_000.0},
+        {"adjusted_at": "2026-08-06 09:00:00", "new_capital": 194_000.0},
+    ]
+
+    result = svc._twr_pct(closed, 100_000.0, adjustments)
+
+    expected = ((1.10) * (1 - 0.03) * (1.05) - 1) * 100.0
+    assert result == pytest.approx(expected, abs=0.01)
+
+
+def test_twr_pct_ignores_input_order_and_sorts_by_exit_time():
+    """closed_positions가 exit_time 역순으로 들어와도 결과는 같아야 한다
+    (list_closed_positions는 entry_time DESC로 반환하므로 이 정렬이 함수 내부 책임)."""
+    closed_forward = [
+        {"realized_pnl": 50_000.0, "exit_time": "2026-08-01 10:00:00"},
+        {"realized_pnl": -52_500.0, "exit_time": "2026-08-03 10:00:00"},
+    ]
+    closed_reversed = list(reversed(closed_forward))
+    adjustments = [{"adjusted_at": "2026-08-02 09:00:00", "new_capital": 1_050_000.0}]
+
+    assert svc._twr_pct(closed_forward, 500_000.0, adjustments) == pytest.approx(
+        svc._twr_pct(closed_reversed, 500_000.0, adjustments)
+    )

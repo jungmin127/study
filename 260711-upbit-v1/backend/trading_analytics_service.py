@@ -48,13 +48,42 @@ def _strategy_baseline_capital(strategy: dict, daily_rows: list[dict]) -> float:
     return strategy["current_capital"] or 0.0
 
 
+def _twr_pct(closed_positions: list[dict], baseline: float, adjustments: list[dict]) -> float:
+    """자본 조정 시점을 경계로 거래를 구간으로 나눠 구간수익률을 복리로 연결한다
+    (시간가중수익률). 조정 이력이 없으면 결과는 (cumulative_pnl / baseline * 100)과
+    수학적으로 동일하다. adjustments는 adjusted_at 오름차순이어야 한다
+    (trading_db.list_capital_adjustments가 이미 그 순서로 반환)."""
+    if not adjustments:
+        pnl = sum(p["realized_pnl"] for p in closed_positions)
+        return (pnl / baseline * 100.0) if baseline else 0.0
+
+    positions_sorted = sorted(closed_positions, key=lambda p: p["exit_time"])
+    factor = 1.0
+    seg_start_capital = baseline
+    cursor = 0
+    for adj in adjustments:
+        seg_pnl = 0.0
+        while cursor < len(positions_sorted) and positions_sorted[cursor]["exit_time"] < adj["adjusted_at"]:
+            seg_pnl += positions_sorted[cursor]["realized_pnl"]
+            cursor += 1
+        if seg_start_capital:
+            factor *= 1 + seg_pnl / seg_start_capital
+        seg_start_capital = adj["new_capital"]
+
+    seg_pnl = sum(p["realized_pnl"] for p in positions_sorted[cursor:])
+    if seg_start_capital:
+        factor *= 1 + seg_pnl / seg_start_capital
+    return (factor - 1) * 100.0
+
+
 def _strategy_metrics(strategy: dict) -> dict:
     closed = trading_db.list_closed_positions(strategy["id"])
     daily_rows = trading_db.list_daily_performance(strategy["id"])
+    adjustments = trading_db.list_capital_adjustments(strategy["id"])
     baseline = _strategy_baseline_capital(strategy, daily_rows)
 
     cumulative_pnl = sum(p["realized_pnl"] for p in closed)
-    cumulative_pnl_pct = (cumulative_pnl / baseline * 100.0) if baseline else 0.0
+    cumulative_pnl_pct = _twr_pct(closed, baseline, adjustments)
     mdd_pct = _mdd_pct([row["ending_balance"] for row in daily_rows])
     win_rate_pct = _win_rate_pct(closed)
 
@@ -81,11 +110,13 @@ def get_journal_summary() -> dict:
     strategy_cards = []
     pnl_by_date: dict[str, float] = {}
     total_baseline = 0.0
+    weighted_pct_sum = 0.0
     all_closed: list[dict] = []
 
     for strategy in strategies:
         m = _strategy_metrics(strategy)
         total_baseline += m["baseline"]
+        weighted_pct_sum += m["cumulative_pnl_pct"] * m["baseline"]
         all_closed.extend(m["closed_positions"])
         for row in m["daily_rows"]:
             pnl_by_date[row["trading_date"]] = (
@@ -108,7 +139,7 @@ def get_journal_summary() -> dict:
         equity_curve.append({"trading_date": trading_date, "value": round(running, 4)})
 
     cumulative_pnl = sum(p["realized_pnl"] for p in all_closed)
-    cumulative_pnl_pct = (cumulative_pnl / total_baseline * 100.0) if total_baseline else 0.0
+    cumulative_pnl_pct = (weighted_pct_sum / total_baseline) if total_baseline else 0.0
     mdd_series = [total_baseline] + [e["value"] for e in equity_curve]
 
     return {
@@ -167,13 +198,18 @@ def _market_metrics(strategies: list[dict]) -> dict:
     지표. 코인 단위 매매일지(달력/라인차트 포함)를 위해 _strategy_metrics를 전략별로
     구해 날짜별 realized_pnl을 합산한 뒤, baseline부터 날짜순으로 누적하며 그날의
     수익률(%)까지 함께 계산한다 — daily_performance에 이미 저장된 realized_pnl_pct는
-    전략 단위 기준이라 코인 합산 관점에서는 재계산이 필요하다."""
+    전략 단위 기준이라 코인 합산 관점에서는 재계산이 필요하다.
+    cumulative_pnl_pct는 각 전략의 TWR 보정된 cumulative_pnl_pct를 baseline으로
+    가중평균한다 — 자본 조정 이력이 없는 흔한 경우엔 sum(pnl)/sum(baseline)과
+    대수적으로 동일하다(가중치가 전부 baseline이고 pct_i == pnl_i/baseline_i*100일 때)."""
     total_baseline = 0.0
+    weighted_pct_sum = 0.0
     all_closed: list[dict] = []
     pnl_by_date: dict[str, float] = {}
     for strategy in strategies:
         m = _strategy_metrics(strategy)
         total_baseline += m["baseline"]
+        weighted_pct_sum += m["cumulative_pnl_pct"] * m["baseline"]
         all_closed.extend(m["closed_positions"])
         for row in m["daily_rows"]:
             pnl_by_date[row["trading_date"]] = pnl_by_date.get(row["trading_date"], 0.0) + row["realized_pnl"]
@@ -192,7 +228,7 @@ def _market_metrics(strategies: list[dict]) -> dict:
         })
 
     cumulative_pnl = sum(p["realized_pnl"] for p in all_closed)
-    cumulative_pnl_pct = (cumulative_pnl / total_baseline * 100.0) if total_baseline else 0.0
+    cumulative_pnl_pct = (weighted_pct_sum / total_baseline) if total_baseline else 0.0
     mdd_series = [total_baseline] + [d["cumulative"] for d in daily]
 
     return {
