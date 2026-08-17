@@ -66,6 +66,12 @@ function MetricsGrid({ metrics }: { metrics: BacktestMetrics }) {
       label: '최대연속손실', value: `${metrics.max_consecutive_loss}건`,
       tooltip: '연속으로 손실이 난 거래의 최대 횟수입니다. 클수록 연속 손실 구간에서 심리적/자금 압박이 컸다는 뜻입니다.', icon: Repeat,
     },
+    {
+      label: '최대거래 기여도',
+      value: metrics.top_trade_contribution_pct != null ? `${metrics.top_trade_contribution_pct.toFixed(1)}%` : '-',
+      tooltip: '총 이익 중 가장 큰 단일 거래가 차지하는 비중입니다. 높을수록 소수 거래에 수익이 쏠렸다는 뜻입니다.',
+      icon: Percent,
+    },
   ];
 
   return (

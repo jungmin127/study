@@ -44,6 +44,7 @@ export interface BacktestMetrics {
   avg_holding_period: number;
   max_consecutive_loss: number;
   buy_and_hold_return: number;
+  top_trade_contribution_pct: number | null;
   total_trades: number;
 }
 
