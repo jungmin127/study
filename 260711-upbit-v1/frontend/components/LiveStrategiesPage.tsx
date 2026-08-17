@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Check, Pause, Play, Square, Trash2, X } from 'lucide-react';
+import { Check, CircleHelp, Pause, Play, Square, Trash2, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import {
   approveLiveStrategy,
@@ -24,6 +24,14 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { summarizeGroup } from '@/lib/condition-summary';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { formatTimeframe } from '@/lib/format';
@@ -34,6 +42,40 @@ const POLL_INTERVAL_MS = 5000;
 
 function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+const RISK_CONFIG_LABELS: Record<string, string> = {
+  position_sizing_mode: '포지션 사이징 방식',
+  position_sizing_value: '포지션 사이징 값',
+  max_position_per_market: '코인당 최대 포지션',
+  order_execution_mode: '주문 방식',
+  order_timeout_sec: '주문 타임아웃(초)',
+  manual_intervention_policy: '수동 개입 정책',
+  daily_loss_limit_pct: '일일 손실 한도(%)',
+  consecutive_loss_limit: '연속 손실 한도',
+};
+
+const POSITION_SIZING_MODE_LABELS: Record<string, string> = {
+  fixed: '고정 금액',
+  percent: '자본 비율(%)',
+};
+
+const ORDER_EXECUTION_MODE_LABELS: Record<string, string> = {
+  market: '시장가',
+  limit: '지정가',
+  limit_timeout: '지정가(타임아웃 시 시장가 전환)',
+};
+
+const MANUAL_INTERVENTION_POLICY_LABELS: Record<string, string> = {
+  all_stop: '전체 정지',
+  acknowledge_and_continue: '확인 후 계속',
+};
+
+function formatRiskConfigValue(key: string, value: number | string): string {
+  if (key === 'position_sizing_mode') return POSITION_SIZING_MODE_LABELS[value as string] ?? String(value);
+  if (key === 'order_execution_mode') return ORDER_EXECUTION_MODE_LABELS[value as string] ?? String(value);
+  if (key === 'manual_intervention_policy') return MANUAL_INTERVENTION_POLICY_LABELS[value as string] ?? String(value);
+  return String(value);
 }
 
 function Stat({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
@@ -102,6 +144,50 @@ export default function LiveStrategiesPage() {
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
                 <Badge variant={s.status === 'running' ? 'default' : 'secondary'}>{s.status}</Badge>
+                <Dialog>
+                  <DialogTrigger
+                    type="button"
+                    className={buttonVariants({ variant: 'outline', size: 'icon-lg' })}
+                    aria-label="전략 설정 보기"
+                    title="전략 설정 보기"
+                  >
+                    <CircleHelp />
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>
+                        {s.market} · {formatTimeframe(s.timeframe)} 전략 설정
+                      </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3 text-sm">
+                      <div>
+                        <p className="mb-1 font-medium text-muted-foreground">매수 조건</p>
+                        <p className="rounded-md bg-muted/50 p-2 font-mono text-xs">
+                          {summarizeGroup(s.buy_conditions)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 font-medium text-muted-foreground">매도 조건</p>
+                        <p className="rounded-md bg-muted/50 p-2 font-mono text-xs">
+                          {summarizeGroup(s.sell_conditions)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 font-medium text-muted-foreground">리스크 관리</p>
+                        <div className="space-y-1 rounded-md bg-muted/50 p-2">
+                          {Object.entries(RISK_CONFIG_LABELS).map(([key, label]) => (
+                            <div key={key} className="flex justify-between gap-2">
+                              <span className="text-muted-foreground">{label}</span>
+                              <span className="tabular-nums">
+                                {formatRiskConfigValue(key, s.risk_config[key as keyof typeof s.risk_config])}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
                 {s.status === 'draft' && (
                   <>
                     <Button
