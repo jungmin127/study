@@ -32,6 +32,14 @@ export interface LiveStrategyOpenPosition {
   unrealized_pnl_pct: number | null;
 }
 
+export interface CapitalAdjustment {
+  id: string;
+  adjusted_at: string;
+  previous_capital: number;
+  new_capital: number;
+  delta: number;
+}
+
 export interface LiveStrategy {
   id: string;
   market: string;
@@ -46,6 +54,7 @@ export interface LiveStrategy {
   buy_conditions: ConditionGroup;
   sell_conditions: ConditionGroup;
   risk_config: LiveStrategyRiskConfig;
+  capital_adjustments: CapitalAdjustment[];
 }
 
 export interface BacktestConfig {

@@ -39,3 +39,10 @@ export function stopLiveStrategy(id: string): Promise<LiveStrategy> {
 export function deleteLiveStrategy(id: string): Promise<{ deleted: boolean }> {
   return apiFetch<{ deleted: boolean }>(`/api/v1/live-strategies/${id}`, { method: 'DELETE' });
 }
+
+export function updateLiveStrategyCapital(id: string, newCapital: number): Promise<LiveStrategy> {
+  return apiFetch<LiveStrategy>(`/api/v1/live-strategies/${id}/capital`, {
+    method: 'PATCH',
+    body: JSON.stringify({ new_capital: newCapital }),
+  });
+}
