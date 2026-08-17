@@ -122,14 +122,20 @@ function ChangeCapitalDialog({
     }
   }
 
+  function closeAndReset() {
+    setOpen(false);
+    setValue('');
+    setError(null);
+  }
+
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) {
-          setValue('');
-          setError(null);
+        if (next) {
+          setOpen(true);
+        } else {
+          closeAndReset();
         }
       }}
     >
@@ -165,7 +171,7 @@ function ChangeCapitalDialog({
           {error && <p className="text-destructive">{error}</p>}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={submitting}>
+          <Button variant="outline" onClick={closeAndReset} disabled={submitting}>
             취소
           </Button>
           <Button onClick={handleSubmit} disabled={submitting}>
