@@ -1,8 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowDown, ArrowUp, ArrowUpDown, Copy } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 import type { TrendSegment } from '@/lib/types/eda';
 
 function formatReturn(pct: number): string {
@@ -23,10 +25,19 @@ function patternRank(seg: TrendSegment): number {
   return TREND_RANK[seg.first_half_trend] * 3 + TREND_RANK[seg.second_half_trend];
 }
 
+function buildGridSearchHref(market: string, seg: TrendSegment): string {
+  const params = new URLSearchParams({
+    market,
+    start: seg.start_date,
+    end: seg.end_date,
+  });
+  return `/grid-search?${params.toString()}`;
+}
+
 type SortKey = 'pattern' | 'return_pct';
 type SortDir = 'asc' | 'desc';
 
-export default function TrendSegmentTable({ segments }: { segments: TrendSegment[] }) {
+export default function TrendSegmentTable({ segments, market }: { segments: TrendSegment[]; market: string }) {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -95,7 +106,22 @@ export default function TrendSegmentTable({ segments }: { segments: TrendSegment
               <TableCell className={`text-right tabular-nums ${TREND_TEXT_CLASS[seg.trend]}`}>
                 {formatReturn(seg.return_pct)}
               </TableCell>
-              <TableCell>{seg.pattern_label}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-1.5">
+                  <span>{seg.pattern_label}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    nativeButton={false}
+                    role="link"
+                    aria-label="그리드서치로 복사"
+                    title="그리드서치로 복사"
+                    render={<Link href={buildGridSearchHref(market, seg)} />}
+                  >
+                    <Copy className="size-3.5" />
+                  </Button>
+                </div>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

@@ -89,7 +89,7 @@ export default function TrendSegmentView({ markets }: { markets: Market[] }) {
           </p>
           <TrendSegmentChart ohlcv={data.ohlcv} segments={data.segments} />
           <TrendPatternLegend />
-          <TrendSegmentTable segments={data.segments} />
+          <TrendSegmentTable segments={data.segments} market={selectedMarket} />
         </>
       )}
     </div>
