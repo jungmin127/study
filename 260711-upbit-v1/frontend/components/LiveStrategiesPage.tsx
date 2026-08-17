@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Check, CircleHelp, Pause, Play, Square, Trash2, X } from 'lucide-react';
+import { Check, CircleHelp, Coins, Pause, Play, Square, Trash2, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import {
   approveLiveStrategy,
@@ -10,6 +10,7 @@ import {
   pauseLiveStrategy,
   resumeLiveStrategy,
   stopLiveStrategy,
+  updateLiveStrategyCapital,
 } from '@/lib/api/liveStrategies';
 import type { LiveStrategy, LiveStrategyRiskConfig } from '@/lib/types/liveStrategies';
 import {
@@ -27,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -34,7 +36,8 @@ import {
 import { summarizeGroup } from '@/lib/condition-summary';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { formatTimeframe } from '@/lib/format';
+import { formatDateTime, formatTimeframe } from '@/lib/format';
+import { INPUT_CLASS } from '@/lib/ui-classes';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling';
 
@@ -84,6 +87,93 @@ function Stat({ label, value, valueClassName }: { label: string; value: string; 
       <p className="text-[0.68rem] text-muted-foreground">{label}</p>
       <p className={`text-sm font-semibold tabular-nums ${valueClassName ?? ''}`}>{value}</p>
     </div>
+  );
+}
+
+function ChangeCapitalDialog({
+  strategy,
+  onChanged,
+}: {
+  strategy: LiveStrategy;
+  onChanged: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit() {
+    const newCapital = Number(value);
+    if (!Number.isFinite(newCapital) || newCapital <= 0) {
+      setError('0보다 큰 숫자를 입력하세요.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await updateLiveStrategyCapital(strategy.id, newCapital);
+      await onChanged();
+      setOpen(false);
+      setValue('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '시드 변경에 실패했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) {
+          setValue('');
+          setError(null);
+        }
+      }}
+    >
+      <DialogTrigger
+        type="button"
+        className={buttonVariants({ variant: 'outline', size: 'icon-lg' })}
+        aria-label="시드 변경"
+        title="시드 변경"
+      >
+        <Coins />
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>시드 변경</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p>
+            현재 자본:{' '}
+            <span className="font-semibold tabular-nums">
+              {strategy.current_capital !== null
+                ? `${Math.round(strategy.current_capital).toLocaleString()}원`
+                : '-'}
+            </span>
+          </p>
+          <input
+            type="number"
+            inputMode="decimal"
+            className={INPUT_CLASS}
+            placeholder="새 시드 금액(원)"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          {error && <p className="text-destructive">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={submitting}>
+            취소
+          </Button>
+          <Button onClick={handleSubmit} disabled={submitting}>
+            확인
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -185,9 +275,35 @@ export default function LiveStrategiesPage() {
                           )}
                         </div>
                       </div>
+                      <div>
+                        <p className="mb-1 font-medium text-muted-foreground">자본 변경 이력</p>
+                        {s.capital_adjustments.length === 0 ? (
+                          <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+                            변경 이력 없음
+                          </p>
+                        ) : (
+                          <div className="space-y-1 rounded-md bg-muted/50 p-2">
+                            {s.capital_adjustments.map((adj) => (
+                              <div
+                                key={adj.id}
+                                className="flex flex-wrap items-baseline justify-between gap-x-2 text-xs"
+                              >
+                                <span className="text-muted-foreground">{formatDateTime(adj.adjusted_at)}</span>
+                                <span className="tabular-nums">
+                                  {Math.round(adj.previous_capital).toLocaleString()}원 →{' '}
+                                  {Math.round(adj.new_capital).toLocaleString()}원
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </DialogContent>
                 </Dialog>
+                {s.open_position === null && (s.status === 'running' || s.status === 'paused') && (
+                  <ChangeCapitalDialog strategy={s} onChanged={refresh} />
+                )}
                 {s.status === 'draft' && (
                   <>
                     <Button
