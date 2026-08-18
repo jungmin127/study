@@ -1,6 +1,14 @@
 from tests.live_indicator_fixtures import assert_matches_backtrader
 from tests.signal_fixtures import make_oscillating_df
-from trading.live_indicators import LIVE_INDICATOR_FACTORY, create_ema, create_sma, create_wma
+from trading.live_indicators import (
+    LIVE_INDICATOR_FACTORY,
+    create_ema,
+    create_ema_pct,
+    create_sma,
+    create_sma_pct,
+    create_wma,
+    create_wma_pct,
+)
 
 
 def test_sma_matches_backtrader():
@@ -16,6 +24,27 @@ def test_ema_matches_backtrader():
 def test_wma_matches_backtrader():
     df = make_oscillating_df()
     assert_matches_backtrader("WMA", {"period": 14}, create_wma(df, period=14))
+
+
+def test_sma_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("SMA_PCT", {"period": 14}, create_sma_pct(df, period=14))
+
+
+def test_ema_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("EMA_PCT", {"period": 14}, create_ema_pct(df, period=14))
+
+
+def test_wma_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("WMA_PCT", {"period": 14}, create_wma_pct(df, period=14))
+
+
+def test_live_indicator_factory_registers_pct_variants():
+    assert LIVE_INDICATOR_FACTORY["SMA_PCT"] is create_sma_pct
+    assert LIVE_INDICATOR_FACTORY["EMA_PCT"] is create_ema_pct
+    assert LIVE_INDICATOR_FACTORY["WMA_PCT"] is create_wma_pct
 
 
 def test_sma_uses_default_period_14_when_omitted():

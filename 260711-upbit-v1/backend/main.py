@@ -175,6 +175,24 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=3이면 (종가1×1 + 종가2×2 + 종가3×3) / (1+2+3)로 계산합니다(가장 최근 종가의 가중치가 가장 큼).",
     },
     {
+        "value": "SMA_PCT", "label": "SMA 이격도 (%)", "category": "추세",
+        "params": [{"key": "period", "label": "기간", "default": 14}],
+        "description": "종가가 SMA(period) 대비 몇 % 떨어져 있는지 나타냅니다(이격도).",
+        "example": "SMA_PCT > 5면 이동평균보다 5% 이상 위로 벌어진 구간을 포착합니다.",
+    },
+    {
+        "value": "EMA_PCT", "label": "EMA 이격도 (%)", "category": "추세",
+        "params": [{"key": "period", "label": "기간", "default": 14}],
+        "description": "종가가 EMA(period) 대비 몇 % 떨어져 있는지 나타냅니다.",
+        "example": "EMA_PCT < -3이면 EMA보다 3% 이상 아래로 눌린 구간입니다.",
+    },
+    {
+        "value": "WMA_PCT", "label": "WMA 이격도 (%)", "category": "추세",
+        "params": [{"key": "period", "label": "기간", "default": 14}],
+        "description": "종가가 WMA(period) 대비 몇 % 떨어져 있는지 나타냅니다.",
+        "example": "WMA_PCT > 2면 WMA보다 2% 이상 위에 있는 구간입니다.",
+    },
+    {
         "value": "RSI", "label": "RSI (상대강도지수)", "category": "오실레이터",
         "params": [{"key": "period", "label": "기간", "default": 14}],
         "description": "일정 기간의 평균 상승폭과 평균 하락폭을 비교해 0~100 사이 값으로 과매수/과매도를 나타냅니다.",

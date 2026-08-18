@@ -56,6 +56,21 @@ def create_wma(df: pd.DataFrame, **params) -> pd.Series:
     )
 
 
+def create_sma_pct(df: pd.DataFrame, **params) -> pd.Series:
+    ma = create_sma(df, **params)
+    return (df["close"] - ma) / ma * 100
+
+
+def create_ema_pct(df: pd.DataFrame, **params) -> pd.Series:
+    ma = create_ema(df, **params)
+    return (df["close"] - ma) / ma * 100
+
+
+def create_wma_pct(df: pd.DataFrame, **params) -> pd.Series:
+    ma = create_wma(df, **params)
+    return (df["close"] - ma) / ma * 100
+
+
 def create_rsi(df: pd.DataFrame, **params) -> pd.Series:
     period = int(params.get("period", 14))
     delta = df["close"].diff()
@@ -532,6 +547,9 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "SMA": create_sma,
     "EMA": create_ema,
     "WMA": create_wma,
+    "SMA_PCT": create_sma_pct,
+    "EMA_PCT": create_ema_pct,
+    "WMA_PCT": create_wma_pct,
     "RSI": create_rsi,
     "MACD_line": create_macd_line,
     "MACD_signal": create_macd_signal,

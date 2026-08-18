@@ -33,7 +33,7 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     params: [{ key: 'period', role: '평균을 낼 봉 개수. 크게 잡을수록 느리고 완만하게, 작게 잡을수록 가격을 빠르게 따라갑니다.' }],
     formula: 'SMA = (최근 period개 종가의 합) ÷ period',
     thresholdExample: `${PRICE_SCALE_CAVEAT}`,
-    usage: '단독보다는 "SMA(50) 위/아래에서만 매수" 같은 큰 흐름 필터로, 다른 오실레이터 조건과 AND로 묶어 자주 씁니다.',
+    usage: '단독보다는 "SMA(50) 위/아래에서만 매수" 같은 큰 흐름 필터로, 다른 오실레이터 조건과 AND로 묶어 자주 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 SMA_PCT를 대신 쓰세요.',
   },
   EMA: {
     meaning:
@@ -41,14 +41,35 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     params: [{ key: 'period', role: '가중치 감쇠 속도를 정하는 기간. α=2/(period+1)가 매 봉 새 종가에 주는 가중치입니다.' }],
     formula: 'EMA_t = 종가_t × α + EMA_{t-1} × (1-α),  α = 2 ÷ (period+1)  (시작값은 처음 period개 종가의 SMA)',
     thresholdExample: `${PRICE_SCALE_CAVEAT}`,
-    usage: 'SMA보다 최근 변화에 민감하게 반응해, 추세 전환을 좀 더 빨리 잡고 싶을 때 SMA 대신 씁니다.',
+    usage: 'SMA보다 최근 변화에 민감하게 반응해, 추세 전환을 좀 더 빨리 잡고 싶을 때 SMA 대신 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 EMA_PCT를 대신 쓰세요.',
   },
   WMA: {
     meaning: '최근 봉일수록 선형으로 더 큰 가중치를 주는 이동평균입니다(가장 최근 봉의 가중치가 period로 가장 큼).',
     params: [{ key: 'period', role: '평균에 포함할 봉 개수이자 최대 가중치. 가중치는 1,2,...,period 순으로 매겨집니다.' }],
     formula: 'WMA = (종가_{t-period+1}×1 + ... + 종가_t×period) ÷ (1+2+...+period)',
     thresholdExample: `${PRICE_SCALE_CAVEAT}`,
-    usage: 'SMA·EMA와 마찬가지로 절대 가격 레벨 필터로 쓰되, 최근 봉에 가장 민감하게 반응하고 싶을 때 선택합니다.',
+    usage: 'SMA·EMA와 마찬가지로 절대 가격 레벨 필터로 쓰되, 최근 봉에 가장 민감하게 반응하고 싶을 때 선택합니다. 코인 시세와 무관한 정규화 버전이 필요하면 WMA_PCT를 대신 쓰세요.',
+  },
+  SMA_PCT: {
+    meaning: '종가가 SMA(period) 대비 몇 % 위/아래에 있는지 나타낸 이격도 지표입니다 — 계산 배경은 SMA 가이드를 참고하세요.',
+    params: [{ key: 'period', role: '평균을 낼 봉 개수. SMA와 동일한 의미.' }],
+    formula: 'SMA_PCT = (종가 − SMA) ÷ SMA × 100',
+    thresholdExample: 'SMA_PCT > 5면 이동평균보다 5% 이상 위로 벌어진(과열 가능성) 구간을, < -5면 5% 이상 아래로 눌린 구간을 포착합니다. 코인 시세와 무관하게 여러 코인에 같은 threshold를 그대로 쓸 수 있습니다.',
+    usage: 'SMA를 절대가격 필터로 쓰기 애매할 때, 대신 이 지표로 "이동평균 대비 몇 % 떨어져 있는지"를 오실레이터처럼 씁니다.',
+  },
+  EMA_PCT: {
+    meaning: '종가가 EMA(period) 대비 몇 % 위/아래에 있는지 나타낸 이격도 지표입니다 — 계산 배경은 EMA 가이드를 참고하세요.',
+    params: [{ key: 'period', role: '가중치 감쇠 속도를 정하는 기간. EMA와 동일한 의미.' }],
+    formula: 'EMA_PCT = (종가 − EMA) ÷ EMA × 100',
+    thresholdExample: 'EMA_PCT < -3이면 EMA보다 3% 이상 아래로 눌린 구간입니다.',
+    usage: 'EMA를 절대가격 필터로 쓰기 애매할 때, 대신 이 지표로 "이동평균 대비 몇 % 떨어져 있는지"를 오실레이터처럼 씁니다.',
+  },
+  WMA_PCT: {
+    meaning: '종가가 WMA(period) 대비 몇 % 위/아래에 있는지 나타낸 이격도 지표입니다 — 계산 배경은 WMA 가이드를 참고하세요.',
+    params: [{ key: 'period', role: '평균에 포함할 봉 개수. WMA와 동일한 의미.' }],
+    formula: 'WMA_PCT = (종가 − WMA) ÷ WMA × 100',
+    thresholdExample: 'WMA_PCT > 2면 WMA보다 2% 이상 위에 있는 구간입니다.',
+    usage: 'WMA를 절대가격 필터로 쓰기 애매할 때, 대신 이 지표로 "이동평균 대비 몇 % 떨어져 있는지"를 오실레이터처럼 씁니다.',
   },
   RSI: {
     meaning:

@@ -53,6 +53,34 @@ def test_sma_matches_manual_average():
     assert abs(values[-1] - manual) < 1e-6
 
 
+def test_sma_pct_matches_manual_disparity():
+    values = _run_probe("SMA_PCT", {"period": 5})
+    df = make_oscillating_df()
+    ma = df["close"].rolling(5).mean().iloc[-1]
+    close = df["close"].iloc[-1]
+    manual = (close - ma) / ma * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_ema_pct_registered_and_differs_from_sma_pct():
+    # EMA/SMA는 계산식이 달라 이격도도 다르다 — 두 값이 항상 같으면 EMA_PCT가 실제로
+    # EMA가 아니라 SMA를 잘못 참조하고 있다는 신호.
+    sma_pct = _run_probe("SMA_PCT", {"period": 5})
+    ema_pct = _run_probe("EMA_PCT", {"period": 5})
+    assert sma_pct[-1] != ema_pct[-1]
+
+
+def test_wma_pct_matches_manual_disparity():
+    values = _run_probe("WMA_PCT", {"period": 3})
+    df = make_oscillating_df()
+    weights = [1, 2, 3]
+    window = df["close"].iloc[-3:].to_numpy()
+    ma = (window * weights).sum() / sum(weights)
+    close = df["close"].iloc[-1]
+    manual = (close - ma) / ma * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
 def _run_probe_with_aux(indicator: str, params: dict, aux_line: str, aux_series) -> list[float]:
     df = make_oscillating_df()
     df[aux_line] = aux_series
