@@ -28,6 +28,8 @@ def test_journal_summary_empty_when_no_approved_strategies(monkeypatch, tmp_path
     assert summary["cumulative_pnl"] == 0.0
     assert summary["mdd_pct"] == 0.0
     assert summary["win_rate_pct"] == 0.0
+    assert len(summary["daily_pnl_30d"]) == 30
+    assert all(d["pnl"] == 0.0 for d in summary["daily_pnl_30d"])
 
 
 def test_journal_summary_excludes_unapproved_draft(monkeypatch, tmp_path):
@@ -341,3 +343,23 @@ def test_zero_filled_last_30_days_fills_missing_dates_and_keeps_known_values():
     by_date = {d["date"]: d["pnl"] for d in result}
     assert by_date["2026-08-05"] == -300.0
     assert by_date["2026-08-01"] == 0.0  # 거래 없는 날은 0
+
+
+def test_journal_summary_includes_daily_pnl_30d(monkeypatch, tmp_path):
+    db = _fresh(monkeypatch, tmp_path)
+    s1 = insert_live_strategy(db, status="draft")
+    _approve(db, s1, 100_000.0)
+
+    summary = svc.get_journal_summary()
+
+    assert len(summary["daily_pnl_30d"]) == 30
+
+
+def test_market_journal_includes_daily_pnl_30d(monkeypatch, tmp_path):
+    db = _fresh(monkeypatch, tmp_path)
+    s1 = insert_live_strategy(db, status="draft", market="KRW-DOGE")
+    _approve(db, s1, 100_000.0)
+
+    detail = svc.get_market_journal("KRW-DOGE")
+
+    assert len(detail["daily_pnl_30d"]) == 30

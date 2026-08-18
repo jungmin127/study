@@ -125,6 +125,7 @@ def get_journal_summary() -> dict:
         return {
             "cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0, "mdd_pct": 0.0,
             "win_rate_pct": 0.0, "equity_curve": [], "strategies": [],
+            "daily_pnl_30d": _zero_filled_last_30_days({}),
         }
 
     strategy_cards = []
@@ -169,6 +170,7 @@ def get_journal_summary() -> dict:
         "win_rate_pct": round(_win_rate_pct(all_closed), 4),
         "equity_curve": equity_curve,
         "strategies": strategy_cards,
+        "daily_pnl_30d": _zero_filled_last_30_days(pnl_by_date),
     }
 
 
@@ -215,10 +217,10 @@ def _backtest_comparison(strategy: dict, m: dict) -> dict | None:
 
 def _market_metrics(strategies: list[dict]) -> dict:
     """여러 live_strategy 행(같은 market, 서로 다른 timeframe·세대 포함)을 하나로 합친
-    지표. 코인 단위 매매일지(달력/라인차트 포함)를 위해 _strategy_metrics를 전략별로
-    구해 날짜별 realized_pnl을 합산한 뒤, baseline부터 날짜순으로 누적하며 그날의
-    수익률(%)까지 함께 계산한다 — daily_performance에 이미 저장된 realized_pnl_pct는
-    전략 단위 기준이라 코인 합산 관점에서는 재계산이 필요하다.
+    지표. 코인 단위 매매일지(달력/그래프 포함)를 위해 _strategy_metrics를 전략별로 구해
+    날짜별 realized_pnl을 합산한 뒤, baseline부터 날짜순으로 누적하며 그날의 수익률(%)까지
+    함께 계산한다 — daily_performance에 이미 저장된 realized_pnl_pct는 전략 단위 기준이라
+    코인 합산 관점에서는 재계산이 필요하다.
     cumulative_pnl_pct는 각 전략의 TWR 보정된 cumulative_pnl_pct를 baseline으로
     가중평균한다 — 자본 조정 이력이 없는 흔한 경우엔 sum(pnl)/sum(baseline)과
     대수적으로 동일하다(가중치가 전부 baseline이고 pct_i == pnl_i/baseline_i*100일 때)."""
@@ -258,6 +260,7 @@ def _market_metrics(strategies: list[dict]) -> dict:
         "mdd_pct": _mdd_pct(mdd_series),
         "win_rate_pct": _win_rate_pct(all_closed),
         "daily": daily,
+        "daily_pnl_30d": _zero_filled_last_30_days(pnl_by_date),
     }
 
 
@@ -318,4 +321,5 @@ def get_market_journal(market: str) -> dict | None:
         "backtest_comparison": _backtest_comparison(latest_strategy, m),
         "trade_log": trade_log,
         "daily": m["daily"],
+        "daily_pnl_30d": m["daily_pnl_30d"],
     }
