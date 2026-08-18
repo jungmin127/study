@@ -25,7 +25,7 @@ daily_performance는 영향받은 전략의 청산일별로 재계산한다(real
 from __future__ import annotations
 
 import argparse
-import shutil
+import sqlite3
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -35,13 +35,33 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import trading.db as db
 
 
+def _backup_db() -> Path:
+    """raw shutil.copy2로는 WAL 모드에서 아직 체크포인트되지 않은(그러나 이미 커밋된)
+    거래가 -wal 사이드카 파일에만 있어 백업에서 누락될 수 있고, 다른 프로세스가 쓰는
+    중인 파일을 그대로 복사하면 깨진 스냅샷이 될 수도 있다. sqlite3의 온라인 백업 API를
+    쓰면 journal 모드와 무관하게 항상 일관된 완전한 스냅샷을 얻는다."""
+    backup_path = db.DB_PATH.with_name(
+        f"{db.DB_PATH.name}.bak-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+    )
+    src = sqlite3.connect(db.DB_PATH)
+    try:
+        dst = sqlite3.connect(backup_path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    return backup_path
+
+
 def _exit_kst_date(exit_time: str) -> str:
     utc_dt = datetime.strptime(exit_time, "%Y-%m-%d %H:%M:%S")
     return (utc_dt + timedelta(hours=9)).strftime("%Y-%m-%d")
 
 
 def _match_positions_to_bid_orders(strategy_id: str) -> list[tuple[dict, dict]] | None:
-    closed = sorted(db.list_closed_positions(strategy_id), key=lambda p: p["entry_time"])
+    closed = db.list_closed_positions(strategy_id)
     open_pos = db.get_open_position(strategy_id)
     positions = closed + ([open_pos] if open_pos else [])
     positions.sort(key=lambda p: p["entry_time"])
@@ -57,45 +77,55 @@ def _match_positions_to_bid_orders(strategy_id: str) -> list[tuple[dict, dict]] 
     return list(zip(positions, bid_orders))
 
 
-def _recompute_daily_performance(strategy_id: str, apply: bool) -> None:
+def _recompute_daily_performance(
+    strategy_id: str, apply: bool, corrected_pnl_by_position: dict[str, float],
+) -> dict[str, float]:
+    """청산일별 daily_performance를 재계산한다. 드라이런에서도 미리보기가 실제로
+    --apply 했을 때 쓰일 값을 그대로 반영해야 하므로, DB에서 막 다시 읽은 (아직 갱신되지
+    않았을 수 있는) position["realized_pnl"]을 신뢰하지 않고, run()에서 이번 실행 중
+    계산한 corrected_pnl_by_position 맵을 우선 사용한다(맵에 없으면 — 이번 실행이 건드리지
+    않은 포지션이라는 뜻이므로 — DB에 저장된 값으로 폴백). 반환값은
+    {trading_date: 재계산된 realized_pnl}로, 테스트에서 미리보기 값을 직접 검증할 수 있게 한다."""
     closed = db.list_closed_positions(strategy_id)
-    by_date: dict[str, list[dict]] = {}
+    by_date: dict[str, list[tuple[dict, float]]] = {}
     for p in closed:
-        by_date.setdefault(_exit_kst_date(p["exit_time"]), []).append(p)
+        effective_pnl = corrected_pnl_by_position.get(p["id"], p["realized_pnl"])
+        by_date.setdefault(_exit_kst_date(p["exit_time"]), []).append((p, effective_pnl))
 
-    for trading_date, positions in by_date.items():
+    preview: dict[str, float] = {}
+    for trading_date, entries in by_date.items():
         existing = db.get_daily_performance(strategy_id, trading_date)
         if existing is None:
             print(f"  경고: daily_performance 행 없음 strategy={strategy_id} date={trading_date} — 건너뜀")
             continue
-        realized_pnl = sum(p["realized_pnl"] for p in positions)
-        win_count = sum(1 for p in positions if p["realized_pnl"] >= 0)
-        loss_count = len(positions) - win_count
+        realized_pnl = sum(pnl for _, pnl in entries)
+        win_count = sum(1 for _, pnl in entries if pnl >= 0)
+        loss_count = len(entries) - win_count
         starting_balance = existing["starting_balance"]
         pct = (realized_pnl / starting_balance * 100.0) if starting_balance else 0.0
         print(
             f"  daily_performance {trading_date}: realized_pnl {existing['realized_pnl']:.2f} -> "
             f"{realized_pnl:.2f}"
         )
+        preview[trading_date] = realized_pnl
         if apply:
             db.upsert_daily_performance(
                 strategy_id, trading_date, realized_pnl, pct,
-                len(positions), win_count, loss_count, starting_balance, existing["ending_balance"],
+                len(entries), win_count, loss_count, starting_balance, existing["ending_balance"],
             )
+    return preview
 
 
 def run(apply: bool) -> None:
     if apply:
-        backup_path = db.DB_PATH.with_name(
-            f"{db.DB_PATH.name}.bak-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-        )
-        shutil.copy2(db.DB_PATH, backup_path)
+        backup_path = _backup_db()
         print(f"백업 완료: {backup_path}")
 
     strategies = db.list_live_strategies()
     matched_count = 0
     skipped_count = 0
     touched_strategy_ids: list[str] = []
+    corrected_pnl_by_position: dict[str, float] = {}
 
     for strategy in strategies:
         pairs = _match_positions_to_bid_orders(strategy["id"])
@@ -110,6 +140,16 @@ def run(apply: bool) -> None:
         for position, order in pairs:
             entry_fee = order["fee"] or 0.0
             if position["status"] == "closed":
+                if position["entry_fee"]:
+                    # entry_fee가 이미 채워져 있다 — 이전 실행에서 이미 백필됐거나, 버그
+                    # 수정 이후 코드로 진입/청산되어 close_position()이 이미 반영했다는 뜻.
+                    # 여기서 다시 차감하면 이중 차감이 되므로 realized_pnl은 그대로 둔다.
+                    print(
+                        f"  포지션 {position['id']}: entry_fee가 이미 {position['entry_fee']:.2f}로 "
+                        f"설정됨 — 이미 반영된 것으로 보고 건너뜀"
+                    )
+                    corrected_pnl_by_position[position["id"]] = position["realized_pnl"]
+                    continue
                 new_realized_pnl = position["realized_pnl"] - entry_fee
                 denom = position["entry_price"] * position["entry_qty"]
                 new_pct = (new_realized_pnl / denom * 100.0) if denom else 0.0
@@ -120,6 +160,7 @@ def run(apply: bool) -> None:
                 if apply:
                     db.update_position_entry_fee(position["id"], entry_fee)
                     db.update_position_realized_pnl(position["id"], new_realized_pnl, new_pct)
+                corrected_pnl_by_position[position["id"]] = new_realized_pnl
             else:
                 print(f"  열린 포지션 {position['id']}: entry_fee만 {entry_fee:.2f}로 백필")
                 if apply:
@@ -128,7 +169,7 @@ def run(apply: bool) -> None:
 
     for strategy_id in touched_strategy_ids:
         print(f"daily_performance 재계산: live_strategy_id={strategy_id}")
-        _recompute_daily_performance(strategy_id, apply)
+        _recompute_daily_performance(strategy_id, apply, corrected_pnl_by_position)
 
     print(f"\n완료: 포지션 {matched_count}건 처리, 전략 {skipped_count}건 건너뜀.")
     if not apply:
