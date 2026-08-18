@@ -1121,3 +1121,48 @@ def test_insert_position_defaults_entry_fee_to_zero(monkeypatch, tmp_path):
     position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
 
     assert db.get_position(position_id)["entry_fee"] == 0.0
+
+
+def test_update_position_entry_fee_updates_open_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    db.update_position_entry_fee(position_id, 777.0)
+
+    assert db.get_position(position_id)["entry_fee"] == 777.0
+
+
+def test_update_position_realized_pnl_updates_closed_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+    db.close_position_row(position_id, 101_000_000.0, 0.01, 9500.0, 0.95, "signal")
+
+    db.update_position_realized_pnl(position_id, 9000.0, 0.9)
+
+    closed = db.get_position(position_id)
+    assert closed["realized_pnl"] == 9000.0
+    assert closed["realized_pnl_pct"] == 0.9
+
+
+def test_update_position_realized_pnl_ignores_open_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    db.update_position_realized_pnl(position_id, 9000.0, 0.9)  # status='open'이라 아무 효과 없어야 함
+
+    position = db.get_position(position_id)
+    assert position["realized_pnl"] is None
+
+
+def test_update_order_position_id_links_order_to_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    order_id = db.insert_order(strategy_id, None, "KRW-BTC", "bid", "market", None, None, 100_000_000.0)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    db.update_order_position_id(order_id, position_id)
+
+    assert db.get_order_by_id(order_id)["position_id"] == position_id

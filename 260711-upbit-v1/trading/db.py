@@ -351,6 +351,31 @@ def close_position_row(
         conn.close()
 
 
+def update_position_entry_fee(position_id: str, entry_fee: float) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE positions SET entry_fee = ? WHERE id = ?",
+            (entry_fee, position_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_position_realized_pnl(position_id: str, realized_pnl: float, realized_pnl_pct: float) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE positions SET realized_pnl = ?, realized_pnl_pct = ? "
+            "WHERE id = ? AND status = 'closed'",
+            (realized_pnl, realized_pnl_pct, position_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_open_position(live_strategy_id: str) -> dict | None:
     conn = _connect()
     try:
@@ -487,6 +512,18 @@ def insert_order(
     finally:
         conn.close()
     return order_id
+
+
+def update_order_position_id(order_id: str, position_id: str) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE orders SET position_id = ? WHERE id = ?",
+            (position_id, order_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def update_order_filled(
