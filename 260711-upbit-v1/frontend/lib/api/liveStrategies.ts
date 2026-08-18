@@ -46,3 +46,10 @@ export function updateLiveStrategyCapital(id: string, newCapital: number): Promi
     body: JSON.stringify({ new_capital: newCapital }),
   });
 }
+
+export function replaceLiveStrategyStrategy(id: string, sourceRunId: string): Promise<LiveStrategy> {
+  return apiFetch<LiveStrategy>(`/api/v1/live-strategies/${id}/replace-strategy`, {
+    method: 'POST',
+    body: JSON.stringify({ source_run_id: sourceRunId }),
+  });
+}

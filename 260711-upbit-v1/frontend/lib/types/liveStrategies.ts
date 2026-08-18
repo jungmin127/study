@@ -42,6 +42,7 @@ export interface CapitalAdjustment {
 
 export interface LiveStrategy {
   id: string;
+  source_run_id: string | null;
   market: string;
   timeframe: string;
   status: LiveStrategyStatus;

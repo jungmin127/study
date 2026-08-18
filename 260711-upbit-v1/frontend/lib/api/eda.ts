@@ -41,8 +41,9 @@ export function getBacktestDetail(runId: string): Promise<BacktestDetail> {
   return apiFetch<BacktestDetail>(`/api/v1/backtests/${runId}`);
 }
 
-export function getBacktestRuns(): Promise<BacktestRunSummary[]> {
-  return apiFetch<BacktestRunSummary[]>('/api/v1/backtests');
+export function getBacktestRuns(market?: string): Promise<BacktestRunSummary[]> {
+  const query = market ? `?market=${encodeURIComponent(market)}` : '';
+  return apiFetch<BacktestRunSummary[]>(`/api/v1/backtests${query}`);
 }
 
 export function getMarkets(): Promise<Market[]> {
