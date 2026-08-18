@@ -5,6 +5,11 @@ export interface JournalEquityPoint {
   value: number;
 }
 
+export interface JournalDailyPnlPoint {
+  date: string;
+  pnl: number;
+}
+
 export interface JournalStrategyCard {
   id: string;
   market: string;
@@ -21,6 +26,7 @@ export interface JournalSummary {
   mdd_pct: number;
   win_rate_pct: number;
   equity_curve: JournalEquityPoint[];
+  daily_pnl_30d: JournalDailyPnlPoint[];
   strategies: JournalStrategyCard[];
 }
 
@@ -71,4 +77,5 @@ export interface JournalMarketDetail {
   backtest_comparison: JournalBacktestComparison | null;
   trade_log: JournalTradeLogEntry[];
   daily: JournalDailyCell[];
+  daily_pnl_30d: JournalDailyPnlPoint[];
 }
