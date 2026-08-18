@@ -328,3 +328,16 @@ def test_twr_pct_ignores_input_order_and_sorts_by_exit_time():
     assert svc._twr_pct(closed_forward, 500_000.0, adjustments) == pytest.approx(
         svc._twr_pct(closed_reversed, 500_000.0, adjustments)
     )
+
+
+def test_zero_filled_last_30_days_fills_missing_dates_and_keeps_known_values():
+    pnl_by_date = {"2026-08-10": 1500.0, "2026-08-05": -300.0}
+
+    result = svc._zero_filled_last_30_days(pnl_by_date, today="2026-08-10")
+
+    assert len(result) == 30
+    assert result[-1] == {"date": "2026-08-10", "pnl": 1500.0}
+    assert result[0]["date"] == "2026-07-12"  # 29일 전
+    by_date = {d["date"]: d["pnl"] for d in result}
+    assert by_date["2026-08-05"] == -300.0
+    assert by_date["2026-08-01"] == 0.0  # 거래 없는 날은 0

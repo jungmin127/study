@@ -12,9 +12,12 @@ main.py의 journal 엔드포인트가 이 모듈의 함수만 호출한다.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import pandas as pd
 
 import trading.db as trading_db
+import trading.risk_manager as risk_manager
 from engine.cache import load_result
 from engine.metrics import calculate_metrics
 
@@ -30,6 +33,23 @@ def _mdd_pct(values: list[float]) -> float:
     nonzero = cummax != 0
     drawdown[nonzero] = (series[nonzero] - cummax[nonzero]) / cummax[nonzero] * 100.0
     return float(drawdown.min())
+
+
+def _zero_filled_last_30_days(
+    pnl_by_date: dict[str, float], *, today: str | None = None,
+) -> list[dict]:
+    """pnl_by_date(YYYY-MM-DD 키)를 오늘(KST) 포함 최근 30일로 0-채움한 배열로 바꾼다.
+    그래프가 청산 없는 날도 막대(0)로 표시할 수 있도록 daily_performance에 행이 없는
+    날짜도 항목을 만든다. today를 넘기면 그 날짜를 기준으로 30일 창을 만든다(테스트용,
+    기본은 실제 오늘)."""
+    anchor = datetime.strptime(today or risk_manager.today_kst(), "%Y-%m-%d").date()
+    return [
+        {
+            "date": (anchor - timedelta(days=offset)).isoformat(),
+            "pnl": round(pnl_by_date.get((anchor - timedelta(days=offset)).isoformat(), 0.0), 4),
+        }
+        for offset in range(29, -1, -1)
+    ]
 
 
 def _win_rate_pct(positions: list[dict]) -> float:
