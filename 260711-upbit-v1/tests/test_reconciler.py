@@ -458,6 +458,7 @@ async def test_reconcile_position_opens_from_matched_external_buy(monkeypatch, t
     position = position_manager.get_open_position(strategy["id"])
     assert position["entry_qty"] == 0.01
     assert position["entry_price"] == 50_000_000.0
+    assert position["entry_fee"] == 500.0
 
 
 async def test_reconcile_position_closes_from_matched_external_sell(monkeypatch, tmp_path):

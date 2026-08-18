@@ -212,7 +212,7 @@ def _weighted_fill(orders: list[dict]) -> tuple[float, float, float]:
 
 def _apply_explained_change(
     strategy: dict, position: dict | None, actual_qty: float,
-    buy_price: float, sell_price: float, sell_fee: float,
+    buy_price: float, buy_fee: float, sell_price: float, sell_fee: float,
 ) -> str | None:
     """설계 스펙 결정4/7 — 매칭된 외부주문의 실제 체결가로 정밀하게 self-heal한다. 호출자
     (_reconcile_position)가 이미 "매수+매도 동시 매칭"과 "포지션 보유 중 top-up" 두
@@ -224,7 +224,7 @@ def _apply_explained_change(
     if position is None:
         if actual_qty <= _QTY_EPSILON:
             return None
-        position_manager.open_position(strategy["id"], strategy["market"], buy_price, actual_qty)
+        position_manager.open_position(strategy["id"], strategy["market"], buy_price, actual_qty, buy_fee)
         return "opened"
 
     if actual_qty <= _QTY_EPSILON:
@@ -291,7 +291,7 @@ async def _reconcile_position(
     matched_orders = list(external_orders) + list(own_fills)
     done_buys = [o for o in matched_orders if o["side"] == "bid" and o["filled_volume"]]
     done_sells = [o for o in matched_orders if o["side"] == "ask" and o["filled_volume"]]
-    buy_volume, buy_price, _buy_fee = _weighted_fill(done_buys)
+    buy_volume, buy_price, buy_fee = _weighted_fill(done_buys)
     sell_volume, sell_price, sell_fee = _weighted_fill(done_sells)
     explained_diff = buy_volume - sell_volume
 
@@ -309,7 +309,7 @@ async def _reconcile_position(
         and (buy_volume > 0 or sell_volume > 0)
         and abs(diff - explained_diff) <= _QTY_EPSILON
     ):
-        action = _apply_explained_change(strategy, position, actual_qty, buy_price, sell_price, sell_fee)
+        action = _apply_explained_change(strategy, position, actual_qty, buy_price, buy_fee, sell_price, sell_fee)
 
     if action is not None:
         # own_fills만으로 전부 설명됐다면(external_orders가 이번에 아무것도 못 찾았다면)
