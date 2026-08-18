@@ -335,6 +335,12 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=20이면 최근 20봉 거래대금의 평균. 현재 거래대금이 이 값의 2배를 넘으면 진짜 자금이 유입된 급증 구간으로 판단하는 식으로 활용합니다.",
     },
     {
+        "value": "TRADE_VALUE_PCT", "label": "거래대금 비율 (%)", "category": "거래대금",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "이번 봉 거래대금이 자체 이동평균(TRADE_VALUE_SMA) 대비 몇 % 높거나 낮은지 나타냅니다. 코인마다 다른 거래대금 스케일을 제거합니다.",
+        "example": "TRADE_VALUE_PCT > 100이면 평소 대비 거래대금이 2배 이상으로 튄 구간입니다.",
+    },
+    {
         "value": "FIB_382", "label": "피보나치 38.2%", "category": "가격대",
         "params": [{"key": "period", "label": "기간", "default": 20}],
         "description": "최근 period봉의 스윙 고점과 저점 사이에서 38.2% 되돌림 지점을 계산합니다. 상승 추세 중 조정이 어디까지 진행될지 가늠하는 지지선으로 흔히 씁니다.",

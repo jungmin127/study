@@ -62,6 +62,7 @@ _A_GROUP_PARAMS: dict[str, dict] = {
     "VOLUME_SMA": {"period": 20},
     "TRADE_VALUE": {},
     "TRADE_VALUE_SMA": {"period": 20},
+    "TRADE_VALUE_PCT": {"period": 20},
     "VPIN": {"period": 20},
     "FIB_382": {"period": 20},
     "FIB_500": {"period": 20},
@@ -104,7 +105,7 @@ def test_warmup_formula_produces_non_nan_last_value(name, params):
     required_bars = _required_bars_for(name, params)
     n = required_bars * signal_engine._WARMUP_MULTIPLIER + signal_engine._WARMUP_BUFFER_BARS
     df = make_oscillating_df(n=n)
-    if name in {"TRADE_VALUE", "TRADE_VALUE_SMA"}:
+    if name in {"TRADE_VALUE", "TRADE_VALUE_SMA", "TRADE_VALUE_PCT"}:
         df["trade_value"] = df["close"] * df["volume"]
 
     result = LIVE_INDICATOR_FACTORY[name](df, **params).iloc[-1]

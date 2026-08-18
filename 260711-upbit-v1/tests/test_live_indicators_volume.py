@@ -9,6 +9,7 @@ from trading.live_indicators import (
     LIVE_INDICATOR_FACTORY,
     create_obv,
     create_trade_value,
+    create_trade_value_pct,
     create_trade_value_sma,
     create_volume_sma,
     create_vpin,
@@ -63,6 +64,19 @@ def test_trade_value_sma_warmup_is_nan_before_period_bars():
     result = create_trade_value_sma(df, period=5)
     assert result.iloc[:4].isna().all()
     assert result.iloc[5:].notna().all()
+
+
+def test_trade_value_pct_matches_manual_ratio_to_own_sma():
+    df = make_oscillating_df()
+    df["trade_value"] = df["close"] * df["volume"]
+    result = create_trade_value_pct(df, period=5)
+    sma = df["trade_value"].rolling(5).mean()
+    manual = (df["trade_value"] - sma) / sma * 100
+    assert abs(result.iloc[-1] - manual.iloc[-1]) < 1e-6
+
+
+def test_live_indicator_factory_registers_trade_value_pct():
+    assert LIVE_INDICATOR_FACTORY["TRADE_VALUE_PCT"] is create_trade_value_pct
 
 
 def test_vpin_matches_backtrader():

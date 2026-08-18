@@ -35,7 +35,7 @@ def _run_probe(indicator: str, params: dict) -> list[float]:
 
 
 _NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC", "KOREA_PREMIUM", "FUNDING_RATE"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
-_NEEDS_TRADE_VALUE_LINE = {"TRADE_VALUE", "TRADE_VALUE_SMA"}  # trade_value 라인이 필요 — test_trade_value_* 참고
+_NEEDS_TRADE_VALUE_LINE = {"TRADE_VALUE", "TRADE_VALUE_SMA", "TRADE_VALUE_PCT"}  # trade_value 라인이 필요 — test_trade_value_* 참고
 
 
 def test_all_registered_indicators_produce_values():
@@ -125,6 +125,15 @@ def test_trade_value_sma_matches_manual_average_of_trade_value():
     trade_value = df["close"] * df["volume"]
     values = _run_probe_with_aux("TRADE_VALUE_SMA", {"period": 5}, "trade_value", trade_value)
     manual = trade_value.rolling(5).mean().iloc[-1]
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_trade_value_pct_matches_manual_ratio_to_own_sma():
+    df = make_oscillating_df()
+    trade_value = df["close"] * df["volume"]
+    values = _run_probe_with_aux("TRADE_VALUE_PCT", {"period": 5}, "trade_value", trade_value)
+    sma = trade_value.rolling(5).mean().iloc[-1]
+    manual = (trade_value.iloc[-1] - sma) / sma * 100
     assert abs(values[-1] - manual) < 1e-6
 
 

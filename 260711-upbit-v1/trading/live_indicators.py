@@ -212,6 +212,11 @@ def create_trade_value_sma(df: pd.DataFrame, **params) -> pd.Series:
     return df["trade_value"].rolling(period).mean()
 
 
+def create_trade_value_pct(df: pd.DataFrame, **params) -> pd.Series:
+    sma = create_trade_value_sma(df, **params)
+    return (df["trade_value"] - sma) / sma * 100
+
+
 def create_vpin(df: pd.DataFrame, **params) -> pd.Series:
     period = int(params.get("period", 20))
     closes = df["close"].tolist()
@@ -570,6 +575,7 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "VOLUME_SMA": create_volume_sma,
     "TRADE_VALUE": create_trade_value,
     "TRADE_VALUE_SMA": create_trade_value_sma,
+    "TRADE_VALUE_PCT": create_trade_value_pct,
     "VPIN": create_vpin,
     "FIB_382": create_fib_382,
     "FIB_500": create_fib_500,

@@ -50,6 +50,7 @@ const ZERO_CROSS_INDICATORS = new Set([
   'PIVOT_P_PCT', 'PIVOT_R1_PCT', 'PIVOT_S1_PCT',
   'VPVR_POC_PCT', 'VPVR_VAH_PCT', 'VPVR_VAL_PCT',
   'SMA_PCT', 'EMA_PCT', 'WMA_PCT',
+  'TRADE_VALUE_PCT',
 ]);
 const PRICE_SCALE_INDICATORS = new Set([
   'SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower',

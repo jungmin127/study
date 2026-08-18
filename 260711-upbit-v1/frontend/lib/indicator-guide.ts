@@ -251,7 +251,15 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     params: [{ key: 'period', role: '거래대금을 평균낼 봉 개수.' }],
     formula: 'TRADE_VALUE_SMA = 최근 period개 거래대금의 평균',
     thresholdExample: 'period=20 기준으로 최근 거래대금이 이 평균의 2배를 넘으면 "평소보다 자금이 몰린 급증 구간"으로 해석하는 식으로 씁니다.',
-    usage: 'TRADE_VALUE(원시값)로 절대 규모 필터를 걸고, TRADE_VALUE_SMA로는 "그 코인 기준 평소 대비 얼마나 튀었는지"를 함께 보는 조합이 유용합니다.',
+    usage: 'TRADE_VALUE(원시값)로 절대 규모 필터를 걸고, TRADE_VALUE_SMA로는 "그 코인 기준 평소 대비 얼마나 튀었는지"를 함께 보는 조합이 유용합니다. 코인 시세와 무관한 정규화 버전이 필요하면 TRADE_VALUE_PCT를 대신 쓰세요.',
+  },
+  TRADE_VALUE_PCT: {
+    meaning:
+      '이번 봉 거래대금이 자체 이동평균(TRADE_VALUE_SMA) 대비 몇 % 높거나 낮은지 나타낸 정규화 지표입니다. 코인마다 다른 거래대금 스케일을 제거합니다 — 계산 배경은 TRADE_VALUE_SMA 가이드를 참고하세요.',
+    params: [{ key: 'period', role: '내부적으로 계산하는 거래대금 이동평균의 봉 개수. TRADE_VALUE_SMA와 동일한 의미.' }],
+    formula: 'TRADE_VALUE_PCT = (거래대금 − TRADE_VALUE_SMA) ÷ TRADE_VALUE_SMA × 100',
+    thresholdExample: 'TRADE_VALUE_PCT > 100이면 평소 대비 거래대금이 2배 이상으로 튄 구간입니다. TRADE_VALUE_SMA와 달리 코인마다 스케일이 달라도 같은 threshold를 여러 코인에 그대로 쓸 수 있습니다.',
+    usage: 'TRADE_VALUE_SMA를 코인마다 다른 절대 규모로 비교하기 애매할 때, 대신 이 지표로 "평소 대비 몇 % 튀었는지"를 오실레이터처럼 씁니다.',
   },
   STOP_LOSS_PCT: {
     meaning:

@@ -57,6 +57,26 @@ def create_trade_value_sma(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     return bt.indicators.SMA(data.trade_value, period=period)
 
 
+class TradeValueRatio(bt.Indicator):
+    """이번 봉 거래대금이 자체 이동평균(period봉) 대비 몇 % 높거나 낮은지를 나타낸
+    정규화 버전. 코인마다 다른 거래대금 스케일을 제거한다."""
+
+    lines = ("pct",)
+    params = (("period", 20),)
+
+    def __init__(self) -> None:
+        self.sma = bt.indicators.SMA(self.data.trade_value, period=self.p.period)
+
+    def next(self) -> None:
+        sma_val = self.sma[0]
+        self.lines.pct[0] = (self.data.trade_value[0] - sma_val) / sma_val * 100 if sma_val else 0.0
+
+
+def create_trade_value_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 20))
+    return TradeValueRatio(data, period=period)
+
+
 class VolumeBarVPIN(bt.Indicator):
     """거래량 버킷(volume bar) 기반 VPIN. Easley/López de Prado/O'Hara의 Bulk Volume
     Classification(BVC, 2012)을 따른다 — 틱 단위 매수/매도 라벨이 필요 없고, 캔들
