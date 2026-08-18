@@ -1166,3 +1166,114 @@ def test_update_order_position_id_links_order_to_position(monkeypatch, tmp_path)
     db.update_order_position_id(order_id, position_id)
 
     assert db.get_order_by_id(order_id)["position_id"] == position_id
+
+
+def test_replace_live_strategy_strategy_updates_fields_and_preserves_others(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        db,
+        source_run_id="old-run",
+        market="KRW-BTC",
+        timeframe="minutes60",
+        buy_conditions_json='{"old": true}',
+        sell_conditions_json='{"old": true}',
+        risk_config_json='{"position_sizing_value": 100000}',
+        current_capital=500000.0,
+        status="running",
+    )
+    db.update_live_strategy_last_candle(strategy_id, "2026-08-17T00:00:00")
+    db.update_live_strategy_baseline_qty(strategy_id, 0.05)
+
+    result = db.replace_live_strategy_strategy(
+        strategy_id,
+        source_run_id="new-run",
+        timeframe="minutes30",
+        buy_conditions_json='{"new": true}',
+        sell_conditions_json='{"new": true}',
+    )
+
+    assert result is True
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy["source_run_id"] == "new-run"
+    assert strategy["timeframe"] == "minutes30"
+    assert strategy["buy_conditions_json"] == '{"new": true}'
+    assert strategy["sell_conditions_json"] == '{"new": true}'
+    assert strategy["last_processed_candle_time"] is None
+    # market/자본/자금관리/기존 보유량 판단 기준은 그대로 유지되어야 한다
+    assert strategy["market"] == "KRW-BTC"
+    assert strategy["current_capital"] == 500000.0
+    assert strategy["risk_config_json"] == '{"position_sizing_value": 100000}'
+    assert strategy["baseline_qty"] == 0.05
+
+
+def test_replace_live_strategy_strategy_refuses_when_position_open(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running", timeframe="minutes60")
+    db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    result = db.replace_live_strategy_strategy(
+        strategy_id,
+        source_run_id="new-run",
+        timeframe="minutes30",
+        buy_conditions_json='{"new": true}',
+        sell_conditions_json='{"new": true}',
+    )
+
+    assert result is False
+    assert db.get_live_strategy(strategy_id)["timeframe"] == "minutes60"
+
+
+def test_replace_live_strategy_strategy_refuses_draft_status(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="draft", timeframe="minutes60")
+
+    result = db.replace_live_strategy_strategy(
+        strategy_id,
+        source_run_id="new-run",
+        timeframe="minutes30",
+        buy_conditions_json='{"new": true}',
+        sell_conditions_json='{"new": true}',
+    )
+
+    assert result is False
+    assert db.get_live_strategy(strategy_id)["timeframe"] == "minutes60"
+
+
+def test_replace_live_strategy_strategy_resets_tripped_circuit_breaker(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+    db.upsert_circuit_breaker_state(
+        strategy_id, "2026-08-18", 3, 1,
+        tripped_reason="일일 손실 한도 초과", tripped_at="2026-08-18T05:00:00",
+    )
+
+    result = db.replace_live_strategy_strategy(
+        strategy_id,
+        source_run_id="new-run",
+        timeframe="minutes30",
+        buy_conditions_json='{"new": true}',
+        sell_conditions_json='{"new": true}',
+    )
+
+    assert result is True
+    cb_state = db.get_circuit_breaker_state(strategy_id)
+    assert cb_state["tripped"] == 0
+    assert cb_state["consecutive_losses"] == 0
+    assert cb_state["tripped_reason"] is None
+    assert cb_state["tripped_at"] is None
+
+
+def test_replace_live_strategy_strategy_noop_when_no_circuit_breaker_row(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="stopped")
+
+    result = db.replace_live_strategy_strategy(
+        strategy_id,
+        source_run_id="new-run",
+        timeframe="minutes30",
+        buy_conditions_json='{"new": true}',
+        sell_conditions_json='{"new": true}',
+    )
+
+    assert result is True
+    assert db.get_circuit_breaker_state(strategy_id) is None

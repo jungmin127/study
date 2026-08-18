@@ -785,6 +785,52 @@ def stop_live_strategy_if_no_open_position(live_strategy_id: str) -> bool:
         conn.close()
 
 
+def replace_live_strategy_strategy(
+    live_strategy_id: str,
+    source_run_id: str,
+    timeframe: str,
+    buy_conditions_json: str,
+    sell_conditions_json: str,
+) -> bool:
+    """열린 포지션이 없는 라이브 전략을 같은 market 안에서 다른 백테스트 결과로
+    제자리 교체한다. market/current_capital/risk_config_json/baseline_qty/status는
+    건드리지 않는다 — 자금관리(risk_config)는 백테스트 결과에 존재하지 않는
+    라이브 전용 입력값이라 사용자가 이미 설정해둔 값을 그대로 유지한다.
+    last_processed_candle_time은 NULL로 리셋한다 — timeframe이 바뀌면 이전 봉
+    기준 타임스탬프가 새 timeframe에서 최신 봉을 건너뛰게 만들 수 있다
+    (signal_engine.py의 <= 게이트). circuit_breaker_state도 함께 리셋한다 —
+    이전 전략의 손실로 트립된 상태가 새 전략의 매수를 막지 않도록 하기 위함
+    (그 행이 아예 없으면 UPDATE는 조용히 0행 갱신되고 넘어간다)."""
+    conn = _connect()
+    try:
+        open_position = conn.execute(
+            "SELECT id FROM positions WHERE live_strategy_id = ? AND status = 'open'",
+            (live_strategy_id,),
+        ).fetchone()
+        if open_position is not None:
+            return False
+
+        cursor = conn.execute(
+            "UPDATE live_strategies SET source_run_id=?, timeframe=?, buy_conditions_json=?, "
+            "sell_conditions_json=?, last_processed_candle_time=NULL "
+            "WHERE id=? AND status IN ('running','paused','stopped')",
+            (source_run_id, timeframe, buy_conditions_json, sell_conditions_json, live_strategy_id),
+        )
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return False
+
+        conn.execute(
+            "UPDATE circuit_breaker_state SET tripped=0, consecutive_losses=0, "
+            "tripped_reason=NULL, tripped_at=NULL WHERE live_strategy_id=?",
+            (live_strategy_id,),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def list_active_strategies() -> list[dict]:
     conn = _connect()
     try:
