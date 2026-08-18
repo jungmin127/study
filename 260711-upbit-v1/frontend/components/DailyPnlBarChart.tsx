@@ -1,6 +1,7 @@
 'use client';
 
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, XAxis, YAxis } from 'recharts';
+import type { RenderableText } from 'recharts';
 import type { JournalDailyPnlPoint } from '@/lib/types/journal';
 
 // 이 앱의 손익 색상 관례(frontend/lib/return-rate-color.ts)와 동일: 양수=빨강, 음수=파랑
@@ -15,9 +16,9 @@ function fmtTick(date: string): string {
   return date.slice(5).replace('-', '/');
 }
 
-function fmtLabel(value: number | string | null | undefined): string {
+function fmtLabel(value: RenderableText): RenderableText {
   if (value === undefined || value === null) return '';
-  const num = typeof value === 'string' ? parseFloat(value) : value;
+  const num = typeof value === 'string' ? parseFloat(value) : typeof value === 'number' ? value : NaN;
   if (isNaN(num) || num === 0) return '';
   return Math.round(num).toLocaleString();
 }
@@ -42,7 +43,7 @@ export default function DailyPnlBarChart({
             position="top"
             className="fill-foreground"
             fontSize={10}
-            formatter={fmtLabel as any}
+            formatter={fmtLabel}
           />
         </Bar>
       </BarChart>
