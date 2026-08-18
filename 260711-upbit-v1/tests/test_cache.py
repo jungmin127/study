@@ -354,13 +354,14 @@ def test_list_distinct_combos(monkeypatch, tmp_path):
 
 
 def _save_condition_tree_run(monkeypatch, tmp_path, run_id: str, title: str | None, description: str | None,
-                              final_value: float = 11000.0, initial_capital: float = 10000.0):
+                              final_value: float = 11000.0, initial_capital: float = 10000.0,
+                              market: str = "KRW-BTC"):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     save_result(
         run_id=run_id,
         strategy_name="ConditionTreeStrategy",
         strategy_params={"buy_conditions": {}, "sell_conditions": {}},
-        market="KRW-BTC",
+        market=market,
         timeframe="days",
         start=datetime(2026, 1, 1, tzinfo=timezone.utc),
         end=datetime(2026, 1, 10, tzinfo=timezone.utc),
@@ -854,3 +855,21 @@ def test_save_trend_segments_replaces_only_that_market(monkeypatch, tmp_path):
 def test_list_trend_segments_returns_empty_list_when_not_computed(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     assert list_trend_segments("KRW-XRP") == []
+
+
+def test_list_backtest_runs_filters_by_market(monkeypatch, tmp_path):
+    _save_condition_tree_run(monkeypatch, tmp_path, "btc-run", title="BTC", description=None, market="KRW-BTC")
+    _save_condition_tree_run(monkeypatch, tmp_path, "eth-run", title="ETH", description=None, market="KRW-ETH")
+
+    runs = list_backtest_runs(market="KRW-ETH")
+
+    assert [r["run_id"] for r in runs] == ["eth-run"]
+
+
+def test_list_backtest_runs_without_market_returns_all(monkeypatch, tmp_path):
+    _save_condition_tree_run(monkeypatch, tmp_path, "btc-run", title="BTC", description=None, market="KRW-BTC")
+    _save_condition_tree_run(monkeypatch, tmp_path, "eth-run", title="ETH", description=None, market="KRW-ETH")
+
+    runs = list_backtest_runs()
+
+    assert {r["run_id"] for r in runs} == {"btc-run", "eth-run"}

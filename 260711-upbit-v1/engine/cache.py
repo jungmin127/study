@@ -493,35 +493,45 @@ def list_distinct_combos() -> list[dict]:
     ]
 
 
-def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int = 1000) -> list[dict]:
+def list_backtest_runs(
+    strategy_name: str = "ConditionTreeStrategy", limit: int = 1000, market: str | None = None,
+) -> list[dict]:
     """온디맨드 조건식 실행(홈 화면) 결과만 최신순으로 반환한다.
 
     strategy_name으로 필터링해 run_sweep()이 남기는 SignalStrategy 기반 행(히트맵/랭킹
-    전용)은 섞이지 않게 한다 — 두 시스템은 의도적으로 분리되어 있다.
+    전용)은 섞이지 않게 한다 — 두 시스템은 의도적으로 분리되어 있다. market이 주어지면
+    해당 market의 결과만 추가로 필터링한다(라이브 전략 "전략 교체" 팝업이 같은 코인
+    후보만 보여주기 위해 사용).
 
     initial_capital/commission_rate/trades/buy_conditions/sell_conditions는 클라이언트
     응답용이 아니라 backend/main.py가 미청산 포지션 실시간 재평가 계산에 쓰는 내부 필드다."""
     conn = _connect()
     try:
+        where = "r.strategy_name = ?"
+        params: list = [strategy_name]
+        if market is not None:
+            where += " AND r.market = ?"
+            params.append(market)
+        params.append(limit)
         rows = conn.execute(
             "SELECT r.id, r.title, r.description, r.market, r.timeframe, r.start, r.end, "
             "       r.created_at, r.risk_config_json, r.params_json, "
             "       res.final_value, res.sharpe, res.max_drawdown, res.trades_json "
             "FROM backtest_runs r "
             "JOIN backtest_results res ON res.run_id = r.id "
-            "WHERE r.strategy_name = ? "
+            f"WHERE {where} "
             # created_at은 초 단위라 같은 초에 여러 건이 저장되면 순서가 불안정해질 수 있어,
             # 삽입 순서를 그대로 보존하는 rowid를 보조 정렬 기준으로 둔다.
             "ORDER BY r.created_at DESC, r.rowid DESC "
             "LIMIT ?",
-            (strategy_name, limit),
+            params,
         ).fetchall()
     finally:
         conn.close()
 
     runs: list[dict] = []
     for row in rows:
-        (run_id, title, description, market, timeframe, start, end,
+        (run_id, title, description, market_val, timeframe, start, end,
          created_at, risk_config_json, params_json,
          final_value, sharpe, max_drawdown, trades_json) = row
         risk_config = json.loads(risk_config_json)
@@ -536,7 +546,7 @@ def list_backtest_runs(strategy_name: str = "ConditionTreeStrategy", limit: int 
             "run_id": run_id,
             "title": title,
             "description": description,
-            "market": market,
+            "market": market_val,
             "timeframe": timeframe,
             "start": start,
             "end": end,
