@@ -1060,3 +1060,45 @@ def test_list_capital_adjustments_returns_empty_for_strategy_with_none(monkeypat
     strategy_id = insert_live_strategy(db)
 
     assert db.list_capital_adjustments(strategy_id) == []
+
+
+def test_connect_adds_entry_fee_column_to_existing_positions_table(monkeypatch, tmp_path):
+    """entry_fee는 실거래 중인 프로덕션 DB에 적용해야 해서, 다른 컬럼들의 "크게 실패시키는
+    assert" 패턴과 달리 실제 ALTER TABLE로 추가한다(무마이그레이션 정책의 유일한 예외)."""
+    db = _fresh_db(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db.DB_PATH)
+    conn.execute("""
+        CREATE TABLE positions (
+            id               TEXT PRIMARY KEY,
+            live_strategy_id TEXT NOT NULL,
+            market           TEXT NOT NULL,
+            status           TEXT NOT NULL DEFAULT 'open',
+            entry_price      REAL,
+            entry_qty        REAL,
+            entry_time       TEXT,
+            exit_price       REAL,
+            exit_qty         REAL,
+            exit_time        TEXT,
+            realized_pnl     REAL,
+            realized_pnl_pct REAL,
+            close_reason     TEXT,
+            stale_resolved_qty      REAL NOT NULL DEFAULT 0,
+            stale_resolved_proceeds REAL NOT NULL DEFAULT 0,
+            stale_resolved_fee      REAL NOT NULL DEFAULT 0,
+            created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("INSERT INTO positions (id, live_strategy_id, market) VALUES ('p1', 's1', 'KRW-BTC')")
+    conn.commit()
+    conn.close()
+
+    db._connect()
+
+    conn = sqlite3.connect(db.DB_PATH)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
+        row = conn.execute("SELECT entry_fee FROM positions WHERE id = 'p1'").fetchone()
+    finally:
+        conn.close()
+    assert "entry_fee" in columns
+    assert row[0] == 0

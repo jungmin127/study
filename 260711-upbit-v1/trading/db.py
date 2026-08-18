@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS positions (
     status           TEXT NOT NULL DEFAULT 'open',
     entry_price      REAL,
     entry_qty        REAL,
+    entry_fee        REAL NOT NULL DEFAULT 0,
     entry_time       TEXT,
     exit_price       REAL,
     exit_qty         REAL,
@@ -190,6 +191,24 @@ def _assert_live_strategies_manual_pause_column_present(conn: sqlite3.Connection
     )
 
 
+def _ensure_positions_entry_fee_column(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 positions 테이블에 새 컬럼 entry_fee를
+    추가하지 못한다. 다른 컬럼들은 "DB 파일을 지우고 다시 시작하라"는 assert로 크게
+    실패시키지만(무마이그레이션 정책), entry_fee는 지금 AWS에서 실거래 중인 프로덕션
+    DB에 적용해야 해서 파일을 지울 수 없다 — 컬럼이 없으면 실제 ALTER TABLE로 추가한다
+    (기존 행은 DEFAULT 0으로 채워짐, 이후 백필 스크립트가 정확한 값으로 갱신한다)."""
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='positions'"
+    ).fetchone() is not None
+    if not table_exists:
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('positions')")}
+    if "entry_fee" in columns:
+        return
+    conn.execute("ALTER TABLE positions ADD COLUMN entry_fee REAL NOT NULL DEFAULT 0")
+    conn.commit()
+
+
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -199,6 +218,7 @@ def _connect() -> sqlite3.Connection:
         conn.executescript(_SCHEMA)
         _assert_signals_unique_constraint_present(conn)
         _assert_live_strategies_manual_pause_column_present(conn)
+        _ensure_positions_entry_fee_column(conn)
         _initialized_paths.add(DB_PATH)
     return conn
 
