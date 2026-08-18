@@ -26,6 +26,7 @@ REQUEST_DELAY_SECONDS = 0.15
 _CLOSE_COLUMNS = ["candle_time", "close"]
 
 _TIMEFRAME_TO_INTERVAL = {
+    "minutes5": "5m",
     "minutes15": "15m",
     "minutes30": "30m",
     "minutes60": "1h",

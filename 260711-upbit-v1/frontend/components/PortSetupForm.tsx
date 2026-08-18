@@ -24,6 +24,7 @@ import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 import { defaultDate, formatCapital } from '@/lib/format';
 
 const CANDLE_UNITS = [
+  { label: '5분', timeframe: 'minutes5' },
   { label: '15분', timeframe: 'minutes15' },
   { label: '30분', timeframe: 'minutes30' },
   { label: '1시간', timeframe: 'minutes60' },
@@ -44,7 +45,7 @@ function parsePreset(searchParams: URLSearchParams) {
 
   return {
     market: searchParams.get('market') ?? '',
-    timeframe: searchParams.get('timeframe') ?? CANDLE_UNITS[0].timeframe,
+    timeframe: searchParams.get('timeframe') ?? 'minutes15',
     startDate: searchParams.get('start') ?? defaultDate(90),
     startTime: searchParams.get('startTime') ?? '00:00',
     endDate: searchParams.get('end') ?? defaultDate(0),

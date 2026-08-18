@@ -31,6 +31,7 @@ def test_binance_symbol_strips_krw_prefix_and_appends_usdt():
 
 
 def test_interval_for_timeframe_maps_all_supported_timeframes():
+    assert _interval_for_timeframe("minutes5") == "5m"
     assert _interval_for_timeframe("minutes15") == "15m"
     assert _interval_for_timeframe("minutes30") == "30m"
     assert _interval_for_timeframe("minutes60") == "1h"
