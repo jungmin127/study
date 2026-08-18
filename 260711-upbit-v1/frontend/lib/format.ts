@@ -15,6 +15,12 @@ export function formatDateTime(iso: string): string {
   return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
+export function formatDateTimeShort(iso: string): string {
+  const parts = KST_FORMATTER.formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+}
+
 // 타임프레임별 1 bar당 분(minute) 수. engine/metrics.py의 _TIMEFRAME_MINUTES와 동일하게 유지한다.
 const TIMEFRAME_MINUTES: Record<string, number> = {
   minutes1: 1,

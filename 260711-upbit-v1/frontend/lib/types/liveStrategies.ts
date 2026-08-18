@@ -52,6 +52,8 @@ export interface LiveStrategy {
   started_at: string | null;
   stopped_at: string | null;
   open_position: LiveStrategyOpenPosition | null;
+  last_buy_at: string | null;
+  last_sell_at: string | null;
   buy_conditions: ConditionGroup;
   sell_conditions: ConditionGroup;
   risk_config: LiveStrategyRiskConfig;
