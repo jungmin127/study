@@ -204,6 +204,7 @@ async def test_enter_dry_run_opens_position_at_requested_price(monkeypatch, tmp_
     position = position_manager.get_open_position(strategy["id"])
     assert position is not None
     assert position["entry_price"] == 50_000_000.0
+    assert position["entry_fee"] == 0.0
 
 
 async def test_enter_market_mode_places_price_order_and_records_fill(monkeypatch, tmp_path):
@@ -234,6 +235,29 @@ async def test_enter_market_mode_places_price_order_and_records_fill(monkeypatch
     assert order["filled_price"] == pytest.approx(500000.0 / 0.01)
     position = position_manager.get_open_position(strategy["id"])
     assert position is not None
+
+
+async def test_enter_records_entry_fee_and_links_order_to_position(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+
+    async def fake_create_order(market, side, ord_type, *, volume=None, price=None,
+                                 time_in_force=None, identifier=None, client=None):
+        return {"uuid": "uuid-1", "state": "done"}
+
+    async def fake_get_order(*, uuid=None, identifier=None, client=None):
+        return {"state": "done", "executed_volume": "0.01", "remaining_volume": "0",
+                "paid_fee": "250.0", "trades": [{"funds": "500000.0"}]}
+
+    monkeypatch.setattr(upbit_client, "create_order", fake_create_order)
+    monkeypatch.setattr(upbit_client, "get_order", fake_get_order)
+
+    order = await order_executor.enter(strategy, 500_000.0, 50_000_000.0)
+
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_fee"] == pytest.approx(250.0)
+    linked_order = dbm.get_order_by_id(order["id"])
+    assert linked_order["position_id"] == position["id"]
 
 
 async def test_enter_raises_when_position_already_open(monkeypatch, tmp_path):

@@ -410,7 +410,10 @@ async def enter(
     if result["status"] != "done":
         return db.get_order_by_id(result["order_id"])
 
-    position_manager.open_position(strategy["id"], market, result["filled_price"], result["filled_volume"])
+    position_id = position_manager.open_position(
+        strategy["id"], market, result["filled_price"], result["filled_volume"], result["fee"],
+    )
+    db.update_order_position_id(result["order_id"], position_id)
     return db.get_order_by_id(result["order_id"])
 
 
