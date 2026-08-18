@@ -1,15 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from 'recharts';
 import { ApiError } from '@/lib/api/client';
 import { getJournalSummary, getMarketJournal } from '@/lib/api/journal';
 import type { JournalMarketDetail, JournalSummary } from '@/lib/types/journal';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatTimeframe } from '@/lib/format';
+import DailyPnlBarChart from '@/components/DailyPnlBarChart';
 import JournalCalendar from '@/components/JournalCalendar';
 import JournalMarketDetailView from '@/components/JournalMarketDetail';
 
@@ -124,26 +122,12 @@ export default function JournalPage() {
             </Card>
           </div>
 
-          {summary.equity_curve.length === 0 ? (
+          {summary.daily_pnl_30d.every((d) => d.pnl === 0) ? (
             <p className="text-sm text-muted-foreground">
-              아직 청산된 거래가 없어 그래프를 표시할 수 없습니다.
+              최근 30일간 청산된 거래가 없어 그래프를 표시할 수 없습니다.
             </p>
           ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={summary.equity_curve}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="trading_date" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  stroke="var(--color-primary)"
-                  name="계좌 총자산"
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <DailyPnlBarChart data={summary.daily_pnl_30d} heightPx={280} />
           )}
 
           <div className="flex items-center justify-between">
@@ -171,26 +155,12 @@ export default function JournalPage() {
 
               <JournalCalendar daily={detail.daily} />
 
-              {detail.daily.length === 0 ? (
+              {detail.daily_pnl_30d.every((d) => d.pnl === 0) ? (
                 <p className="text-sm text-muted-foreground">
-                  아직 청산된 거래가 없어 그래프를 표시할 수 없습니다.
+                  최근 30일간 청산된 거래가 없어 그래프를 표시할 수 없습니다.
                 </p>
               ) : (
-                <ResponsiveContainer width="100%" height={240}>
-                  <LineChart data={detail.daily}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="trading_date" tick={{ fontSize: 11 }} />
-                    <YAxis dataKey="cumulative" tick={{ fontSize: 11 }} />
-                    <Tooltip />
-                    <Line
-                      type="monotone"
-                      dataKey="cumulative"
-                      stroke="var(--color-primary)"
-                      name={`${detail.market} 누적자산`}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                <DailyPnlBarChart data={detail.daily_pnl_30d} heightPx={240} />
               )}
 
               <JournalMarketDetailView detail={detail} />
