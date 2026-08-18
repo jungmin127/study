@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Check, CircleHelp, Coins, Pause, Play, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import {
@@ -13,7 +13,7 @@ import {
   stopLiveStrategy,
   updateLiveStrategyCapital,
 } from '@/lib/api/liveStrategies';
-import { getBacktestRuns } from '@/lib/api/eda';
+import { getBacktestRuns, getMarkets } from '@/lib/api/eda';
 import type { BacktestRunSummary } from '@/lib/types/eda';
 import type { LiveStrategy, LiveStrategyRiskConfig } from '@/lib/types/liveStrategies';
 import {
@@ -39,7 +39,7 @@ import {
 import { summarizeGroup } from '@/lib/condition-summary';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { formatCapital, formatDateTime, formatTimeframe } from '@/lib/format';
+import { formatCapital, formatDateTime, formatDateTimeShort, formatTimeframe } from '@/lib/format';
 import { Input } from '@/components/ui/input';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling';
@@ -201,9 +201,11 @@ function ChangeCapitalDialog({
 
 function StrategySwapDialog({
   strategy,
+  marketName,
   onChanged,
 }: {
   strategy: LiveStrategy;
+  marketName: string;
   onChanged: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -272,7 +274,7 @@ function StrategySwapDialog({
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>전략 교체 — {strategy.market}</DialogTitle>
+          <DialogTitle>전략 교체 — {marketName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <p className="text-xs text-muted-foreground">
@@ -339,6 +341,17 @@ export default function LiveStrategiesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [marketNames, setMarketNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    getMarkets()
+      .then((markets) => {
+        setMarketNames(Object.fromEntries(markets.map((m) => [m.market, m.korean_name])));
+      })
+      .catch(() => {
+        // 한글명 로드 실패 시 컴포넌트 전체를 막지 않고 티커로 폴백한다.
+      });
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -378,7 +391,9 @@ export default function LiveStrategiesPage() {
     <div className="space-y-4">
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-        {strategies.map((s) => (
+        {strategies.map((s) => {
+          const koreanName = marketNames[s.market] ?? s.market;
+          return (
           <Card
             key={s.id}
             className={`gap-2 overflow-hidden border-l-[3px] py-3 md:gap-3 md:py-4 ${
@@ -387,7 +402,7 @@ export default function LiveStrategiesPage() {
           >
             <div className="flex items-center justify-between gap-2 px-4">
               <span className="min-w-0 truncate text-sm font-semibold">
-                {s.market} · {formatTimeframe(s.timeframe)}
+                {koreanName} · {formatTimeframe(s.timeframe)}
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
                 <Badge variant={s.status === 'running' ? 'default' : 'secondary'}>{s.status}</Badge>
@@ -403,7 +418,7 @@ export default function LiveStrategiesPage() {
                   <DialogContent className="max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>
-                        {s.market} · {formatTimeframe(s.timeframe)} 전략 설정
+                        {koreanName} · {formatTimeframe(s.timeframe)} 전략 설정
                       </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-3 text-sm">
@@ -462,7 +477,7 @@ export default function LiveStrategiesPage() {
                   <ChangeCapitalDialog strategy={s} onChanged={refresh} />
                 )}
                 {s.open_position === null && s.status !== 'draft' && (
-                  <StrategySwapDialog strategy={s} onChanged={refresh} />
+                  <StrategySwapDialog strategy={s} marketName={koreanName} onChanged={refresh} />
                 )}
                 {s.status === 'draft' && (
                   <>
@@ -589,11 +604,20 @@ export default function LiveStrategiesPage() {
               )}
             </div>
 
+            {(s.last_buy_at || s.last_sell_at) && (
+              <p className="px-4 text-xs text-muted-foreground">
+                {s.last_buy_at && `매수 ${formatDateTimeShort(s.last_buy_at)}`}
+                {s.last_buy_at && s.last_sell_at && ' · '}
+                {s.last_sell_at && `매도 ${formatDateTimeShort(s.last_sell_at)}`}
+              </p>
+            )}
+
             {s.status === 'stopped' && s.stopped_at && (
               <p className="px-4 text-xs text-muted-foreground">중지 시각: {s.stopped_at}</p>
             )}
           </Card>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
