@@ -1168,6 +1168,17 @@ def _open_position_summary(position: dict, current_price: float | None) -> dict:
 
 
 def _live_strategy_response(strategy: dict, position: dict | None, current_price: float | None) -> dict:
+    closed_positions = trading_db.list_closed_positions(strategy["id"])
+    last_closed = closed_positions[0] if closed_positions else None
+
+    if position is not None:
+        last_buy_at = _to_utc_iso(position["entry_time"])
+    elif last_closed is not None:
+        last_buy_at = _to_utc_iso(last_closed["entry_time"])
+    else:
+        last_buy_at = None
+    last_sell_at = _to_utc_iso(last_closed["exit_time"]) if last_closed is not None else None
+
     return {
         "id": strategy["id"],
         "source_run_id": strategy["source_run_id"],
@@ -1180,6 +1191,8 @@ def _live_strategy_response(strategy: dict, position: dict | None, current_price
         "started_at": strategy["started_at"],
         "stopped_at": strategy["stopped_at"],
         "open_position": _open_position_summary(position, current_price) if position else None,
+        "last_buy_at": last_buy_at,
+        "last_sell_at": last_sell_at,
         "buy_conditions": json.loads(strategy["buy_conditions_json"]),
         "sell_conditions": json.loads(strategy["sell_conditions_json"]),
         "risk_config": json.loads(strategy["risk_config_json"]),

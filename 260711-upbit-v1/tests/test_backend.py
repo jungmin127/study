@@ -544,6 +544,48 @@ def test_list_live_strategies_includes_open_position_summary(monkeypatch, tmp_pa
     assert position["unrealized_pnl_pct"] == pytest.approx(10.0)
 
 
+def test_list_live_strategies_last_buy_at_reflects_open_position(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    create_resp = client.post("/api/v1/live-strategies", json=_live_strategy_request())
+    strategy_id = create_resp.json()["id"]
+    trading_db_module.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    _patch_get_current_prices(monkeypatch, {"KRW-BTC": 55_000_000.0})
+
+    resp = client.get("/api/v1/live-strategies")
+
+    body = resp.json()[0]
+    assert body["last_buy_at"] is not None
+    assert body["last_sell_at"] is None
+
+
+def test_list_live_strategies_last_buy_and_sell_reflect_closed_position(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    create_resp = client.post("/api/v1/live-strategies", json=_live_strategy_request())
+    strategy_id = create_resp.json()["id"]
+    position_id = trading_db_module.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    trading_db_module.close_position_row(position_id, 51_000_000.0, 0.01, 10000.0, 2.0, "signal")
+
+    resp = client.get("/api/v1/live-strategies")
+
+    body = resp.json()[0]
+    assert body["last_buy_at"] is not None
+    assert body["last_sell_at"] is not None
+
+
+def test_list_live_strategies_last_buy_and_sell_are_null_without_trades(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    client.post("/api/v1/live-strategies", json=_live_strategy_request())
+
+    resp = client.get("/api/v1/live-strategies")
+
+    body = resp.json()[0]
+    assert body["last_buy_at"] is None
+    assert body["last_sell_at"] is None
+
+
 def test_list_live_strategies_falls_back_when_current_price_fetch_fails(monkeypatch, tmp_path):
     """Fix 2(Important) — get_current_prices()가 업비트 장애/타임아웃으로 예외를 던져도
     목록 엔드포인트 전체가 500으로 죽으면 안 된다. 열린 포지션이 있는 전략의
