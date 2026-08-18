@@ -285,14 +285,14 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     params: [],
     formula: 'Pivot = (직전 봉 고가 + 직전 봉 저가 + 직전 봉 종가) ÷ 3',
     thresholdExample: '이 앱의 조건식은 지표값과 숫자 threshold만 비교합니다. threshold는 보통 현재 가격대 근처 값을 넣어 레벨 필터로 씁니다.',
-    usage: '종가가 Pivot 위/아래 어느 쪽에 있는지를 다른 오실레이터 조건과 AND로 묶어, 그날의 우세한 방향으로만 진입하는 필터로 씁니다.',
+    usage: '종가가 Pivot 위/아래 어느 쪽에 있는지를 다른 오실레이터 조건과 AND로 묶어, 그날의 우세한 방향으로만 진입하는 필터로 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 PIVOT_P_PCT를 대신 쓰세요.',
   },
   PIVOT_R1: {
     meaning: 'Pivot 기준선 대비 1차 저항선입니다. 종가가 이 선을 넘으면 상승 모멘텀이 강하다고 흔히 해석합니다.',
     params: [],
     formula: 'R1 = Pivot × 2 − 직전 봉 저가',
     thresholdExample: '이 앱의 조건식은 지표값과 숫자 threshold만 비교합니다. threshold는 보통 현재 가격대 근처 값을 넣어 레벨 필터로 씁니다.',
-    usage: '종가가 R1을 상향 돌파하는 걸 돌파 매수 신호로, 혹은 R1 근처를 저항으로 보고 매도 신호로 반대로 쓰기도 합니다.',
+    usage: '종가가 R1을 상향 돌파하는 걸 돌파 매수 신호로, 혹은 R1 근처를 저항으로 보고 매도 신호로 반대로 쓰기도 합니다. 코인 시세와 무관한 정규화 버전이 필요하면 PIVOT_R1_PCT를 대신 쓰세요.',
   },
   FIB_382_PCT: {
     meaning:
@@ -324,7 +324,28 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     params: [],
     formula: 'S1 = Pivot × 2 − 직전 봉 고가',
     thresholdExample: '이 앱의 조건식은 지표값과 숫자 threshold만 비교합니다. threshold는 보통 현재 가격대 근처 값을 넣어 레벨 필터로 씁니다.',
-    usage: 'S1 근처에서 반등을 노리는 매수 조건, 혹은 S1 하향 이탈을 손절/추가 하락 신호로 씁니다.',
+    usage: 'S1 근처에서 반등을 노리는 매수 조건, 혹은 S1 하향 이탈을 손절/추가 하락 신호로 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 PIVOT_S1_PCT를 대신 쓰세요.',
+  },
+  PIVOT_P_PCT: {
+    meaning: 'Pivot 기준선(P) 대비, 종가가 몇 % 위/아래에 있는지 나타낸 정규화 지표입니다 — 계산 배경은 PIVOT_P 가이드를 참고하세요.',
+    params: [],
+    formula: 'PIVOT_P_PCT = (종가 − Pivot P) ÷ Pivot P × 100',
+    thresholdExample: 'PIVOT_P_PCT > 2면 기준선보다 2% 이상 위에서 거래되는 구간입니다. 코인 시세와 무관하게 여러 코인에 같은 threshold를 그대로 쓸 수 있습니다.',
+    usage: 'PIVOT_P를 절대가격 필터로 쓰기 애매할 때, 대신 이 지표로 "기준선 대비 몇 % 떨어져 있는지"를 오실레이터처럼 씁니다.',
+  },
+  PIVOT_R1_PCT: {
+    meaning: '1차 저항선(R1) 대비, 종가가 몇 % 위/아래에 있는지 나타낸 정규화 지표입니다 — 계산 배경은 PIVOT_R1 가이드를 참고하세요.',
+    params: [],
+    formula: 'PIVOT_R1_PCT = (종가 − R1) ÷ R1 × 100',
+    thresholdExample: 'PIVOT_R1_PCT > 0이면 저항선을 이미 돌파했다는 뜻입니다.',
+    usage: 'PIVOT_R1을 절대가격 필터로 쓰기 애매할 때, 대신 이 지표로 "저항선 대비 몇 % 떨어져 있는지"를 오실레이터처럼 씁니다.',
+  },
+  PIVOT_S1_PCT: {
+    meaning: '1차 지지선(S1) 대비, 종가가 몇 % 위/아래에 있는지 나타낸 정규화 지표입니다 — 계산 배경은 PIVOT_S1 가이드를 참고하세요.',
+    params: [],
+    formula: 'PIVOT_S1_PCT = (종가 − S1) ÷ S1 × 100',
+    thresholdExample: 'PIVOT_S1_PCT < 0이면 지지선 아래로 이탈했다는 뜻입니다.',
+    usage: 'PIVOT_S1을 절대가격 필터로 쓰기 애매할 때, 대신 이 지표로 "지지선 대비 몇 % 떨어져 있는지"를 오실레이터처럼 씁니다.',
   },
   MARKET_TREND: {
     meaning:

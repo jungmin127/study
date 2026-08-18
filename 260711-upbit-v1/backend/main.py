@@ -371,6 +371,24 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "Pivot이 105, 직전 봉 고가가 110이면 S1 = 105×2 − 110 = 100입니다.",
     },
     {
+        "value": "PIVOT_P_PCT", "label": "Pivot 기준선 (정규화, %)", "category": "가격대",
+        "params": [],
+        "description": "Pivot 기준선(P) 대비 종가가 몇 % 위/아래에 있는지 나타냅니다.",
+        "example": "PIVOT_P_PCT > 2면 기준선보다 2% 이상 위에서 거래되는 구간입니다.",
+    },
+    {
+        "value": "PIVOT_R1_PCT", "label": "Pivot 저항선(R1) (정규화, %)", "category": "가격대",
+        "params": [],
+        "description": "1차 저항선(R1) 대비 종가의 이격을 %로 나타냅니다.",
+        "example": "PIVOT_R1_PCT > 0이면 저항선을 이미 돌파했다는 뜻입니다.",
+    },
+    {
+        "value": "PIVOT_S1_PCT", "label": "Pivot 지지선(S1) (정규화, %)", "category": "가격대",
+        "params": [],
+        "description": "1차 지지선(S1) 대비 종가의 이격을 %로 나타냅니다.",
+        "example": "PIVOT_S1_PCT < 0이면 지지선 아래로 이탈했다는 뜻입니다.",
+    },
+    {
         "value": "VPVR_POC", "label": "VPVR POC (거래량 최다 가격대)", "category": "가격대",
         "params": [{"key": "period", "label": "기간", "default": 50}],
         "description": "최근 period봉의 거래량을 가격대별로 나눠 쌓았을 때, 거래량이 가장 많이 몰린 가격대(Point of Control)입니다. 시장이 '공정하다'고 합의한 가격으로 해석되어 반등/저항이 자주 일어나는 자리로 흔히 씁니다.",

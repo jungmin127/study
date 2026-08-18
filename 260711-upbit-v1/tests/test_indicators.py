@@ -312,6 +312,35 @@ def test_pivot_s1_matches_manual_formula():
     assert abs(values[-1] - manual) < 1e-6
 
 
+def test_pivot_p_pct_matches_manual_pct_from_level():
+    values = _run_probe("PIVOT_P_PCT", {})
+    df = make_oscillating_df()
+    level = (df["high"].iloc[-2] + df["low"].iloc[-2] + df["close"].iloc[-2]) / 3.0
+    close = df["close"].iloc[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_pivot_r1_pct_matches_manual_pct_from_level():
+    values = _run_probe("PIVOT_R1_PCT", {})
+    df = make_oscillating_df()
+    pivot = (df["high"].iloc[-2] + df["low"].iloc[-2] + df["close"].iloc[-2]) / 3.0
+    level = pivot * 2 - df["low"].iloc[-2]
+    close = df["close"].iloc[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_pivot_s1_pct_matches_manual_pct_from_level():
+    values = _run_probe("PIVOT_S1_PCT", {})
+    df = make_oscillating_df()
+    pivot = (df["high"].iloc[-2] + df["low"].iloc[-2] + df["close"].iloc[-2]) / 3.0
+    level = pivot * 2 - df["high"].iloc[-2]
+    close = df["close"].iloc[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
 def test_btc_correlation_matches_manual_pearson_of_pct_returns():
     df = make_oscillating_df()
     btc_df = make_oscillating_df(base=50000.0, amplitude=3000.0, period=45, ripple_period=9)

@@ -13,8 +13,11 @@ from trading.live_indicators import (
     create_fib_618,
     create_fib_618_pct,
     create_pivot_p,
+    create_pivot_p_pct,
     create_pivot_r1,
+    create_pivot_r1_pct,
     create_pivot_s1,
+    create_pivot_s1_pct,
 )
 
 
@@ -46,6 +49,27 @@ def test_pivot_r1_matches_backtrader():
 def test_pivot_s1_matches_backtrader():
     df = make_oscillating_df()
     assert_matches_backtrader("PIVOT_S1", {}, create_pivot_s1(df))
+
+
+def test_pivot_p_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("PIVOT_P_PCT", {}, create_pivot_p_pct(df))
+
+
+def test_pivot_r1_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("PIVOT_R1_PCT", {}, create_pivot_r1_pct(df))
+
+
+def test_pivot_s1_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("PIVOT_S1_PCT", {}, create_pivot_s1_pct(df))
+
+
+def test_live_indicator_factory_registers_pivot_pct():
+    assert LIVE_INDICATOR_FACTORY["PIVOT_P_PCT"] is create_pivot_p_pct
+    assert LIVE_INDICATOR_FACTORY["PIVOT_R1_PCT"] is create_pivot_r1_pct
+    assert LIVE_INDICATOR_FACTORY["PIVOT_S1_PCT"] is create_pivot_s1_pct
 
 
 def test_fib_382_pct_matches_backtrader():

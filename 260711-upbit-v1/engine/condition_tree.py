@@ -69,6 +69,15 @@ def get_indicator_value(indicator_name: str, obj: bt.Indicator) -> float:
         return float(obj.lines.r1[0])
     elif indicator_name == "PIVOT_S1":
         return float(obj.lines.s1[0])
+    elif indicator_name == "PIVOT_P_PCT":
+        close, level = float(obj.data.close[0]), float(obj.lines.p[0])
+        return (close - level) / level * 100 if level else 0.0
+    elif indicator_name == "PIVOT_R1_PCT":
+        close, level = float(obj.data.close[0]), float(obj.lines.r1[0])
+        return (close - level) / level * 100 if level else 0.0
+    elif indicator_name == "PIVOT_S1_PCT":
+        close, level = float(obj.data.close[0]), float(obj.lines.s1[0])
+        return (close - level) / level * 100 if level else 0.0
     elif indicator_name == "VPVR_POC":
         return float(obj.lines.poc[0])
     elif indicator_name == "VPVR_VAH":

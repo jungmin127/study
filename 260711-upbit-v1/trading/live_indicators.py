@@ -290,6 +290,21 @@ def create_pivot_s1(df: pd.DataFrame, **params) -> pd.Series:
     return pivot * 2 - prev_high
 
 
+def create_pivot_p_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_pivot_p(df, **params)
+    return (df["close"] - level) / level * 100
+
+
+def create_pivot_r1_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_pivot_r1(df, **params)
+    return (df["close"] - level) / level * 100
+
+
+def create_pivot_s1_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_pivot_s1(df, **params)
+    return (df["close"] - level) / level * 100
+
+
 NUM_BINS = 24
 VALUE_AREA_PCT = 0.7
 
@@ -532,6 +547,9 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "PIVOT_P": create_pivot_p,
     "PIVOT_R1": create_pivot_r1,
     "PIVOT_S1": create_pivot_s1,
+    "PIVOT_P_PCT": create_pivot_p_pct,
+    "PIVOT_R1_PCT": create_pivot_r1_pct,
+    "PIVOT_S1_PCT": create_pivot_s1_pct,
     "VPVR_POC": create_vpvr_poc,
     "VPVR_VAH": create_vpvr_vah,
     "VPVR_VAL": create_vpvr_val,
