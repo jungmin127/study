@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .market import create_btc_correlation, create_market_trend, create_usdt_correlation
+from .market import create_btc_correlation, create_market_trend, create_market_trend_pct, create_usdt_correlation
 from .momentum import (
     create_cci,
     create_macd_line,
@@ -61,6 +61,7 @@ INDICATOR_FACTORY: dict[str, object] = {
     "TRADE_VALUE_SMA": create_trade_value_sma,
     "TRADE_VALUE_PCT": create_trade_value_pct,
     "MARKET_TREND": create_market_trend,
+    "MARKET_TREND_PCT": create_market_trend_pct,
     "BTC_CORRELATION": create_btc_correlation,
     "USDT_CORRELATION": create_usdt_correlation,
     "MOMENTUM_PCT": create_momentum_pct,

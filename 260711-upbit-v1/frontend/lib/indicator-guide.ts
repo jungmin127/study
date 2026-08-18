@@ -382,7 +382,15 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     params: [{ key: 'period', role: 'KRW-BTC 종가의 이동평균을 계산할 봉 개수.' }],
     formula: '시장 추세 = KRW-BTC 종가 − KRW-BTC 종가의 period봉 이동평균',
     thresholdExample: '연산자 "<", threshold 0 → BTC 종가가 자기 이동평균보다 낮을 때(BTC 하락 추세일 때) 조건이 참. 반대로 ">" 0이면 BTC가 상승 추세일 때만 참이 됩니다.',
-    usage: '알트코인 매수 조건에 "BTC가 하락 추세가 아닐 때만"이라는 시장 필터를 AND로 추가해, 전체 시장이 흔들릴 때 매수를 쉬는 용도로 씁니다.',
+    usage: '알트코인 매수 조건에 "BTC가 하락 추세가 아닐 때만"이라는 시장 필터를 AND로 추가해, 전체 시장이 흔들릴 때 매수를 쉬는 용도로 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 MARKET_TREND_PCT를 대신 쓰세요.',
+  },
+  MARKET_TREND_PCT: {
+    meaning:
+      'KRW-BTC 종가가 자신의 이동평균(period봉) 대비 몇 % 위/아래에 있는지 나타낸 정규화 지표입니다. 절대 KRW 차이값(MARKET_TREND)의 코인 시세 종속성을 제거한 버전 — 계산 배경은 MARKET_TREND 가이드를 참고하세요.',
+    params: [{ key: 'period', role: 'KRW-BTC 종가의 이동평균을 계산할 봉 개수. MARKET_TREND와 동일한 의미.' }],
+    formula: 'MARKET_TREND_PCT = (KRW-BTC 종가 − KRW-BTC 이동평균) ÷ KRW-BTC 이동평균 × 100',
+    thresholdExample: 'MARKET_TREND_PCT < -2면 BTC가 자기 이동평균보다 2% 이상 아래(약세)인 구간을 필터로 씁니다. MARKET_TREND와 달리 BTC 가격 수준이 시기마다 달라져도 같은 threshold를 계속 쓸 수 있습니다.',
+    usage: 'MARKET_TREND는 BTC 가격이 오르내릴수록 "같은 threshold가 뜻하는 이격 폭"도 달라지는 문제가 있습니다 — 장기간 백테스트나 여러 시기에 걸쳐 같은 threshold를 쓰고 싶을 때 이 지표를 대신 씁니다.',
   },
   MOMENTUM_PCT: {
     meaning: 'period봉 전 종가 대비 현재 종가가 몇 % 올랐거나 내렸는지입니다. backtrader의 ROC100(Rate of Change ×100)을 그대로 씁니다.',

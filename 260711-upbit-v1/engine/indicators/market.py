@@ -19,6 +19,27 @@ def create_market_trend(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     return market_close - sma
 
 
+class MarketTrendPct(bt.Indicator):
+    """KRW-BTC 종가가 자신의 이동평균(period봉) 대비 몇 % 위/아래에 있는지 나타낸
+    정규화 버전. 절대 KRW 차이값(MARKET_TREND)의 코인 시세 종속성을 제거한다."""
+
+    lines = ("pct",)
+    params = (("period", 10),)
+
+    def __init__(self) -> None:
+        self.market_close = self.data.btc_close
+        self.sma = bt.indicators.SMA(self.market_close, period=self.p.period)
+
+    def next(self) -> None:
+        sma_val = self.sma[0]
+        self.lines.pct[0] = (self.market_close[0] - sma_val) / sma_val * 100 if sma_val else 0.0
+
+
+def create_market_trend_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 10))
+    return MarketTrendPct(data, period=period)
+
+
 class RollingCorrelation(bt.Indicator):
     """두 종가 라인의 봉 대비 등락률(bt.indicators.ROC100, period=1)을 최근 period봉 모아
     Pearson 상관계수를 계산한다. 등락률·롤링 윈도우 방식은

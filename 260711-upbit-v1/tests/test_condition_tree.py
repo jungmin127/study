@@ -164,6 +164,14 @@ def test_required_aux_markets_returns_btc_when_market_trend_present():
     assert required_aux_markets(tree) == {"KRW-BTC"}
 
 
+def test_required_aux_markets_returns_btc_when_market_trend_pct_present():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "MARKET_TREND_PCT", "params": {"period": 10}, "operator": "<", "threshold": 0}],
+    }
+    assert required_aux_markets(tree) == {"KRW-BTC"}
+
+
 def test_required_aux_markets_empty_when_absent():
     tree = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}]}
     assert required_aux_markets(tree) == set()

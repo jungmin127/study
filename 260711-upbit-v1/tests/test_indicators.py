@@ -34,7 +34,7 @@ def _run_probe(indicator: str, params: dict) -> list[float]:
     return results[0].seen_values
 
 
-_NEEDS_EXTRA_LINE = {"MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC", "KOREA_PREMIUM", "FUNDING_RATE"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
+_NEEDS_EXTRA_LINE = {"MARKET_TREND", "MARKET_TREND_PCT", "BTC_CORRELATION", "USDT_CORRELATION", "FEAR_GREED_CMC", "KOREA_PREMIUM", "FUNDING_RATE"}  # btc_close/usdt_close 데이터 라인이 필요 — test_market_trend_matches_manual_close_minus_sma_of_btc_close_line 등 참고
 _NEEDS_TRADE_VALUE_LINE = {"TRADE_VALUE", "TRADE_VALUE_SMA", "TRADE_VALUE_PCT"}  # trade_value 라인이 필요 — test_trade_value_* 참고
 
 
@@ -103,6 +103,15 @@ def test_market_trend_matches_manual_close_minus_sma_of_btc_close_line():
     btc_close = df["close"] * 2 + 1000  # 대상 마켓과 스케일이 다른 별도 시세임을 검증하기 위해 배율을 둠
     values = _run_probe_with_aux("MARKET_TREND", {"period": 5}, "btc_close", btc_close)
     manual = (btc_close - btc_close.rolling(5).mean()).iloc[-1]
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_market_trend_pct_matches_manual_pct_of_btc_close_vs_sma():
+    df = make_oscillating_df()
+    btc_close = df["close"] * 2 + 1000
+    values = _run_probe_with_aux("MARKET_TREND_PCT", {"period": 5}, "btc_close", btc_close)
+    sma = btc_close.rolling(5).mean().iloc[-1]
+    manual = (btc_close.iloc[-1] - sma) / sma * 100
     assert abs(values[-1] - manual) < 1e-6
 
 

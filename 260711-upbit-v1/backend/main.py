@@ -473,6 +473,12 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=10이고 연산자 <, 임계값 0이면: KRW-BTC 종가가 자신의 10봉 이동평균보다 낮을 때(BTC가 하락 추세일 때) 조건이 참이 됩니다.",
     },
     {
+        "value": "MARKET_TREND_PCT", "label": "시장 추세 (정규화, %)", "category": "시장 심리",
+        "params": [{"key": "period", "label": "기간", "default": 10}],
+        "description": "KRW-BTC 종가가 자신의 이동평균 대비 몇 % 위/아래에 있는지 나타냅니다. 절대 KRW 차이값(MARKET_TREND)의 정규화 버전입니다.",
+        "example": "MARKET_TREND_PCT < -2면 BTC가 자기 이동평균보다 2% 이상 아래(약세)인 구간을 필터로 씁니다.",
+    },
+    {
         "value": "BTC_CORRELATION", "label": "BTC 상관계수", "category": "시장 심리",
         "params": [{"key": "period", "label": "기간", "default": 20}],
         "description": "대상 코인과 KRW-BTC의 봉 대비 등락률(%)을 최근 period봉 동안 비교한 Pearson 상관계수(-1~1)입니다. 1에 가까울수록 BTC와 같은 방향으로, -1에 가까울수록 반대 방향으로 움직입니다.",

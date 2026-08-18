@@ -435,6 +435,13 @@ def create_market_trend(df: pd.DataFrame, **params) -> pd.Series:
     return btc_close - btc_close.rolling(period).mean()
 
 
+def create_market_trend_pct(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 10))
+    btc_close = df["btc_close"]
+    sma = btc_close.rolling(period).mean()
+    return (btc_close - sma) / sma * 100
+
+
 def _rolling_pearson_corr(a: pd.Series, b: pd.Series, period: int) -> pd.Series:
     """두 종가 시리즈의 봉 대비 등락률(ROC100, period=1)을 최근 period봉 모아 피어슨
     상관계수를 구한다. pandas rolling corr는 윈도우 내 분산이 0이면 NaN을 내는데,
@@ -596,6 +603,7 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "VPVR_VAH_PCT": create_vpvr_vah_pct,
     "VPVR_VAL_PCT": create_vpvr_val_pct,
     "MARKET_TREND": create_market_trend,
+    "MARKET_TREND_PCT": create_market_trend_pct,
     "BTC_CORRELATION": create_btc_correlation,
     "USDT_CORRELATION": create_usdt_correlation,
     "FEAR_GREED_CMC": create_fear_greed_cmc,

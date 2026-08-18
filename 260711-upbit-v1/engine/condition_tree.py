@@ -271,6 +271,7 @@ def max_required_period(group: dict) -> int:
 
 AUX_MARKET_INDICATORS: dict[str, str] = {
     "MARKET_TREND": "KRW-BTC",
+    "MARKET_TREND_PCT": "KRW-BTC",
     "BTC_CORRELATION": "KRW-BTC",
     "USDT_CORRELATION": "KRW-USDT",
     "KOREA_PREMIUM": "KRW-USDT",

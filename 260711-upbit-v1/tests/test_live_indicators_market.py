@@ -5,6 +5,7 @@ from tests.signal_fixtures import make_oscillating_df
 from trading.live_indicators import (
     LIVE_INDICATOR_FACTORY,
     create_market_trend,
+    create_market_trend_pct,
     create_btc_correlation,
     create_usdt_correlation,
 )
@@ -30,6 +31,28 @@ def test_market_trend_uses_default_period_10_when_omitted():
 
 def test_live_indicator_factory_registers_market_trend():
     assert LIVE_INDICATOR_FACTORY["MARKET_TREND"] is create_market_trend
+
+
+def test_market_trend_pct_matches_backtrader():
+    df = make_oscillating_df()
+    btc_close = df["close"] * 2 + 1000
+    df["btc_close"] = btc_close
+    assert_matches_backtrader_with_aux(
+        "MARKET_TREND_PCT", {"period": 5}, "btc_close", btc_close,
+        create_market_trend_pct(df, period=5),
+    )
+
+
+def test_market_trend_pct_uses_default_period_10_when_omitted():
+    df = make_oscillating_df()
+    df["btc_close"] = df["close"] * 2 + 1000
+    default = create_market_trend_pct(df)
+    explicit = create_market_trend_pct(df, period=10)
+    assert default.equals(explicit)
+
+
+def test_live_indicator_factory_registers_market_trend_pct():
+    assert LIVE_INDICATOR_FACTORY["MARKET_TREND_PCT"] is create_market_trend_pct
 
 
 def test_btc_correlation_matches_backtrader():

@@ -27,7 +27,7 @@ from trading.live_indicators import LIVE_INDICATOR_FACTORY
 # B그룹: OHLCV 외 추가 컬럼이 필요해 이 테스트 범위 밖(설계 스펙 결정 8 관련, signal_engine.py의
 # _populate_b_group_columns/_merge_aux_markets가 별도로 채운다).
 _B_GROUP = {
-    "MARKET_TREND", "BTC_CORRELATION", "USDT_CORRELATION",
+    "MARKET_TREND", "MARKET_TREND_PCT", "BTC_CORRELATION", "USDT_CORRELATION",
     "FEAR_GREED_CMC", "KOREA_PREMIUM", "FUNDING_RATE",
 }
 
