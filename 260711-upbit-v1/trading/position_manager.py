@@ -28,8 +28,11 @@ def calculate_initial_capital(risk_config: dict, available_balance: float) -> fl
     return capital
 
 
-def open_position(live_strategy_id: str, market: str, entry_price: float, entry_qty: float) -> str:
-    return db.insert_position(live_strategy_id, market, entry_price, entry_qty)
+def open_position(
+    live_strategy_id: str, market: str, entry_price: float, entry_qty: float,
+    entry_fee: float = 0.0,
+) -> str:
+    return db.insert_position(live_strategy_id, market, entry_price, entry_qty, entry_fee)
 
 
 def get_open_position(live_strategy_id: str) -> dict | None:
@@ -42,16 +45,22 @@ def close_position(
     """포지션을 청산한다. realized_pnl/realized_pnl_pct를 계산해 positions 행을 갱신하고,
     live_strategies.current_capital을 (exit_price*exit_qty - fee)로 갱신한다(복리, 설계
     스펙 결정 7 — 수수료 차감 후 실현금액이 그대로 다음 진입 자금). 반환값은 호출자가
-    risk_manager.record_trade_result()에 그대로 넘길 수 있는 형태다."""
+    risk_manager.record_trade_result()에 그대로 넘길 수 있는 형태다.
+
+    realized_pnl은 진입 수수료(entry_fee, positions 행에 저장된 값)와 청산 수수료(fee
+    인자)를 모두 차감한다 — capital_after는 매도 실수령액 기준이라 entry_fee와 무관하지만,
+    손익 지표는 실제 매수 시 지불한 총 현금(entry_price*entry_qty + entry_fee)을 원가로
+    써야 정확하다."""
     position = db.get_position(position_id)
     if position is None:
         raise ValueError(f"포지션을 찾을 수 없습니다: {position_id}")
 
     entry_price = position["entry_price"]
     entry_qty = position["entry_qty"]
+    entry_fee = position["entry_fee"] or 0.0
     live_strategy_id = position["live_strategy_id"]
 
-    realized_pnl = (exit_price * exit_qty) - (entry_price * entry_qty) - fee
+    realized_pnl = (exit_price * exit_qty) - (entry_price * entry_qty) - entry_fee - fee
     realized_pnl_pct = realized_pnl / (entry_price * entry_qty) * 100
     capital_after = exit_price * exit_qty - fee
 

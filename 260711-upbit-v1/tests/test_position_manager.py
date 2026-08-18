@@ -88,3 +88,19 @@ def test_close_position_handles_loss(monkeypatch, tmp_path):
 
     assert result["realized_pnl"] < 0
     assert result["realized_pnl_pct"] < 0
+
+
+def test_close_position_subtracts_both_entry_and_exit_fee(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, current_capital=100_000_000.0 * 0.01)
+    position_id = open_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01, entry_fee=500.0)
+
+    result = close_position(position_id, 101_000_000.0, 0.01, fee=505.0, close_reason="signal")
+
+    expected_pnl = (101_000_000.0 * 0.01) - (100_000_000.0 * 0.01) - 500.0 - 505.0
+    expected_pct = expected_pnl / (100_000_000.0 * 0.01) * 100
+
+    assert result["realized_pnl"] == pytest.approx(expected_pnl)
+    assert result["realized_pnl_pct"] == pytest.approx(expected_pct)
+    # capital_after는 매도 체결 실수령액 기준이라 entry_fee와 무관해야 함
+    assert result["capital_after"] == pytest.approx(101_000_000.0 * 0.01 - 505.0)
