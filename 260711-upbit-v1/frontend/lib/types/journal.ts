@@ -27,6 +27,7 @@ export interface JournalSummary {
   win_rate_pct: number;
   equity_curve: JournalEquityPoint[];
   daily_pnl_30d: JournalDailyPnlPoint[];
+  daily: JournalDailyCell[];
   strategies: JournalStrategyCard[];
 }
 

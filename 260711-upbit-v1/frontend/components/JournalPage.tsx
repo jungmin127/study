@@ -7,7 +7,6 @@ import type { JournalMarketDetail, JournalSummary } from '@/lib/types/journal';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatTimeframe } from '@/lib/format';
-import DailyPnlBarChart from '@/components/DailyPnlBarChart';
 import JournalCalendar from '@/components/JournalCalendar';
 import JournalMarketDetailView from '@/components/JournalMarketDetail';
 
@@ -122,13 +121,7 @@ export default function JournalPage() {
             </Card>
           </div>
 
-          {summary.daily_pnl_30d.every((d) => d.pnl === 0) ? (
-            <p className="text-sm text-muted-foreground">
-              최근 30일간 청산된 거래가 없어 그래프를 표시할 수 없습니다.
-            </p>
-          ) : (
-            <DailyPnlBarChart data={summary.daily_pnl_30d} heightPx={280} />
-          )}
+          <JournalCalendar daily={summary.daily} />
 
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">코인별 매매일지</h2>
@@ -154,14 +147,6 @@ export default function JournalPage() {
               </p>
 
               <JournalCalendar daily={detail.daily} />
-
-              {detail.daily_pnl_30d.every((d) => d.pnl === 0) ? (
-                <p className="text-sm text-muted-foreground">
-                  최근 30일간 청산된 거래가 없어 그래프를 표시할 수 없습니다.
-                </p>
-              ) : (
-                <DailyPnlBarChart data={detail.daily_pnl_30d} heightPx={240} />
-              )}
 
               <JournalMarketDetailView detail={detail} />
             </div>
