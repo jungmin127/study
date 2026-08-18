@@ -1102,3 +1102,22 @@ def test_connect_adds_entry_fee_column_to_existing_positions_table(monkeypatch, 
         conn.close()
     assert "entry_fee" in columns
     assert row[0] == 0
+
+
+def test_insert_position_stores_entry_fee(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01, entry_fee=500.0)
+
+    position = db.get_position(position_id)
+    assert position["entry_fee"] == 500.0
+
+
+def test_insert_position_defaults_entry_fee_to_zero(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    assert db.get_position(position_id)["entry_fee"] == 0.0

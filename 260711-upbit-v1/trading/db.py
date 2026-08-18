@@ -283,15 +283,18 @@ def update_live_strategy_last_candle(live_strategy_id: str, candle_time: str) ->
         conn.close()
 
 
-def insert_position(live_strategy_id: str, market: str, entry_price: float, entry_qty: float) -> str:
+def insert_position(
+    live_strategy_id: str, market: str, entry_price: float, entry_qty: float,
+    entry_fee: float = 0.0,
+) -> str:
     position_id = str(uuid.uuid4())
     conn = _connect()
     try:
         conn.execute(
             "INSERT INTO positions "
-            "(id, live_strategy_id, market, status, entry_price, entry_qty, entry_time) "
-            "VALUES (?, ?, ?, 'open', ?, ?, datetime('now'))",
-            (position_id, live_strategy_id, market, entry_price, entry_qty),
+            "(id, live_strategy_id, market, status, entry_price, entry_qty, entry_fee, entry_time) "
+            "VALUES (?, ?, ?, 'open', ?, ?, ?, datetime('now'))",
+            (position_id, live_strategy_id, market, entry_price, entry_qty, entry_fee),
         )
         conn.commit()
     finally:
