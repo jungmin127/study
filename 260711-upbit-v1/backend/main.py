@@ -1170,6 +1170,7 @@ def _open_position_summary(position: dict, current_price: float | None) -> dict:
 def _live_strategy_response(strategy: dict, position: dict | None, current_price: float | None) -> dict:
     return {
         "id": strategy["id"],
+        "source_run_id": strategy["source_run_id"],
         "market": strategy["market"],
         "timeframe": strategy["timeframe"],
         "status": strategy["status"],
@@ -1377,6 +1378,38 @@ def delete_live_strategy_endpoint(strategy_id: str) -> dict:
         raise HTTPException(status_code=409, detail="중지된 전략만 삭제할 수 있습니다")
     trading_db.delete_live_strategy(strategy_id)
     return {"deleted": True}
+
+
+class ReplaceLiveStrategyRequest(BaseModel):
+    source_run_id: str
+
+
+@app.post("/api/v1/live-strategies/{strategy_id}/replace-strategy")
+def replace_live_strategy_endpoint(strategy_id: str, req: ReplaceLiveStrategyRequest) -> dict:
+    strategy = trading_db.get_live_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    if strategy["status"] == "draft":
+        raise HTTPException(status_code=409, detail="draft 상태의 전략은 교체할 수 없습니다")
+
+    config = get_run_config(req.source_run_id)
+    if config is None:
+        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 설정을 찾을 수 없습니다")
+    if config["market"] != strategy["market"]:
+        raise HTTPException(status_code=400, detail="선택한 백테스트 결과의 마켓이 현재 전략과 다릅니다")
+    if config["timeframe"] not in VALID_TIMEFRAMES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 봉데이터입니다: {config['timeframe']}")
+
+    replaced = trading_db.replace_live_strategy_strategy(
+        strategy_id,
+        source_run_id=req.source_run_id,
+        timeframe=config["timeframe"],
+        buy_conditions_json=json.dumps(config["buy_conditions"]),
+        sell_conditions_json=json.dumps(config["sell_conditions"]),
+    )
+    if not replaced:
+        raise HTTPException(status_code=409, detail="포지션이 열려 있어 교체할 수 없습니다")
+    return _full_live_strategy_response(strategy_id)
 
 
 @app.get("/api/v1/journal/summary")

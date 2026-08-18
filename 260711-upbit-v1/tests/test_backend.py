@@ -2514,3 +2514,120 @@ def test_get_backtest_runs_without_market_returns_all(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     assert len(resp.json()) == 1
+
+
+def _seed_backtest_run(run_id: str, market: str, timeframe: str, buy_conditions: dict, sell_conditions: dict) -> None:
+    save_result(
+        run_id=run_id, strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": buy_conditions, "sell_conditions": sell_conditions},
+        market=market, timeframe=timeframe,
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="교체용",
+    )
+
+
+def test_live_strategy_response_includes_source_run_id(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post("/api/v1/live-strategies", json=_live_strategy_request(source_run_id="orig-run"))
+
+    assert resp.json()["source_run_id"] == "orig-run"
+
+
+def test_replace_live_strategy_swaps_timeframe_and_conditions(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post(
+        "/api/v1/live-strategies", json=_live_strategy_request(source_run_id="old-run"),
+    ).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")  # draft -> stopped, 승인 없이도 가능
+    new_buy = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]}
+    new_sell = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]}
+    _seed_backtest_run("new-run", "KRW-BTC", "minutes30", new_buy, new_sell)
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "new-run"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["timeframe"] == "minutes30"
+    assert body["buy_conditions"] == new_buy
+    assert body["sell_conditions"] == new_sell
+    assert body["source_run_id"] == "new-run"
+    assert body["status"] == "stopped"  # 상태는 교체 전과 동일하게 유지
+
+
+def test_replace_live_strategy_returns_404_for_missing_strategy(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.post(
+        "/api/v1/live-strategies/does-not-exist/replace-strategy",
+        json={"source_run_id": "new-run"},
+    )
+
+    assert resp.status_code == 404
+
+
+def test_replace_live_strategy_returns_404_for_missing_run(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "does-not-exist"},
+    )
+
+    assert resp.status_code == 404
+
+
+def test_replace_live_strategy_returns_409_for_draft_status(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    _seed_backtest_run("new-run", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "new-run"},
+    )
+
+    assert resp.status_code == 409
+
+
+def test_replace_live_strategy_returns_400_for_market_mismatch(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    _seed_backtest_run("eth-run", "KRW-ETH", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "eth-run"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_replace_live_strategy_returns_409_when_position_open(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    monkeypatch.setattr(backend_module.upbit_client, "get_accounts", _accounts_with_krw_balance(1_000_000))
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/approve")
+    trading_db_module.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    _seed_backtest_run("new-run", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "new-run"},
+    )
+
+    assert resp.status_code == 409
