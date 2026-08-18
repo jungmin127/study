@@ -67,6 +67,40 @@ def test_journal_summary_aggregates_across_strategies(monkeypatch, tmp_path):
     assert summary["equity_curve"][0]["value"] == 300_000.0 - 1000.0  # 원금합 - 순손실
 
 
+def test_journal_summary_includes_daily_cells_matching_equity_curve(monkeypatch, tmp_path):
+    """계좌 전체 요약 달력이 쓰는 daily 필드가 equity_curve와 같은 누적값을 가리켜야
+    한다(추가 검증: JournalCalendar 재사용을 위한 daily 필드)."""
+    db = _fresh(monkeypatch, tmp_path)
+    s1 = insert_live_strategy(db, status="draft")
+    _approve(db, s1, 100_000.0)
+    s2 = insert_live_strategy(db, status="draft")
+    _approve(db, s2, 200_000.0)
+
+    db.upsert_daily_performance(s1, "2026-08-10", 1000.0, 1.0, 1, 1, 0, 100_000.0, 101_000.0)
+    db.upsert_daily_performance(s2, "2026-08-10", -2000.0, -1.0, 1, 0, 1, 200_000.0, 198_000.0)
+    p1 = db.insert_position(s1, "KRW-BTC", 50_000_000.0, 0.002)
+    db.close_position_row(p1, 50_500_000.0, 0.002, 1000.0, 1.0, "take_profit")
+    p2 = db.insert_position(s2, "KRW-ETH", 3_000_000.0, 0.06)
+    db.close_position_row(p2, 2_940_000.0, 0.06, -2000.0, -1.0, "stop_loss")
+
+    summary = svc.get_journal_summary()
+
+    assert len(summary["daily"]) == 1
+    cell = summary["daily"][0]
+    assert cell["trading_date"] == "2026-08-10"
+    assert cell["pnl"] == -1000.0
+    assert cell["cumulative"] == summary["equity_curve"][0]["value"]
+
+
+def test_journal_summary_daily_is_empty_when_no_approved_strategies(monkeypatch, tmp_path):
+    db = _fresh(monkeypatch, tmp_path)
+    insert_live_strategy(db, status="draft")
+
+    summary = svc.get_journal_summary()
+
+    assert summary["daily"] == []
+
+
 def test_journal_summary_known_limitation_resolved_after_strategy_stops(monkeypatch, tmp_path):
     """stopped된 전략의 과거 손익이 계좌 합산 누적에서 사라지지 않아야 한다(스펙의
     '알려진 한계'를 flow 기반 집계로 해소했는지 확인하는 회귀 테스트)."""

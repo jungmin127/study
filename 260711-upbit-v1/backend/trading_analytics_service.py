@@ -126,23 +126,12 @@ def get_journal_summary() -> dict:
             "cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0, "mdd_pct": 0.0,
             "win_rate_pct": 0.0, "equity_curve": [], "strategies": [],
             "daily_pnl_30d": _zero_filled_last_30_days({}),
+            "daily": [],
         }
 
     strategy_cards = []
-    pnl_by_date: dict[str, float] = {}
-    total_baseline = 0.0
-    weighted_pct_sum = 0.0
-    all_closed: list[dict] = []
-
     for strategy in strategies:
         m = _strategy_metrics(strategy)
-        total_baseline += m["baseline"]
-        weighted_pct_sum += m["cumulative_pnl_pct"] * m["baseline"]
-        all_closed.extend(m["closed_positions"])
-        for row in m["daily_rows"]:
-            pnl_by_date[row["trading_date"]] = (
-                pnl_by_date.get(row["trading_date"], 0.0) + row["realized_pnl"]
-            )
         strategy_cards.append({
             "id": strategy["id"],
             "market": strategy["market"],
@@ -153,24 +142,22 @@ def get_journal_summary() -> dict:
             "trade_count": len(m["closed_positions"]),
         })
 
-    equity_curve = []
-    running = total_baseline
-    for trading_date in sorted(pnl_by_date):
-        running += pnl_by_date[trading_date]
-        equity_curve.append({"trading_date": trading_date, "value": round(running, 4)})
-
-    cumulative_pnl = sum(p["realized_pnl"] for p in all_closed)
-    cumulative_pnl_pct = (weighted_pct_sum / total_baseline) if total_baseline else 0.0
-    mdd_series = [total_baseline] + [e["value"] for e in equity_curve]
+    # 계좌 전체 합산은 코인 단위 합산(_market_metrics)과 공식이 완전히 같다 —
+    # market으로 거르지 않은 전체 승인 전략 리스트를 넘기면 그대로 계좌 합산이 된다.
+    agg = _market_metrics(strategies)
+    equity_curve = [
+        {"trading_date": d["trading_date"], "value": d["cumulative"]} for d in agg["daily"]
+    ]
 
     return {
-        "cumulative_pnl": round(cumulative_pnl, 4),
-        "cumulative_pnl_pct": round(cumulative_pnl_pct, 4),
-        "mdd_pct": round(_mdd_pct(mdd_series), 4),
-        "win_rate_pct": round(_win_rate_pct(all_closed), 4),
+        "cumulative_pnl": round(agg["cumulative_pnl"], 4),
+        "cumulative_pnl_pct": round(agg["cumulative_pnl_pct"], 4),
+        "mdd_pct": round(agg["mdd_pct"], 4),
+        "win_rate_pct": round(agg["win_rate_pct"], 4),
         "equity_curve": equity_curve,
         "strategies": strategy_cards,
-        "daily_pnl_30d": _zero_filled_last_30_days(pnl_by_date),
+        "daily_pnl_30d": agg["daily_pnl_30d"],
+        "daily": agg["daily"],
     }
 
 
