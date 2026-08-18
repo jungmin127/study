@@ -251,8 +251,11 @@ def get_run_config(run_id: str) -> dict | None:
         "timeframe": timeframe,
         "start": start,
         "risk_config": json.loads(risk_config_json),
-        "buy_conditions": params["buy_conditions"],
-        "sell_conditions": params["sell_conditions"],
+        # SignalStrategy(그리드서치/스윕) 결과의 params_json에는 이 두 키가 없다 —
+        # .get()으로 방어해 KeyError 대신 None을 돌려주고, 호출부(예: 라이브 전략
+        # 교체 API)가 strategy_name을 보고 명확한 에러를 낼 수 있게 한다.
+        "buy_conditions": params.get("buy_conditions"),
+        "sell_conditions": params.get("sell_conditions"),
         "title": title,
         "description": description,
     }

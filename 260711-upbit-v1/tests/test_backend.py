@@ -2616,6 +2616,74 @@ def test_replace_live_strategy_returns_400_for_market_mismatch(monkeypatch, tmp_
     assert resp.status_code == 400
 
 
+def test_replace_live_strategy_returns_400_for_empty_conditions(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    save_result(
+        run_id="empty-run", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="minutes30",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="빈 조건",
+    )
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "empty-run"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_replace_live_strategy_returns_400_for_unknown_indicator(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    bad_buy = {"type": "AND", "conditions": [{"indicator": "NOT_A_REAL_INDICATOR", "params": {}, "operator": "<", "threshold": 1}]}
+    save_result(
+        run_id="bad-indicator-run", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": bad_buy, "sell_conditions": _VALID_SELL},
+        market="KRW-BTC", timeframe="minutes30",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="알 수 없는 지표",
+    )
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "bad-indicator-run"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_replace_live_strategy_returns_400_for_non_condition_tree_run(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    save_result(
+        run_id="sweep-run", strategy_name="SignalStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="minutes30",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "sweep-run"},
+    )
+
+    assert resp.status_code == 400
+
+
 def test_replace_live_strategy_returns_409_when_position_open(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])

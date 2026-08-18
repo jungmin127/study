@@ -218,10 +218,23 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                 position = position_manager.get_open_position(strategy_id)
                 if position is None:
                     continue
+                # 라이브 전략 "전략 교체" 기능이 실행 중(running/paused)인 전략의
+                # sell_conditions를 제자리에서 바꿀 수 있게 되면서, 함수 시작 시점에
+                # 한 번만 읽은 sell_conditions를 계속 재사용하면 교체 이후에도 옛
+                # 매도조건 기준으로 손절/익절을 계속 트리거하는 버그가 생긴다(태스크
+                # 매니저는 이 태스크가 done()이거나 새로 활성화됐을 때만 재생성하므로,
+                # 이미 실행 중인 태스크는 교체와 무관하게 계속 산다). 매 tick마다
+                # 전략을 다시 읽어 최신 sell_conditions로 판단한다 — position도 이미
+                # 매 tick 다시 읽고 있으므로(위 position_manager.get_open_position)
+                # 비용 프로파일은 동일하다.
+                current_strategy = db.get_live_strategy(strategy_id)
+                if current_strategy is None:
+                    continue
+                current_sell_conditions = json.loads(current_strategy["sell_conditions_json"])
                 position_return_pct = (
                     (trade_price - position["entry_price"]) / position["entry_price"] * 100
                 )
-                matched = signal_engine.matched_risk_exit_indicator(sell_conditions, position_return_pct)
+                matched = signal_engine.matched_risk_exit_indicator(current_sell_conditions, position_return_pct)
                 if matched is None:
                     continue
                 # 쿨다운 사전필터 — 로컬 태스크 변수만 보므로 lock 밖에서 걸러도 안전하다
@@ -265,8 +278,12 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                     fresh_position_return_pct = (
                         (trade_price - fresh_position["entry_price"]) / fresh_position["entry_price"] * 100
                     )
+                    # 위 tick-loop 재읽기와 같은 이유로, lock 안의 최종 판단도 바깥
+                    # 스코프의 stale한 sell_conditions가 아니라 방금 다시 읽은
+                    # fresh_strategy 기준으로 해야 한다.
+                    fresh_sell_conditions = json.loads(fresh_strategy["sell_conditions_json"])
                     fresh_matched = signal_engine.matched_risk_exit_indicator(
-                        sell_conditions, fresh_position_return_pct,
+                        fresh_sell_conditions, fresh_position_return_pct,
                     )
                     if fresh_matched is None:
                         continue

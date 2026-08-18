@@ -1395,10 +1395,20 @@ def replace_live_strategy_endpoint(strategy_id: str, req: ReplaceLiveStrategyReq
     config = get_run_config(req.source_run_id)
     if config is None:
         raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 설정을 찾을 수 없습니다")
+    if config["strategy_name"] != "ConditionTreeStrategy":
+        raise HTTPException(status_code=400, detail="지원하지 않는 백테스트 결과입니다")
     if config["market"] != strategy["market"]:
         raise HTTPException(status_code=400, detail="선택한 백테스트 결과의 마켓이 현재 전략과 다릅니다")
     if config["timeframe"] not in VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 봉데이터입니다: {config['timeframe']}")
+    if is_empty(config["buy_conditions"]) or is_empty(config["sell_conditions"]):
+        raise HTTPException(status_code=400, detail="매수/매도 조건이 비어 있는 백테스트 결과입니다")
+    unknown = sorted(
+        set(find_unknown_indicators(config["buy_conditions"]))
+        | set(find_unknown_indicators(config["sell_conditions"]))
+    )
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 지표입니다: {', '.join(unknown)}")
 
     replaced = trading_db.replace_live_strategy_strategy(
         strategy_id,

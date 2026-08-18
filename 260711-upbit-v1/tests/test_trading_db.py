@@ -1223,6 +1223,43 @@ def test_replace_live_strategy_strategy_refuses_when_position_open(monkeypatch, 
     assert db.get_live_strategy(strategy_id)["timeframe"] == "minutes60"
 
 
+def test_replace_live_strategy_strategy_refuses_when_pending_buy_order(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running", timeframe="minutes60")
+    db.insert_order(strategy_id, None, "KRW-BTC", "bid", "limit", 50_000_000.0, 0.01, 50_000_000.0)
+
+    result = db.replace_live_strategy_strategy(
+        strategy_id,
+        source_run_id="new-run",
+        timeframe="minutes30",
+        buy_conditions_json='{"new": true}',
+        sell_conditions_json='{"new": true}',
+    )
+
+    assert result is False
+    assert db.get_live_strategy(strategy_id)["timeframe"] == "minutes60"
+
+
+def test_replace_live_strategy_strategy_allows_when_pending_sell_order(monkeypatch, tmp_path):
+    """포지션은 이미 닫혔지만 청산(ask) 대기 주문이 아직 남아있는 경우 — 진입이
+    아니므로 교체를 막지 않아야 한다."""
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running", timeframe="minutes60")
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    db.close_position_row(position_id, 51_000_000.0, 0.01, 10000.0, 2.0, "signal")
+    db.insert_order(strategy_id, position_id, "KRW-BTC", "ask", "limit", 51_000_000.0, 0.01, 51_000_000.0)
+
+    result = db.replace_live_strategy_strategy(
+        strategy_id,
+        source_run_id="new-run",
+        timeframe="minutes30",
+        buy_conditions_json='{"new": true}',
+        sell_conditions_json='{"new": true}',
+    )
+
+    assert result is True
+
+
 def test_replace_live_strategy_strategy_refuses_draft_status(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db, status="draft", timeframe="minutes60")

@@ -810,6 +810,19 @@ def replace_live_strategy_strategy(
         if open_position is not None:
             return False
 
+        # limit/limit_timeout 모드에서는 주문이 체결되기 전까지 positions 행이 아직
+        # 없다(체결 후에야 생성됨 — order_executor.py의 진입 흐름 참고). 그 사이 창에서
+        # 교체가 통과하면, 곧 체결될 포지션이 옛 매수조건으로 진입했는데 새 매도조건/
+        # 시간봉으로 관리되는 상황이 생긴다. side='bid'인 wait 주문이 있으면 진입이
+        # 진행 중인 것이므로 함께 막는다. side='ask'(청산) wait 주문은 진입이 아니므로
+        # 막지 않는다.
+        pending_buy = conn.execute(
+            "SELECT id FROM orders WHERE live_strategy_id = ? AND side = 'bid' AND status = 'wait'",
+            (live_strategy_id,),
+        ).fetchone()
+        if pending_buy is not None:
+            return False
+
         cursor = conn.execute(
             "UPDATE live_strategies SET source_run_id=?, timeframe=?, buy_conditions_json=?, "
             "sell_conditions_json=?, last_processed_candle_time=NULL "

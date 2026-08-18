@@ -781,6 +781,47 @@ async def test_run_risk_exit_loop_triggers_exit_for_risk_when_stop_loss_breached
     assert cb_calls["n"] == 1  # action=="exited"이면 서킷브레이커 판정도 호출돼야 한다
 
 
+async def test_run_risk_exit_loop_picks_up_sell_conditions_changed_mid_stream(monkeypatch, tmp_path):
+    """전략 교체 등으로 sell_conditions_json이 태스크 시작 후 바뀌면, 다음 tick부터는
+    바뀐(최신) 매도조건 기준으로 손절/익절을 판단해야 한다 — 함수 시작 시점에 한 번
+    읽은 stale한 sell_conditions를 계속 쓰면 안 된다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -50},  # 매우 넓은 손절선이라 -6%로는 안 뚫림
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    exit_calls = []
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}  # -6%, 옛 손절선(-50%)엔 안 걸림
+        # 중간에 sell_conditions_json이 바뀐다(예: 전략 교체) — 손절선을 -5%로 좁힘
+        conn = dbm._connect()
+        conn.execute(
+            "UPDATE live_strategies SET sell_conditions_json = ? WHERE id = ?",
+            (json.dumps({"type": "OR", "conditions": [
+                {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5},
+            ]}), strategy_id),
+        )
+        conn.commit()
+        conn.close()
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 47_000_000.0}  # 여전히 -6%, 새 손절선(-5%)엔 걸림
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls.append(reason)
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert exit_calls == ["stop_loss_pct"]
+
+
 async def test_run_risk_exit_loop_skips_circuit_breaker_when_exit_pending(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(
