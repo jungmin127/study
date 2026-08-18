@@ -48,6 +48,7 @@ const ZERO_CROSS_INDICATORS = new Set([
   'MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT', 'KOREA_PREMIUM', 'MACD_PPO', 'MACD_PPO_signal',
   'FIB_382_PCT', 'FIB_500_PCT', 'FIB_618_PCT',
   'PIVOT_P_PCT', 'PIVOT_R1_PCT', 'PIVOT_S1_PCT',
+  'VPVR_POC_PCT', 'VPVR_VAH_PCT', 'VPVR_VAL_PCT',
 ]);
 const PRICE_SCALE_INDICATORS = new Set([
   'SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower',

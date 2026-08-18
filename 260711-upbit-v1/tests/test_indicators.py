@@ -341,6 +341,36 @@ def test_pivot_s1_pct_matches_manual_pct_from_level():
     assert abs(values[-1] - manual) < 1e-6
 
 
+def test_vpvr_poc_pct_matches_manual_pct_from_level():
+    poc_values = _run_probe("VPVR_POC", {"period": 50})
+    values = _run_probe("VPVR_POC_PCT", {"period": 50})
+    df = make_oscillating_df()
+    close = df["close"].iloc[-1]
+    level = poc_values[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_vpvr_vah_pct_matches_manual_pct_from_level():
+    vah_values = _run_probe("VPVR_VAH", {"period": 50})
+    values = _run_probe("VPVR_VAH_PCT", {"period": 50})
+    df = make_oscillating_df()
+    close = df["close"].iloc[-1]
+    level = vah_values[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_vpvr_val_pct_matches_manual_pct_from_level():
+    val_values = _run_probe("VPVR_VAL", {"period": 50})
+    values = _run_probe("VPVR_VAL_PCT", {"period": 50})
+    df = make_oscillating_df()
+    close = df["close"].iloc[-1]
+    level = val_values[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
 def test_btc_correlation_matches_manual_pearson_of_pct_returns():
     df = make_oscillating_df()
     btc_df = make_oscillating_df(base=50000.0, amplitude=3000.0, period=45, ripple_period=9)

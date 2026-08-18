@@ -118,7 +118,14 @@ def test_pivot_p_warmup_nan():
     assert not result.iloc[1:].isna().any(), "Expected no NaNs after index 1"
 
 
-from trading.live_indicators import create_vpvr_poc, create_vpvr_vah, create_vpvr_val
+from trading.live_indicators import (
+    create_vpvr_poc,
+    create_vpvr_poc_pct,
+    create_vpvr_vah,
+    create_vpvr_vah_pct,
+    create_vpvr_val,
+    create_vpvr_val_pct,
+)
 
 
 def test_vpvr_poc_matches_backtrader():
@@ -134,6 +141,27 @@ def test_vpvr_vah_matches_backtrader():
 def test_vpvr_val_matches_backtrader():
     df = make_oscillating_df()
     assert_matches_backtrader("VPVR_VAL", {"period": 50}, create_vpvr_val(df, period=50))
+
+
+def test_vpvr_poc_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("VPVR_POC_PCT", {"period": 50}, create_vpvr_poc_pct(df, period=50))
+
+
+def test_vpvr_vah_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("VPVR_VAH_PCT", {"period": 50}, create_vpvr_vah_pct(df, period=50))
+
+
+def test_vpvr_val_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("VPVR_VAL_PCT", {"period": 50}, create_vpvr_val_pct(df, period=50))
+
+
+def test_live_indicator_factory_registers_vpvr_pct():
+    assert LIVE_INDICATOR_FACTORY["VPVR_POC_PCT"] is create_vpvr_poc_pct
+    assert LIVE_INDICATOR_FACTORY["VPVR_VAH_PCT"] is create_vpvr_vah_pct
+    assert LIVE_INDICATOR_FACTORY["VPVR_VAL_PCT"] is create_vpvr_val_pct
 
 
 def test_vpvr_matches_hand_traced_bin_distribution():

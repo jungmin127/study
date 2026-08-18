@@ -75,6 +75,9 @@ _A_GROUP_PARAMS: dict[str, dict] = {
     "VPVR_POC": {"period": 50},
     "VPVR_VAH": {"period": 50},
     "VPVR_VAL": {"period": 50},
+    "VPVR_POC_PCT": {"period": 50},
+    "VPVR_VAH_PCT": {"period": 50},
+    "VPVR_VAL_PCT": {"period": 50},
 }
 
 

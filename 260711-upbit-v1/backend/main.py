@@ -407,6 +407,24 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=50, 연산자 <, threshold를 이 값으로 두면 가격이 Value Area 아래로 벗어난 구간을 포착합니다.",
     },
     {
+        "value": "VPVR_POC_PCT", "label": "VPVR POC (정규화, %)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 50}],
+        "description": "거래량이 가장 많이 몰린 가격대(POC) 대비 종가의 이격을 %로 나타냅니다.",
+        "example": "VPVR_POC_PCT < -5면 POC보다 5% 이상 아래에서 거래되는 구간입니다.",
+    },
+    {
+        "value": "VPVR_VAH_PCT", "label": "VPVR Value Area 상단 (정규화, %)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 50}],
+        "description": "Value Area 상단(VAH) 대비 종가의 이격을 %로 나타냅니다.",
+        "example": "VPVR_VAH_PCT > 0이면 Value Area 위로 벗어났다는 뜻입니다.",
+    },
+    {
+        "value": "VPVR_VAL_PCT", "label": "VPVR Value Area 하단 (정규화, %)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 50}],
+        "description": "Value Area 하단(VAL) 대비 종가의 이격을 %로 나타냅니다.",
+        "example": "VPVR_VAL_PCT < 0이면 Value Area 아래로 벗어났다는 뜻입니다.",
+    },
+    {
         "value": "STOP_LOSS_PCT", "label": "손절라인 (%)", "category": "손익",
         "params": [], "sellOnly": True, "fixedOperator": "<=",
         "description": "캔들 지표가 아니라 보유 포지션의 진입가 대비 현재 수익률(%)입니다. 이 값이 임계값 이하로 내려가면 매도합니다.",

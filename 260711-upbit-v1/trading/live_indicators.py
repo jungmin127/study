@@ -394,6 +394,21 @@ def create_vpvr_val(df: pd.DataFrame, **params) -> pd.Series:
     return _volume_profile(df, period)[2]
 
 
+def create_vpvr_poc_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_vpvr_poc(df, **params)
+    return (df["close"] - level) / level * 100
+
+
+def create_vpvr_vah_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_vpvr_vah(df, **params)
+    return (df["close"] - level) / level * 100
+
+
+def create_vpvr_val_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_vpvr_val(df, **params)
+    return (df["close"] - level) / level * 100
+
+
 def create_market_trend(df: pd.DataFrame, **params) -> pd.Series:
     period = int(params.get("period", 10))
     btc_close = df["btc_close"]
@@ -553,6 +568,9 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "VPVR_POC": create_vpvr_poc,
     "VPVR_VAH": create_vpvr_vah,
     "VPVR_VAL": create_vpvr_val,
+    "VPVR_POC_PCT": create_vpvr_poc_pct,
+    "VPVR_VAH_PCT": create_vpvr_vah_pct,
+    "VPVR_VAL_PCT": create_vpvr_val_pct,
     "MARKET_TREND": create_market_trend,
     "BTC_CORRELATION": create_btc_correlation,
     "USDT_CORRELATION": create_usdt_correlation,

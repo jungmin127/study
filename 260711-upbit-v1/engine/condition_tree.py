@@ -84,6 +84,15 @@ def get_indicator_value(indicator_name: str, obj: bt.Indicator) -> float:
         return float(obj.lines.vah[0])
     elif indicator_name == "VPVR_VAL":
         return float(obj.lines.val[0])
+    elif indicator_name == "VPVR_POC_PCT":
+        close, level = float(obj.data.close[0]), float(obj.lines.poc[0])
+        return (close - level) / level * 100 if level else 0.0
+    elif indicator_name == "VPVR_VAH_PCT":
+        close, level = float(obj.data.close[0]), float(obj.lines.vah[0])
+        return (close - level) / level * 100 if level else 0.0
+    elif indicator_name == "VPVR_VAL_PCT":
+        close, level = float(obj.data.close[0]), float(obj.lines.val[0])
+        return (close - level) / level * 100 if level else 0.0
     elif indicator_name == "ATR_PCT":
         close = float(obj.data.close[0])
         return float(obj.atr[0]) / close * 100 if close else 0.0
