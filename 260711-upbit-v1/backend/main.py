@@ -508,8 +508,8 @@ def get_history(
 
 
 @app.get("/api/v1/backtests")
-def get_backtest_runs() -> list[dict]:
-    runs = list_backtest_runs()
+def get_backtest_runs(market: str | None = Query(None)) -> list[dict]:
+    runs = list_backtest_runs(market=market)
     markets_needing_price = {r["market"] for r in runs if has_revaluable_open_trade(r["trades"])}
 
     live_prices: dict[str, float] = {}

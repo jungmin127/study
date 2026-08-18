@@ -2468,3 +2468,49 @@ def test_refresh_trend_segments_endpoint_forces_recompute(monkeypatch, tmp_path)
     body = resp.json()
     assert body["market"] == "KRW-BTC"
     assert len(body["segments"]) >= 1
+
+
+def test_get_backtest_runs_filters_by_market(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="btc-run", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="BTC 결과",
+    )
+    save_result(
+        run_id="eth-run", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-ETH", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="ETH 결과",
+    )
+
+    resp = client.get("/api/v1/backtests", params={"market": "KRW-ETH"})
+
+    assert resp.status_code == 200
+    run_ids = [r["run_id"] for r in resp.json()]
+    assert run_ids == ["eth-run"]
+
+
+def test_get_backtest_runs_without_market_returns_all(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="btc-run", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": 1.0, "max_drawdown": 2.0, "equity_curve": [], "trades": []},
+        title="BTC 결과",
+    )
+
+    resp = client.get("/api/v1/backtests")
+
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
