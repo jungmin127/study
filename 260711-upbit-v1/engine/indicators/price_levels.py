@@ -150,3 +150,35 @@ def create_vpvr_vah(data: bt.feeds.PandasData, **params) -> bt.Indicator:
 def create_vpvr_val(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     period = int(params.get("period", 50))
     return VolumeProfile(data, period=period)
+
+
+class FibPct(bt.Indicator):
+    """피보나치 되돌림 레벨 대비 종가의 이격을 %로 나타낸 정규화 버전.
+    FIB_382/500/618과 같은 레벨 계산에, 종가와의 이격도만 추가로 계산한다."""
+
+    lines = ("pct",)
+    params = (("period", 20), ("ratio", 0.382))
+
+    def __init__(self) -> None:
+        hh = bt.indicators.Highest(self.data.high, period=self.p.period)
+        ll = bt.indicators.Lowest(self.data.low, period=self.p.period)
+        self.level = hh - (hh - ll) * self.p.ratio
+
+    def next(self) -> None:
+        level = self.level[0]
+        self.lines.pct[0] = (self.data.close[0] - level) / level * 100 if level else 0.0
+
+
+def create_fib_382_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 20))
+    return FibPct(data, period=period, ratio=0.382)
+
+
+def create_fib_500_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 20))
+    return FibPct(data, period=period, ratio=0.5)
+
+
+def create_fib_618_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 20))
+    return FibPct(data, period=period, ratio=0.618)

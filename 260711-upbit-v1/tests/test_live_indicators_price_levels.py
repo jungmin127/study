@@ -7,8 +7,11 @@ from tests.signal_fixtures import make_oscillating_df
 from trading.live_indicators import (
     LIVE_INDICATOR_FACTORY,
     create_fib_382,
+    create_fib_382_pct,
     create_fib_500,
+    create_fib_500_pct,
     create_fib_618,
+    create_fib_618_pct,
     create_pivot_p,
     create_pivot_r1,
     create_pivot_s1,
@@ -43,6 +46,27 @@ def test_pivot_r1_matches_backtrader():
 def test_pivot_s1_matches_backtrader():
     df = make_oscillating_df()
     assert_matches_backtrader("PIVOT_S1", {}, create_pivot_s1(df))
+
+
+def test_fib_382_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("FIB_382_PCT", {"period": 20}, create_fib_382_pct(df, period=20))
+
+
+def test_fib_500_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("FIB_500_PCT", {"period": 20}, create_fib_500_pct(df, period=20))
+
+
+def test_fib_618_pct_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("FIB_618_PCT", {"period": 20}, create_fib_618_pct(df, period=20))
+
+
+def test_live_indicator_factory_registers_fib_pct():
+    assert LIVE_INDICATOR_FACTORY["FIB_382_PCT"] is create_fib_382_pct
+    assert LIVE_INDICATOR_FACTORY["FIB_500_PCT"] is create_fib_500_pct
+    assert LIVE_INDICATOR_FACTORY["FIB_618_PCT"] is create_fib_618_pct
 
 
 def test_live_indicator_factory_registers_price_levels_part1():

@@ -335,6 +335,24 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=20이면 최근 20봉 구간에서 고점 대비 61.8% 되돌아온 가격입니다.",
     },
     {
+        "value": "FIB_382_PCT", "label": "피보나치 38.2% (정규화)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "최근 period봉의 스윙 고점·저점으로 계산한 피보나치 38.2% 되돌림 레벨 대비, 종가가 몇 % 위/아래에 있는지 나타냅니다. 코인 시세와 무관하게 항상 같은 범위입니다.",
+        "example": "레벨이 95,000원, 종가가 100,000원이면 FIB_382_PCT ≈ +5.26입니다(레벨보다 5.26% 위).",
+    },
+    {
+        "value": "FIB_500_PCT", "label": "피보나치 50% (정규화)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "최근 period봉의 스윙 구간 정중앙(50%) 되돌림 레벨 대비 종가의 이격을 %로 나타냅니다.",
+        "example": "레벨 대비 종가가 3% 아래면 FIB_500_PCT = -3입니다.",
+    },
+    {
+        "value": "FIB_618_PCT", "label": "피보나치 61.8% (정규화)", "category": "가격대",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "황금비율 61.8% 되돌림 레벨 대비 종가의 이격을 %로 나타냅니다.",
+        "example": "FIB_618_PCT > 0이면 종가가 61.8% 되돌림 레벨보다 위에 있다는 뜻입니다.",
+    },
+    {
         "value": "PIVOT_P", "label": "Pivot 기준선", "category": "가격대",
         "params": [],
         "description": "직전 1봉의 고가·저가·종가 평균으로 계산하는 기준선입니다. 오늘 가격이 이 선 위/아래 어디서 노는지로 매수/매도 심리 우위를 가늠하는 전통적 지표입니다.",

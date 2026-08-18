@@ -15,8 +15,11 @@ from .momentum import (
 )
 from .price_levels import (
     create_fib_382,
+    create_fib_382_pct,
     create_fib_500,
+    create_fib_500_pct,
     create_fib_618,
+    create_fib_618_pct,
     create_pivot_p,
     create_pivot_r1,
     create_pivot_s1,
@@ -60,6 +63,9 @@ INDICATOR_FACTORY: dict[str, object] = {
     "FIB_382": create_fib_382,
     "FIB_500": create_fib_500,
     "FIB_618": create_fib_618,
+    "FIB_382_PCT": create_fib_382_pct,
+    "FIB_500_PCT": create_fib_500_pct,
+    "FIB_618_PCT": create_fib_618_pct,
     "PIVOT_P": create_pivot_p,
     "PIVOT_R1": create_pivot_r1,
     "PIVOT_S1": create_pivot_s1,

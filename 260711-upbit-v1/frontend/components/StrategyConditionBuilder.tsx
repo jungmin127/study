@@ -44,7 +44,10 @@ const OSCILLATOR_BOUNDS: Record<string, { low: number; high: number }> = {
   BB_PERCENT_B: { low: 0.2, high: 0.8 },
 };
 
-const ZERO_CROSS_INDICATORS = new Set(['MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT', 'KOREA_PREMIUM', 'MACD_PPO', 'MACD_PPO_signal']);
+const ZERO_CROSS_INDICATORS = new Set([
+  'MACD_line', 'MACD_signal', 'MARKET_TREND', 'MOMENTUM_PCT', 'KOREA_PREMIUM', 'MACD_PPO', 'MACD_PPO_signal',
+  'FIB_382_PCT', 'FIB_500_PCT', 'FIB_618_PCT',
+]);
 const PRICE_SCALE_INDICATORS = new Set([
   'SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower',
   'FIB_382', 'FIB_500', 'FIB_618', 'PIVOT_P', 'PIVOT_R1', 'PIVOT_S1',

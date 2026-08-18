@@ -256,6 +256,21 @@ def create_fib_618(df: pd.DataFrame, **params) -> pd.Series:
     return hh - (hh - ll) * 0.618
 
 
+def create_fib_382_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_fib_382(df, **params)
+    return (df["close"] - level) / level * 100
+
+
+def create_fib_500_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_fib_500(df, **params)
+    return (df["close"] - level) / level * 100
+
+
+def create_fib_618_pct(df: pd.DataFrame, **params) -> pd.Series:
+    level = create_fib_618(df, **params)
+    return (df["close"] - level) / level * 100
+
+
 def create_pivot_p(df: pd.DataFrame, **params) -> pd.Series:
     prev_high = df["high"].shift(1)
     prev_low = df["low"].shift(1)
@@ -511,6 +526,9 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "FIB_382": create_fib_382,
     "FIB_500": create_fib_500,
     "FIB_618": create_fib_618,
+    "FIB_382_PCT": create_fib_382_pct,
+    "FIB_500_PCT": create_fib_500_pct,
+    "FIB_618_PCT": create_fib_618_pct,
     "PIVOT_P": create_pivot_p,
     "PIVOT_R1": create_pivot_r1,
     "PIVOT_S1": create_pivot_s1,

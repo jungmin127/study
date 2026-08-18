@@ -240,6 +240,55 @@ def test_fib_618_matches_manual_swing_calculation():
     assert abs(values[-1] - manual) < 1e-6
 
 
+def test_fib_382_pct_matches_manual_pct_from_level():
+    values = _run_probe("FIB_382_PCT", {"period": 5})
+    df = make_oscillating_df()
+    hh = df["high"].rolling(5).max().iloc[-1]
+    ll = df["low"].rolling(5).min().iloc[-1]
+    level = hh - (hh - ll) * 0.382
+    close = df["close"].iloc[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_fib_500_pct_matches_manual_pct_from_level():
+    values = _run_probe("FIB_500_PCT", {"period": 5})
+    df = make_oscillating_df()
+    hh = df["high"].rolling(5).max().iloc[-1]
+    ll = df["low"].rolling(5).min().iloc[-1]
+    level = hh - (hh - ll) * 0.5
+    close = df["close"].iloc[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_fib_618_pct_matches_manual_pct_from_level():
+    values = _run_probe("FIB_618_PCT", {"period": 5})
+    df = make_oscillating_df()
+    hh = df["high"].rolling(5).max().iloc[-1]
+    ll = df["low"].rolling(5).min().iloc[-1]
+    level = hh - (hh - ll) * 0.618
+    close = df["close"].iloc[-1]
+    manual = (close - level) / level * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_fib_pct_handles_zero_level_without_crashing():
+    # 레벨이 0인 극단 케이스(합성 데이터) — ZeroDivisionError 없이 0.0을 반환해야 함.
+    idx = pd.date_range("2026-01-01", periods=10, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": [0.0] * 10, "high": [0.0] * 10,
+        "low": [0.0] * 10, "close": [0.0] * 10, "volume": [1.0] * 10,
+    })
+    df_bt = df.set_index("candle_time")
+    df_bt.index = df_bt.index.tz_localize(None)
+    cerebro = bt.Cerebro()
+    cerebro.adddata(bt.feeds.PandasData(dataname=df_bt, openinterest=-1))
+    cerebro.addstrategy(_ProbeStrategy, indicator="FIB_382_PCT", indicator_params={"period": 3})
+    results = cerebro.run()
+    assert results[0].seen_values[-1] == pytest.approx(0.0)
+
+
 def test_pivot_p_matches_manual_prev_bar_average():
     values = _run_probe("PIVOT_P", {})
     df = make_oscillating_df()
