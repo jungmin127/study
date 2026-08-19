@@ -203,6 +203,15 @@ def create_volume_sma(df: pd.DataFrame, **params) -> pd.Series:
     return df["volume"].rolling(period).mean()
 
 
+def create_volume(df: pd.DataFrame, **params) -> pd.Series:
+    return df["volume"]
+
+
+def create_volume_pct(df: pd.DataFrame, **params) -> pd.Series:
+    sma = create_volume_sma(df, **params)
+    return (df["volume"] - sma) / sma * 100
+
+
 def create_trade_value(df: pd.DataFrame, **params) -> pd.Series:
     return df["trade_value"]
 
@@ -580,6 +589,8 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "BB_PERCENT_B": create_bb_percent_b,
     "OBV": create_obv,
     "VOLUME_SMA": create_volume_sma,
+    "VOLUME": create_volume,
+    "VOLUME_PCT": create_volume_pct,
     "TRADE_VALUE": create_trade_value,
     "TRADE_VALUE_SMA": create_trade_value_sma,
     "TRADE_VALUE_PCT": create_trade_value_pct,

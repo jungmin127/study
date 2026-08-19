@@ -146,6 +146,36 @@ def test_trade_value_pct_matches_manual_ratio_to_own_sma():
     assert abs(values[-1] - manual) < 1e-6
 
 
+def test_volume_matches_raw_volume_column():
+    values = _run_probe("VOLUME", {})
+    df = make_oscillating_df()
+    assert abs(values[-1] - df["volume"].iloc[-1]) < 1e-6
+
+
+def test_volume_pct_matches_manual_ratio_to_own_sma():
+    values = _run_probe("VOLUME_PCT", {"period": 5})
+    df = make_oscillating_df()
+    sma = df["volume"].rolling(5).mean().iloc[-1]
+    manual = (df["volume"].iloc[-1] - sma) / sma * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_volume_pct_handles_zero_level_without_crashing():
+    # 거래량 이동평균이 0인 극단 케이스(합성 데이터) — ZeroDivisionError 없이 0.0을 반환해야 함.
+    idx = pd.date_range("2026-01-01", periods=10, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": [100.0] * 10, "high": [100.0] * 10,
+        "low": [100.0] * 10, "close": [100.0] * 10, "volume": [0.0] * 10,
+    })
+    df_bt = df.set_index("candle_time")
+    df_bt.index = df_bt.index.tz_localize(None)
+    cerebro = bt.Cerebro()
+    cerebro.adddata(bt.feeds.PandasData(dataname=df_bt, openinterest=-1))
+    cerebro.addstrategy(_ProbeStrategy, indicator="VOLUME_PCT", indicator_params={"period": 3})
+    results = cerebro.run()
+    assert results[0].seen_values[-1] == pytest.approx(0.0)
+
+
 def _run_vpvr_probe(
     highs: list[float], lows: list[float], volumes: list[float], period: int, num_bins: int
 ) -> list[tuple[float, float, float]]:

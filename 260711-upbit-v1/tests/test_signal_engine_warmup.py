@@ -60,6 +60,8 @@ _A_GROUP_PARAMS: dict[str, dict] = {
     "BB_PERCENT_B": {"period": 20},
     "OBV": {},
     "VOLUME_SMA": {"period": 20},
+    "VOLUME": {},
+    "VOLUME_PCT": {"period": 20},
     "TRADE_VALUE": {},
     "TRADE_VALUE_SMA": {"period": 20},
     "TRADE_VALUE_PCT": {"period": 20},

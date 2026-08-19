@@ -236,7 +236,21 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
     params: [{ key: 'period', role: '거래량을 평균낼 봉 개수.' }],
     formula: 'VOLUME_SMA = 최근 period개 거래량의 평균',
     thresholdExample: '코인마다 유통량이 달라 절대값 비교보다는 "지금 거래량이 이 값의 N배"인지로 해석합니다(이 앱은 지표끼리 직접 나눌 수는 없어, 대략 이 값의 배수를 threshold에 직접 넣어 씁니다).',
-    usage: '거래량 급증과 가격 조건을 AND로 묶어 "관심이 몰리는 순간의 돌파"만 남기는 필터로 씁니다.',
+    usage: '거래량 급증과 가격 조건을 AND로 묶어 "관심이 몰리는 순간의 돌파"만 남기는 필터로 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 VOLUME_PCT를 대신 쓰세요.',
+  },
+  VOLUME: {
+    meaning: '봉의 원시 거래량(코인 수량)입니다. 거래대금(TRADE_VALUE)과 달리 가격이 반영되지 않은 순수 수량 기준입니다.',
+    params: [],
+    formula: 'VOLUME = 해당 봉의 거래량(수량)',
+    thresholdExample: '코인마다 유통량과 거래 규모가 완전히 달라 절대값 threshold는 코인별로 다시 추정해야 합니다.',
+    usage: '거래량이 특정 절대 수치 이상인지 확인하는 조건, 혹은 VOLUME_SMA와 함께 "지금 거래량이 평균보다 큰가"를 판단하는 데 씁니다. 코인 시세와 무관한 정규화 버전이 필요하면 VOLUME_PCT를 대신 쓰세요.',
+  },
+  VOLUME_PCT: {
+    meaning: '이번 봉 거래량이 자체 이동평균(VOLUME_SMA) 대비 몇 % 위/아래에 있는지 나타낸 정규화 지표입니다. TRADE_VALUE_PCT와 동일한 계산 방식을 거래량(수량)에 적용합니다.',
+    params: [{ key: 'period', role: '거래량 이동평균을 계산할 봉 개수. VOLUME_SMA와 동일한 의미.' }],
+    formula: 'VOLUME_PCT = (거래량 − VOLUME_SMA) ÷ VOLUME_SMA × 100',
+    thresholdExample: 'VOLUME_PCT > 100이면 평소 대비 거래량이 2배 이상으로 튄 구간입니다. 코인마다 유통량이 달라도 같은 threshold를 그대로 쓸 수 있습니다.',
+    usage: 'VOLUME_SMA를 절대값으로 비교하기 애매할 때, 대신 이 지표로 "평균 대비 몇 % 튀었는지"를 오실레이터처럼 씁니다. 거래량 급증과 가격 조건을 AND로 묶는 돌파 필터에 특히 유용합니다.',
   },
   TRADE_VALUE: {
     meaning:

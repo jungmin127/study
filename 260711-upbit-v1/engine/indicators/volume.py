@@ -43,6 +43,32 @@ def create_volume_sma(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     return bt.indicators.SMA(data.volume, period=period)
 
 
+def create_volume(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    """봉의 원시 거래량(수량) — TRADE_VALUE와 동일한 위상으로, 조건식에서 직접 쓸 수
+    있게 data.volume 라인을 그대로 노출한다."""
+    return data.volume
+
+
+class VolumeRatio(bt.Indicator):
+    """이번 봉 거래량이 자체 이동평균(period봉) 대비 몇 % 높거나 낮은지를 나타낸
+    정규화 버전. TradeValueRatio와 동일한 패턴을 거래량(수량)에 적용한다."""
+
+    lines = ("pct",)
+    params = (("period", 20),)
+
+    def __init__(self) -> None:
+        self.sma = bt.indicators.SMA(self.data.volume, period=self.p.period)
+
+    def next(self) -> None:
+        sma_val = self.sma[0]
+        self.lines.pct[0] = (self.data.volume[0] - sma_val) / sma_val * 100 if sma_val else 0.0
+
+
+def create_volume_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 20))
+    return VolumeRatio(data, period=period)
+
+
 def create_trade_value(data: bt.feeds.PandasData, **params):
     """봉의 거래대금(KRW) — engine.runner의 build_data_feed_class가 동적으로 만들어주는
     PandasData 서브클래스가 채워주는 self.data.trade_value 라인(업비트 candle_acc_trade_price)을

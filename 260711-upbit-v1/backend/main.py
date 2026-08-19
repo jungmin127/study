@@ -317,6 +317,18 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "period=20이면 최근 20봉 거래량의 평균. 현재 거래량이 이 값의 2배를 넘으면 거래량 급등으로 판단하는 식으로 활용합니다.",
     },
     {
+        "value": "VOLUME", "label": "거래량", "category": "거래량",
+        "params": [],
+        "description": "봉의 원시 거래량(코인 수량)입니다. 거래대금(TRADE_VALUE)과 달리 가격이 반영되지 않은 순수 수량 기준입니다.",
+        "example": "거래량이 특정 절대 수치 이상인지 확인하는 조건 등에 씁니다. 코인마다 스케일이 크게 달라 여러 코인에 같은 threshold를 재사용하기 어렵습니다.",
+    },
+    {
+        "value": "VOLUME_PCT", "label": "거래량 비율 (%)", "category": "거래량",
+        "params": [{"key": "period", "label": "기간", "default": 20}],
+        "description": "이번 봉 거래량이 자체 이동평균(VOLUME_SMA) 대비 몇 % 높거나 낮은지 나타냅니다. 코인마다 다른 거래량 스케일을 제거합니다.",
+        "example": "VOLUME_PCT > 100이면 평소 대비 거래량이 2배 이상으로 튄 구간입니다.",
+    },
+    {
         "value": "VPIN", "label": "VPIN (주문흐름 독성도)", "category": "거래량",
         "params": [{"key": "period", "label": "기간", "default": 20}],
         "description": "거래량 버킷 단위로 매수/매도 주문 불균형을 추정한 값(0~1)입니다. 1에 가까울수록 그 구간 거래가 한쪽(매수 또는 매도)으로 강하게 쏠렸다는 뜻으로, 급등락 직전의 정보거래(독성 주문흐름) 징후로 해석합니다. 틱 데이터가 아니라 캔들 가격 변화로 매수/매도 비율을 확률적으로 추정하는 방식(Bulk Volume Classification)을 씁니다.",

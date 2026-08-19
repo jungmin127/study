@@ -52,6 +52,7 @@ const ZERO_CROSS_INDICATORS = new Set([
   'SMA_PCT', 'EMA_PCT', 'WMA_PCT',
   'TRADE_VALUE_PCT',
   'MARKET_TREND_PCT',
+  'VOLUME_PCT',
 ]);
 const PRICE_SCALE_INDICATORS = new Set([
   'SMA', 'EMA', 'WMA', 'BB_upper', 'BB_middle', 'BB_lower',

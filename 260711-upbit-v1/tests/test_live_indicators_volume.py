@@ -11,6 +11,8 @@ from trading.live_indicators import (
     create_trade_value,
     create_trade_value_pct,
     create_trade_value_sma,
+    create_volume,
+    create_volume_pct,
     create_volume_sma,
     create_vpin,
 )
@@ -27,6 +29,25 @@ def test_obv_matches_backtrader():
 def test_volume_sma_matches_backtrader():
     df = make_oscillating_df()
     assert_matches_backtrader("VOLUME_SMA", {"period": 20}, create_volume_sma(df, period=20))
+
+
+def test_volume_matches_raw_volume_column():
+    df = make_oscillating_df()
+    result = create_volume(df)
+    assert abs(result.iloc[-1] - df["volume"].iloc[-1]) < 1e-6
+
+
+def test_volume_pct_matches_manual_ratio_to_own_sma():
+    df = make_oscillating_df()
+    result = create_volume_pct(df, period=5)
+    sma = df["volume"].rolling(5).mean()
+    manual = (df["volume"] - sma) / sma * 100
+    assert abs(result.iloc[-1] - manual.iloc[-1]) < 1e-6
+
+
+def test_live_indicator_factory_registers_volume_and_volume_pct():
+    assert LIVE_INDICATOR_FACTORY["VOLUME"] is create_volume
+    assert LIVE_INDICATOR_FACTORY["VOLUME_PCT"] is create_volume_pct
 
 
 def test_trade_value_matches_raw_trade_value_column():
