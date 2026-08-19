@@ -218,7 +218,7 @@ def create_volume(df: pd.DataFrame, **params) -> pd.Series:
 
 def create_volume_pct(df: pd.DataFrame, **params) -> pd.Series:
     sma = create_volume_sma(df, **params)
-    return (df["volume"] - sma) / sma * 100
+    return ((df["volume"] - sma) / sma * 100).where(sma != 0, 0.0)
 
 
 def create_trade_value(df: pd.DataFrame, **params) -> pd.Series:

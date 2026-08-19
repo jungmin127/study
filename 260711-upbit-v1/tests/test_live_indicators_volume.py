@@ -83,6 +83,28 @@ def test_volume_pct_matches_manual_ratio_to_own_sma():
     assert abs(result.iloc[-1] - manual.iloc[-1]) < 1e-6
 
 
+def test_volume_pct_handles_zero_volume_without_crashing():
+    # 거래량 이동평균이 0인 극단 케이스(합성 데이터) — inf/NaN 없이 0.0을 반환해야 함.
+    idx = pd.date_range("2026-01-01", periods=10, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": [100.0] * 10, "high": [100.0] * 10,
+        "low": [100.0] * 10, "close": [100.0] * 10, "volume": [0.0] * 10,
+    })
+    result = create_volume_pct(df, period=3)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
+def test_volume_pct_preserves_warmup_nan_distinct_from_zero_volume_guard():
+    # 정상 데이터(거래량 0 아님)의 워밍업 구간은 NaN이어야 한다 — 거래량 0 가드가
+    # fillna(0.0) 등으로 잘못 구현되면 이 구간도 0.0으로 뭉개져 실제 0 거래량 구간과
+    # 구별이 안 된다. .where(sma != 0, 0.0)만 이 구분을 올바르게 지킨다.
+    df = make_oscillating_df()
+    period = 5
+    result = create_volume_pct(df, period=period)
+    assert result.iloc[:period - 1].isna().all()
+    assert result.iloc[period - 1:].notna().all()
+
+
 def test_live_indicator_factory_registers_volume_and_volume_pct():
     assert LIVE_INDICATOR_FACTORY["VOLUME"] is create_volume
     assert LIVE_INDICATOR_FACTORY["VOLUME_PCT"] is create_volume_pct
