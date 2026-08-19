@@ -495,6 +495,47 @@ def test_obv_matches_manual_cumulative_volume_by_close_direction():
     assert values[-1] == manual[-1]
 
 
+def test_obv_roc_matches_manual_net_volume_over_total_volume():
+    values = _run_probe("OBV_ROC", {"period": 5})
+    df = make_oscillating_df()
+    closes = df["close"].tolist()
+    volumes = df["volume"].tolist()
+    obv = [0.0]
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i - 1]:
+            obv.append(obv[-1] + volumes[i])
+        elif closes[i] < closes[i - 1]:
+            obv.append(obv[-1] - volumes[i])
+        else:
+            obv.append(obv[-1])
+    net_change = obv[-1] - obv[-1 - 5]
+    total_volume = sum(volumes[-5:])
+    manual = net_change / total_volume * 100
+    assert abs(values[-1] - manual) < 1e-6
+
+
+def test_obv_roc_stays_within_bounded_range():
+    # OBV_ROC = 순매수 거래량 / 총 거래량 × 100 이므로 수학적으로 항상 -100~+100.
+    values = _run_probe("OBV_ROC", {"period": 10})
+    assert all(-100.0 <= v <= 100.0 for v in values)
+
+
+def test_obv_roc_handles_zero_total_volume_without_crashing():
+    # 구간에 거래가 아예 없어 총 거래량이 0인 극단 케이스 — ZeroDivisionError 없이 0.0을 반환해야 함.
+    idx = pd.date_range("2026-01-01", periods=10, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": [100.0] * 10, "high": [100.0] * 10,
+        "low": [100.0] * 10, "close": [100.0] * 10, "volume": [0.0] * 10,
+    })
+    df_bt = df.set_index("candle_time")
+    df_bt.index = df_bt.index.tz_localize(None)
+    cerebro = bt.Cerebro()
+    cerebro.adddata(bt.feeds.PandasData(dataname=df_bt, openinterest=-1))
+    cerebro.addstrategy(_ProbeStrategy, indicator="OBV_ROC", indicator_params={"period": 3})
+    results = cerebro.run()
+    assert results[0].seen_values[-1] == pytest.approx(0.0)
+
+
 def test_fear_greed_cmc_matches_raw_fear_greed_value_column():
     df = make_oscillating_df()
     fear_greed = pd.Series([30.0 + (i % 50) for i in range(len(df))])

@@ -8,6 +8,7 @@ from tests.signal_fixtures import make_oscillating_df
 from trading.live_indicators import (
     LIVE_INDICATOR_FACTORY,
     create_obv,
+    create_obv_roc,
     create_trade_value,
     create_trade_value_pct,
     create_trade_value_sma,
@@ -24,6 +25,21 @@ def test_obv_matches_backtrader():
     # 아예 안 냄). assert_matches_backtrader는 마지막 값만 비교하므로 이 offset과 무관하게
     # 그대로 재사용 가능하다.
     assert_matches_backtrader("OBV", {}, create_obv(df))
+
+
+def test_obv_roc_matches_backtrader():
+    df = make_oscillating_df()
+    assert_matches_backtrader("OBV_ROC", {"period": 5}, create_obv_roc(df, period=5))
+
+
+def test_obv_roc_stays_within_bounded_range():
+    df = make_oscillating_df()
+    result = create_obv_roc(df, period=10).dropna()
+    assert ((result >= -100.0) & (result <= 100.0)).all()
+
+
+def test_live_indicator_factory_registers_obv_roc():
+    assert LIVE_INDICATOR_FACTORY["OBV_ROC"] is create_obv_roc
 
 
 def test_volume_sma_matches_backtrader():

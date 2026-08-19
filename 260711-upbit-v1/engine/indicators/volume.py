@@ -38,6 +38,31 @@ def create_obv(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     return OBV(data)
 
 
+class OBVRoc(bt.Indicator):
+    """OBV의 N봉 변화량(순매수 거래량)을 같은 구간 총 거래량으로 나눈 정규화 버전.
+    OBV 자체는 누적합이라 절대값이 무한히 커지고 코인마다 스케일이 달라 threshold를
+    코인 간 공유할 수 없다 — 이 버전은 그 구간 순매수세가 총 거래량의 몇 %였는지를
+    나타내 항상 -100~+100 범위로 유계된다."""
+
+    lines = ("pct",)
+    params = (("period", 14),)
+
+    def __init__(self) -> None:
+        self.obv = OBV(self.data)
+        self.volume_sum = bt.indicators.SumN(self.data.volume, period=self.p.period)
+        self.addminperiod(self.p.period + 2)  # OBV 자체 minperiod(2) + N봉 lookback
+
+    def next(self) -> None:
+        net_change = self.obv[0] - self.obv[-self.p.period]
+        total_volume = self.volume_sum[0]
+        self.lines.pct[0] = net_change / total_volume * 100 if total_volume else 0.0
+
+
+def create_obv_roc(data: bt.feeds.PandasData, **params) -> bt.Indicator:
+    period = int(params.get("period", 14))
+    return OBVRoc(data, period=period)
+
+
 def create_volume_sma(data: bt.feeds.PandasData, **params) -> bt.Indicator:
     period = int(params.get("period", 20))
     return bt.indicators.SMA(data.volume, period=period)

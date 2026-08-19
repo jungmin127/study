@@ -198,6 +198,14 @@ def create_obv(df: pd.DataFrame, **params) -> pd.Series:
     return (direction * df["volume"]).fillna(0).cumsum()
 
 
+def create_obv_roc(df: pd.DataFrame, **params) -> pd.Series:
+    period = int(params.get("period", 14))
+    obv = create_obv(df, **params)
+    volume_sum = df["volume"].rolling(period).sum()
+    net_change = obv - obv.shift(period)
+    return net_change / volume_sum * 100
+
+
 def create_volume_sma(df: pd.DataFrame, **params) -> pd.Series:
     period = int(params.get("period", 20))
     return df["volume"].rolling(period).mean()
@@ -588,6 +596,7 @@ LIVE_INDICATOR_FACTORY: dict[str, object] = {
     "BB_middle": create_bb_middle,
     "BB_PERCENT_B": create_bb_percent_b,
     "OBV": create_obv,
+    "OBV_ROC": create_obv_roc,
     "VOLUME_SMA": create_volume_sma,
     "VOLUME": create_volume,
     "VOLUME_PCT": create_volume_pct,

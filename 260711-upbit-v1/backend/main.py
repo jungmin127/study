@@ -311,6 +311,12 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "어제 OBV=1000이고 오늘 종가가 상승, 거래량 500이면 오늘 OBV=1500.",
     },
     {
+        "value": "OBV_ROC", "label": "OBV 변화율 (정규화, %)", "category": "거래량",
+        "params": [{"key": "period", "label": "기간", "default": 14}],
+        "description": "최근 N봉 동안의 순매수 거래량(OBV 변화량)이 같은 구간 총 거래량의 몇 %였는지 나타냅니다. 항상 -100~100 범위입니다.",
+        "example": "OBV_ROC > 30이면 최근 N봉 동안 매수세가 거래량의 30% 이상을 차지한 강한 매수 압력 구간입니다.",
+    },
+    {
         "value": "VOLUME_SMA", "label": "거래량 SMA", "category": "거래량",
         "params": [{"key": "period", "label": "기간", "default": 20}],
         "description": "최근 N개 봉의 거래량을 산술평균한 값으로, 현재 거래량이 평소보다 급등했는지 비교할 때 기준으로 씁니다.",
