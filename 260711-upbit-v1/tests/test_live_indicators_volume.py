@@ -38,6 +38,17 @@ def test_obv_roc_stays_within_bounded_range():
     assert ((result >= -100.0) & (result <= 100.0)).all()
 
 
+def test_obv_roc_pct_handles_zero_total_volume_without_crashing():
+    # 구간에 거래가 아예 없어 총 거래량이 0인 극단 케이스 — inf/NaN 없이 0.0을 반환해야 함.
+    idx = pd.date_range("2026-01-01", periods=10, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": [100.0] * 10, "high": [100.0] * 10,
+        "low": [100.0] * 10, "close": [100.0] * 10, "volume": [0.0] * 10,
+    })
+    result = create_obv_roc(df, period=3)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
 def test_live_indicator_factory_registers_obv_roc():
     assert LIVE_INDICATOR_FACTORY["OBV_ROC"] is create_obv_roc
 

@@ -203,7 +203,8 @@ def create_obv_roc(df: pd.DataFrame, **params) -> pd.Series:
     obv = create_obv(df, **params)
     volume_sum = df["volume"].rolling(period).sum()
     net_change = obv - obv.shift(period)
-    return net_change / volume_sum * 100
+    result = net_change / volume_sum * 100
+    return result.where(volume_sum != 0, 0.0)
 
 
 def create_volume_sma(df: pd.DataFrame, **params) -> pd.Series:
