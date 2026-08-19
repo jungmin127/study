@@ -57,11 +57,24 @@ def test_obv_roc_preserves_warmup_nan_distinct_from_zero_volume_guard():
     # 정상 데이터(거래량 0 아님)의 워밍업 구간은 NaN이어야 한다 — 총거래량 0 가드가
     # fillna(0.0) 등으로 잘못 구현되면 이 구간도 0.0으로 뭉개져 실제 0 거래량 구간과
     # 구별이 안 된다. .where(volume_sum != 0, 0.0)만 이 구분을 올바르게 지킨다.
+    # 첫 유효값은 bar (period+1)부터다 — OBV 자체가 bar 0은 NaN(backtrader의
+    # addminperiod(2)와 일치)이라 obv.shift(period)가 bar (period+1)에서야 처음
+    # 정의되기 때문(bar period는 volume_sum만 준비되고 net_change가 아직 NaN).
     df = make_oscillating_df()
     period = 10
     result = create_obv_roc(df, period=period)
-    assert result.iloc[:period].isna().all()
-    assert result.iloc[period:].notna().all()
+    assert result.iloc[:period + 1].isna().all()
+    assert result.iloc[period + 1:].notna().all()
+
+
+def test_obv_bar_zero_is_nan_matching_backtrader_undefined_boundary():
+    # backtrader의 OBV는 addminperiod(2)라 bar 0에 대해 next()/nextstart()가 아예
+    # 호출되지 않는다(값 자체가 없음) — 라이브 쪽이 과거 fillna(0)으로 bar 0을 0.0으로
+    # 임의 정의해 워밍업 경계가 1봉 어긋났던 회귀 케이스.
+    df = make_oscillating_df()
+    result = create_obv(df)
+    assert pd.isna(result.iloc[0])
+    assert result.iloc[1:].notna().all()
 
 
 def test_live_indicator_factory_registers_obv_roc():

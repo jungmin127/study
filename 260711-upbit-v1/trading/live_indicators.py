@@ -194,8 +194,12 @@ def create_bb_percent_b(df: pd.DataFrame, **params) -> pd.Series:
 
 
 def create_obv(df: pd.DataFrame, **params) -> pd.Series:
+    # bar 0은 close.diff()가 NaN이라 방향을 정할 수 없다 — 0.0으로 채우지 않고 그대로
+    # NaN을 남겨야 backtrader의 OBV(addminperiod(2), bar 0은 아예 값을 안 냄)와
+    # 워밍업 경계가 일치한다. cumsum()은 선행 NaN을 누적에서 자동으로 건너뛰므로
+    # bar 1부터의 값 자체는 fillna(0) 유무와 무관하게 동일하다.
     direction = np.sign(df["close"].diff())
-    return (direction * df["volume"]).fillna(0).cumsum()
+    return (direction * df["volume"]).cumsum()
 
 
 def create_obv_roc(df: pd.DataFrame, **params) -> pd.Series:
