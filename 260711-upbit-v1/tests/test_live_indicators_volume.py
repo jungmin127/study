@@ -38,7 +38,7 @@ def test_obv_roc_stays_within_bounded_range():
     assert ((result >= -100.0) & (result <= 100.0)).all()
 
 
-def test_obv_roc_pct_handles_zero_total_volume_without_crashing():
+def test_obv_roc_handles_zero_total_volume_without_crashing():
     # 구간에 거래가 아예 없어 총 거래량이 0인 극단 케이스 — inf/NaN 없이 0.0을 반환해야 함.
     idx = pd.date_range("2026-01-01", periods=10, freq="h", tz="UTC")
     df = pd.DataFrame({
@@ -47,6 +47,17 @@ def test_obv_roc_pct_handles_zero_total_volume_without_crashing():
     })
     result = create_obv_roc(df, period=3)
     assert result.iloc[-1] == pytest.approx(0.0)
+
+
+def test_obv_roc_preserves_warmup_nan_distinct_from_zero_volume_guard():
+    # 정상 데이터(거래량 0 아님)의 워밍업 구간은 NaN이어야 한다 — 총거래량 0 가드가
+    # fillna(0.0) 등으로 잘못 구현되면 이 구간도 0.0으로 뭉개져 실제 0 거래량 구간과
+    # 구별이 안 된다. .where(volume_sum != 0, 0.0)만 이 구분을 올바르게 지킨다.
+    df = make_oscillating_df()
+    period = 10
+    result = create_obv_roc(df, period=period)
+    assert result.iloc[:period].isna().all()
+    assert result.iloc[period:].notna().all()
 
 
 def test_live_indicator_factory_registers_obv_roc():
