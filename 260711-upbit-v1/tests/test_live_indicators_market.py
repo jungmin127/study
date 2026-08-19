@@ -55,6 +55,23 @@ def test_live_indicator_factory_registers_market_trend_pct():
     assert LIVE_INDICATOR_FACTORY["MARKET_TREND_PCT"] is create_market_trend_pct
 
 
+def test_market_trend_pct_handles_zero_level_without_crashing():
+    # BTC 이동평균이 0인 극단 케이스(합성 데이터) — inf/NaN 없이 0.0을 반환해야 함.
+    df = make_oscillating_df()
+    df["btc_close"] = 0.0
+    result = create_market_trend_pct(df, period=3)
+    assert result.iloc[-1] == 0.0
+
+
+def test_market_trend_pct_preserves_warmup_nan_distinct_from_zero_level_guard():
+    df = make_oscillating_df()
+    df["btc_close"] = df["close"] * 2 + 1000
+    period = 5
+    result = create_market_trend_pct(df, period=period)
+    assert result.iloc[:period - 1].isna().all()
+    assert result.iloc[period - 1:].notna().all()
+
+
 def test_btc_correlation_matches_backtrader():
     df = make_oscillating_df()
     btc_df = make_oscillating_df(base=50000.0, amplitude=3000.0, period=45, ripple_period=9)

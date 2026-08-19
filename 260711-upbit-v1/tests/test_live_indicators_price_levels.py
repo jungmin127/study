@@ -87,6 +87,50 @@ def test_fib_618_pct_matches_backtrader():
     assert_matches_backtrader("FIB_618_PCT", {"period": 20}, create_fib_618_pct(df, period=20))
 
 
+def _zero_price_df():
+    idx = pd.date_range("2026-01-01", periods=25, freq="h", tz="UTC")
+    return pd.DataFrame({
+        "candle_time": idx, "open": [0.0] * 25, "high": [0.0] * 25,
+        "low": [0.0] * 25, "close": [0.0] * 25, "volume": [10.0] * 25,
+    })
+
+
+def test_fib_382_pct_handles_zero_level_without_crashing():
+    df = _zero_price_df()
+    result = create_fib_382_pct(df, period=20)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
+def test_fib_500_pct_handles_zero_level_without_crashing():
+    df = _zero_price_df()
+    result = create_fib_500_pct(df, period=20)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
+def test_fib_618_pct_handles_zero_level_without_crashing():
+    df = _zero_price_df()
+    result = create_fib_618_pct(df, period=20)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
+def test_pivot_p_pct_handles_zero_level_without_crashing():
+    df = _zero_price_df()
+    result = create_pivot_p_pct(df)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
+def test_pivot_r1_pct_handles_zero_level_without_crashing():
+    df = _zero_price_df()
+    result = create_pivot_r1_pct(df)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
+def test_pivot_s1_pct_handles_zero_level_without_crashing():
+    df = _zero_price_df()
+    result = create_pivot_s1_pct(df)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
 def test_live_indicator_factory_registers_fib_pct():
     assert LIVE_INDICATOR_FACTORY["FIB_382_PCT"] is create_fib_382_pct
     assert LIVE_INDICATOR_FACTORY["FIB_500_PCT"] is create_fib_500_pct
@@ -211,6 +255,25 @@ def test_vpvr_handles_completely_flat_window_without_dividing_by_zero():
     assert poc.iloc[-1] == pytest.approx(100.0)
     assert vah.iloc[-1] == pytest.approx(100.0)
     assert val.iloc[-1] == pytest.approx(100.0)
+
+
+def test_vpvr_pct_handles_zero_level_without_crashing():
+    # POC/VAH/VAL이 전부 0인 극단 케이스(가격 0에서 완전히 flat한 구간) — inf/NaN 없이
+    # 0.0을 반환해야 한다.
+    highs = [0.0, 0.0, 0.0]
+    lows = [0.0, 0.0, 0.0]
+    volumes = [10, 10, 10]
+    idx = pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": highs, "high": highs, "low": lows,
+        "close": highs, "volume": volumes,
+    })
+    poc_pct = create_vpvr_poc_pct(df, period=3)
+    vah_pct = create_vpvr_vah_pct(df, period=3)
+    val_pct = create_vpvr_val_pct(df, period=3)
+    assert poc_pct.iloc[-1] == pytest.approx(0.0)
+    assert vah_pct.iloc[-1] == pytest.approx(0.0)
+    assert val_pct.iloc[-1] == pytest.approx(0.0)
 
 
 def test_live_indicator_factory_registers_vpvr():

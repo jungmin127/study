@@ -3,7 +3,11 @@ import statistics
 import pandas as pd
 import pytest
 
-from tests.live_indicator_fixtures import assert_matches_backtrader, run_backtrader_probe
+from tests.live_indicator_fixtures import (
+    assert_matches_backtrader,
+    assert_matches_backtrader_with_aux,
+    run_backtrader_probe,
+)
 from tests.signal_fixtures import make_oscillating_df
 from trading.live_indicators import (
     LIVE_INDICATOR_FACTORY,
@@ -75,12 +79,9 @@ def test_volume_matches_raw_volume_column():
     assert abs(result.iloc[-1] - df["volume"].iloc[-1]) < 1e-6
 
 
-def test_volume_pct_matches_manual_ratio_to_own_sma():
+def test_volume_pct_matches_backtrader():
     df = make_oscillating_df()
-    result = create_volume_pct(df, period=5)
-    sma = df["volume"].rolling(5).mean()
-    manual = (df["volume"] - sma) / sma * 100
-    assert abs(result.iloc[-1] - manual.iloc[-1]) < 1e-6
+    assert_matches_backtrader("VOLUME_PCT", {"period": 5}, create_volume_pct(df, period=5))
 
 
 def test_volume_pct_handles_zero_volume_without_crashing():
@@ -147,13 +148,34 @@ def test_trade_value_sma_warmup_is_nan_before_period_bars():
     assert result.iloc[5:].notna().all()
 
 
-def test_trade_value_pct_matches_manual_ratio_to_own_sma():
+def test_trade_value_pct_matches_backtrader():
     df = make_oscillating_df()
     df["trade_value"] = df["close"] * df["volume"]
-    result = create_trade_value_pct(df, period=5)
-    sma = df["trade_value"].rolling(5).mean()
-    manual = (df["trade_value"] - sma) / sma * 100
-    assert abs(result.iloc[-1] - manual.iloc[-1]) < 1e-6
+    assert_matches_backtrader_with_aux(
+        "TRADE_VALUE_PCT", {"period": 5}, "trade_value", df["trade_value"],
+        create_trade_value_pct(df, period=5),
+    )
+
+
+def test_trade_value_pct_handles_zero_level_without_crashing():
+    # 거래대금 이동평균이 0인 극단 케이스(합성 데이터) — inf/NaN 없이 0.0을 반환해야 함.
+    idx = pd.date_range("2026-01-01", periods=10, freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "candle_time": idx, "open": [100.0] * 10, "high": [100.0] * 10,
+        "low": [100.0] * 10, "close": [100.0] * 10, "volume": [100.0] * 10,
+        "trade_value": [0.0] * 10,
+    })
+    result = create_trade_value_pct(df, period=3)
+    assert result.iloc[-1] == pytest.approx(0.0)
+
+
+def test_trade_value_pct_preserves_warmup_nan_distinct_from_zero_level_guard():
+    df = make_oscillating_df()
+    df["trade_value"] = df["close"] * df["volume"]
+    period = 5
+    result = create_trade_value_pct(df, period=period)
+    assert result.iloc[:period - 1].isna().all()
+    assert result.iloc[period - 1:].notna().all()
 
 
 def test_live_indicator_factory_registers_trade_value_pct():

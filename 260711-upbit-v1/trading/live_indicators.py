@@ -58,17 +58,17 @@ def create_wma(df: pd.DataFrame, **params) -> pd.Series:
 
 def create_sma_pct(df: pd.DataFrame, **params) -> pd.Series:
     ma = create_sma(df, **params)
-    return (df["close"] - ma) / ma * 100
+    return ((df["close"] - ma) / ma * 100).where(ma != 0, 0.0)
 
 
 def create_ema_pct(df: pd.DataFrame, **params) -> pd.Series:
     ma = create_ema(df, **params)
-    return (df["close"] - ma) / ma * 100
+    return ((df["close"] - ma) / ma * 100).where(ma != 0, 0.0)
 
 
 def create_wma_pct(df: pd.DataFrame, **params) -> pd.Series:
     ma = create_wma(df, **params)
-    return (df["close"] - ma) / ma * 100
+    return ((df["close"] - ma) / ma * 100).where(ma != 0, 0.0)
 
 
 def create_rsi(df: pd.DataFrame, **params) -> pd.Series:
@@ -232,7 +232,7 @@ def create_trade_value_sma(df: pd.DataFrame, **params) -> pd.Series:
 
 def create_trade_value_pct(df: pd.DataFrame, **params) -> pd.Series:
     sma = create_trade_value_sma(df, **params)
-    return (df["trade_value"] - sma) / sma * 100
+    return ((df["trade_value"] - sma) / sma * 100).where(sma != 0, 0.0)
 
 
 def create_vpin(df: pd.DataFrame, **params) -> pd.Series:
@@ -296,17 +296,17 @@ def create_fib_618(df: pd.DataFrame, **params) -> pd.Series:
 
 def create_fib_382_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_fib_382(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 def create_fib_500_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_fib_500(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 def create_fib_618_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_fib_618(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 def create_pivot_p(df: pd.DataFrame, **params) -> pd.Series:
@@ -330,17 +330,17 @@ def create_pivot_s1(df: pd.DataFrame, **params) -> pd.Series:
 
 def create_pivot_p_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_pivot_p(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 def create_pivot_r1_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_pivot_r1(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 def create_pivot_s1_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_pivot_s1(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 NUM_BINS = 24
@@ -434,17 +434,17 @@ def create_vpvr_val(df: pd.DataFrame, **params) -> pd.Series:
 
 def create_vpvr_poc_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_vpvr_poc(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 def create_vpvr_vah_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_vpvr_vah(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 def create_vpvr_val_pct(df: pd.DataFrame, **params) -> pd.Series:
     level = create_vpvr_val(df, **params)
-    return (df["close"] - level) / level * 100
+    return ((df["close"] - level) / level * 100).where(level != 0, 0.0)
 
 
 def create_market_trend(df: pd.DataFrame, **params) -> pd.Series:
@@ -457,7 +457,7 @@ def create_market_trend_pct(df: pd.DataFrame, **params) -> pd.Series:
     period = int(params.get("period", 10))
     btc_close = df["btc_close"]
     sma = btc_close.rolling(period).mean()
-    return (btc_close - sma) / sma * 100
+    return ((btc_close - sma) / sma * 100).where(sma != 0, 0.0)
 
 
 def _rolling_pearson_corr(a: pd.Series, b: pd.Series, period: int) -> pd.Series:
