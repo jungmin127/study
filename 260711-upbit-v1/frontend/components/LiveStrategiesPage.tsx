@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, CircleHelp, Coins, Pause, Play, RefreshCw, Square, Trash2, X } from 'lucide-react';
+import { Check, Coins, Pause, Play, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import {
   approveLiveStrategy,
@@ -87,8 +87,8 @@ function formatRiskConfigValue(key: string, value: number | string): string {
 function Stat({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
   return (
     <div className="flex-1 border-l border-border pl-2.5 first:border-l-0 first:pl-0">
-      <p className="text-[0.68rem] text-muted-foreground">{label}</p>
-      <p className={`text-sm font-semibold tabular-nums ${valueClassName ?? ''}`}>{value}</p>
+      <p className="text-[0.625rem] text-muted-foreground">{label}</p>
+      <p className={`text-[0.78rem] font-semibold tabular-nums ${valueClassName ?? ''}`}>{value}</p>
     </div>
   );
 }
@@ -396,24 +396,33 @@ export default function LiveStrategiesPage() {
           return (
           <Card
             key={s.id}
-            className={`gap-2 overflow-hidden border-l-[3px] py-3 md:gap-3 md:py-4 ${
+            className={`gap-1.5 overflow-hidden border-l-[3px] py-2.5 md:gap-2 md:py-3 ${
               s.open_position ? 'border-l-red-500' : 'border-l-transparent'
             }`}
           >
-            <div className="flex items-center justify-between gap-2 px-4">
-              <span className="min-w-0 truncate text-sm font-semibold">
-                {koreanName} · {formatTimeframe(s.timeframe)}
-              </span>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <Badge variant={s.status === 'running' ? 'default' : 'secondary'}>{s.status}</Badge>
+            <div className="px-4">
+              <Badge
+                variant={s.status === 'running' ? 'default' : 'secondary'}
+                className="h-4 px-1.5 text-[0.625rem]"
+              >
+                {s.status}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between gap-1.5 px-4">
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                <span className="min-w-0 truncate text-[0.8rem] font-semibold">
+                  {koreanName} · {formatTimeframe(s.timeframe)}
+                </span>
                 <Dialog>
                   <DialogTrigger
                     type="button"
-                    className={buttonVariants({ variant: 'outline', size: 'icon-lg' })}
+                    className="flex size-6 shrink-0 items-center justify-center"
                     aria-label="전략 설정 보기"
                     title="전략 설정 보기"
                   >
-                    <CircleHelp />
+                    <span className="flex size-[15px] items-center justify-center rounded-full border border-muted-foreground/45 text-[0.6rem] font-bold text-muted-foreground">
+                      ?
+                    </span>
                   </DialogTrigger>
                   <DialogContent className="max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
@@ -473,6 +482,8 @@ export default function LiveStrategiesPage() {
                     </div>
                   </DialogContent>
                 </Dialog>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
                 {s.open_position === null && (s.status === 'running' || s.status === 'paused') && (
                   <ChangeCapitalDialog strategy={s} onChanged={refresh} />
                 )}
@@ -605,7 +616,7 @@ export default function LiveStrategiesPage() {
             </div>
 
             {(s.last_buy_at || s.last_sell_at) && (
-              <p className="px-4 text-xs text-muted-foreground">
+              <p className="px-4 text-[0.6875rem] text-muted-foreground">
                 {s.last_buy_at && `매수 ${formatDateTimeShort(s.last_buy_at)}`}
                 {s.last_buy_at && s.last_sell_at && ' · '}
                 {s.last_sell_at && `매도 ${formatDateTimeShort(s.last_sell_at)}`}
@@ -613,7 +624,7 @@ export default function LiveStrategiesPage() {
             )}
 
             {s.status === 'stopped' && s.stopped_at && (
-              <p className="px-4 text-xs text-muted-foreground">중지 시각: {s.stopped_at}</p>
+              <p className="px-4 text-[0.6875rem] text-muted-foreground">중지 시각: {s.stopped_at}</p>
             )}
           </Card>
           );
