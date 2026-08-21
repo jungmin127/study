@@ -6,6 +6,7 @@ import { getJournalSummary, getMarketJournal } from '@/lib/api/journal';
 import type { JournalMarketDetail, JournalSummary } from '@/lib/types/journal';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { InfoPopover } from '@/components/ui/info-popover';
 import { formatTimeframe } from '@/lib/format';
 import JournalCalendar from '@/components/JournalCalendar';
 import JournalMarketDetailView from '@/components/JournalMarketDetail';
@@ -97,7 +98,13 @@ export default function JournalPage() {
           <div className="grid grid-cols-3 gap-2 sm:gap-4">
             <Card className="gap-1 py-2 sm:gap-4 sm:py-4">
               <CardHeader className="px-2 sm:px-4">
-                <CardTitle className="text-xs font-medium sm:text-sm">누적손익</CardTitle>
+                <CardTitle className="flex items-center gap-1 text-xs font-medium sm:text-sm">
+                  누적손익
+                  <InfoPopover>
+                    처음 투입한 원금(시드) 대비 손익입니다. 거래로 번 돈을 재투자해도 기준
+                    원금 자체는 바뀌지 않습니다.
+                  </InfoPopover>
+                </CardTitle>
               </CardHeader>
               <CardContent className="px-2 text-xs font-semibold sm:px-4 sm:text-lg">
                 {fmtKrw(summary.cumulative_pnl)} ({fmtPct(summary.cumulative_pnl_pct)})
@@ -105,7 +112,13 @@ export default function JournalPage() {
             </Card>
             <Card className="gap-1 py-2 sm:gap-4 sm:py-4">
               <CardHeader className="px-2 sm:px-4">
-                <CardTitle className="text-xs font-medium sm:text-sm">MDD</CardTitle>
+                <CardTitle className="flex items-center gap-1 text-xs font-medium sm:text-sm">
+                  MDD
+                  <InfoPopover>
+                    일별 잔고가 이전 최고점 대비 가장 크게 빠졌던 낙폭(%)입니다. 보유
+                    중인(미청산) 포지션의 평가손실은 반영되지 않습니다.
+                  </InfoPopover>
+                </CardTitle>
               </CardHeader>
               <CardContent className="px-2 text-xs font-semibold sm:px-4 sm:text-lg">
                 {fmtPct(summary.mdd_pct)}
@@ -113,7 +126,13 @@ export default function JournalPage() {
             </Card>
             <Card className="gap-1 py-2 sm:gap-4 sm:py-4">
               <CardHeader className="px-2 sm:px-4">
-                <CardTitle className="text-xs font-medium sm:text-sm">승률</CardTitle>
+                <CardTitle className="flex items-center gap-1 text-xs font-medium sm:text-sm">
+                  승률
+                  <InfoPopover>
+                    청산된 거래 중 손익이 0 이상인 비율입니다. 보유 중인 포지션은
+                    포함되지 않습니다.
+                  </InfoPopover>
+                </CardTitle>
               </CardHeader>
               <CardContent className="px-2 text-xs font-semibold sm:px-4 sm:text-lg">
                 {summary.win_rate_pct.toFixed(1)}%
