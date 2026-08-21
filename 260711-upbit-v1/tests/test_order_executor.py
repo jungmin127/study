@@ -1313,22 +1313,41 @@ async def test_handle_signal_result_skips_sell_when_value_below_min_order_amount
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)
     position_manager.open_position(strategy["id"], "KRW-BTC", 50_000_000.0, 0.00009)  # ≈4,500원
+    signal_result = _signal_result(sell_signal=True, latest_close=50_000_000.0)
+    conn = dbm._connect()
+    try:
+        conn.execute(
+            "INSERT INTO signals (id, live_strategy_id, signal_type, candle_time) "
+            "VALUES (?, ?, 'sell', ?)",
+            (signal_result["sell_signal_id"], strategy["id"], signal_result["candle_time"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
     async def fake_exit(*args, **kwargs):
         raise AssertionError("최소주문금액 미만 잔량인데 exit()가 호출되면 안 된다")
 
     monkeypatch.setattr(order_executor, "exit", fake_exit)
 
-    result = await order_executor.handle_signal_result(
-        strategy["id"], _signal_result(sell_signal=True, latest_close=50_000_000.0),
-        dry_run=True,
-    )
+    result = await order_executor.handle_signal_result(strategy["id"], signal_result, dry_run=True)
 
     assert result["sell_action"] is None
     assert result["sell_order_id"] is None
     position = position_manager.get_open_position(strategy["id"])
     assert position is not None
     assert position["entry_qty"] == pytest.approx(0.00009)
+
+    conn = dbm._connect()
+    try:
+        row = conn.execute(
+            "SELECT skip_reason, resulting_order_id FROM signals WHERE id = ?",
+            (signal_result["sell_signal_id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "below_min_order_amount"
+    assert row[1] is None
 
 
 async def test_exit_records_signal_as_default_close_reason(monkeypatch, tmp_path):

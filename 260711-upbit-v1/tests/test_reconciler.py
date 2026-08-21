@@ -461,6 +461,38 @@ async def test_reconcile_position_opens_from_matched_external_buy(monkeypatch, t
     assert position["entry_fee"] == 500.0
 
 
+async def test_reconcile_position_dust_sized_matched_buy_opens_not_absorbs(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 Important 발견 — 더스트 흡수 분기가 매칭 판정보다 먼저 실행되면,
+    실제로 매칭되는 소액 외부주문(예: limit 주문의 작은 부분체결)까지 더스트로 오인해
+    baseline에 조용히 흡수해 버린다. dust_value_krw도 최소주문금액 미만인 극소량이지만
+    실제 잔고와 정확히 일치하는 외부 매수주문이 있는 경우, dust_absorbed가 아니라
+    _apply_explained_change()를 통한 정상 "opened"가 나와야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="acknowledge_and_continue")
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.00009, avg_buy_price="50000000")]  # 0.00009 * 5000만 = 4,500원(더스트 크기)
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    external_orders = [{"side": "bid", "filled_volume": 0.00009, "filled_price": 50_000_000.0, "fee": 45.0}]
+    result = await reconciler._reconcile_position(strategy, external_orders)
+
+    assert result == {"balance_mismatch": True, "action": "opened", "paused": False}
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_qty"] == pytest.approx(0.00009)
+    assert position["entry_price"] == 50_000_000.0
+    assert position["entry_fee"] == 45.0
+    updated = dbm.get_live_strategy(strategy["id"])
+    assert updated["baseline_qty"] == pytest.approx(0.0)
+    conn = dbm._connect()
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM manual_intervention_events").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 0
+
+
 async def test_reconcile_position_closes_from_matched_external_sell(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm, baseline_qty=0.0, manual_intervention_policy="all_stop")

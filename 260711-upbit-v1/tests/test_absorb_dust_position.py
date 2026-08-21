@@ -54,6 +54,9 @@ async def test_run_closes_dust_position_and_absorbs_baseline_without_touching_ca
     finally:
         conn.close()
     assert any(row[0] == "dust_absorbed_manual_cleanup" for row in rows)
+    # --apply일 때 실제로 백업파일이 디스크에 생성되는지 확인한다(Minor 발견 —
+    # 지금까지는 백업 로직 자체를 실행만 하고 산출물 존재를 검증하지 않았다).
+    assert list(tmp_path.glob(f"{dbm.DB_PATH.name}.bak-*"))
 
 
 async def test_run_dry_run_does_not_modify_anything(monkeypatch, tmp_path):
@@ -120,3 +123,26 @@ async def test_run_with_force_closes_position_above_min_order_amount(monkeypatch
     await adp.run(strategy["id"], apply=True, force=True)
 
     assert position_manager.get_open_position(strategy["id"]) is None
+
+
+async def test_run_closes_dust_position_with_nonzero_baseline_qty(monkeypatch, tmp_path):
+    """최종 브랜치 리뷰 Important 발견 — 안전 가드가 실제 잔고를 entry_qty 단독과
+    비교했다. 이 코드베이스 전반의 불변식(trading/reconciler.py의
+    actual_qty = raw_balance - baseline_qty)은 잔고가 baseline_qty + entry_qty와
+    같아야 한다는 것이다. 봉이 시작하기 전부터 보유하던 코인이 있어 baseline_qty가
+    0이 아닌 전략에서, 가드가 이 정당한 더스트 정리를 오탐으로 거부하지 않아야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.001, current_capital=1_000_000.0)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 50_000_000.0, 0.00009)  # ≈4,500원
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.00109)]  # baseline_qty(0.001) + entry_qty(0.00009)
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    await adp.run(strategy["id"], apply=True, force=False)
+
+    assert position_manager.get_open_position(strategy["id"]) is None
+    updated = dbm.get_live_strategy(strategy["id"])
+    assert updated["baseline_qty"] == pytest.approx(0.001 + 0.00009)
+    assert updated["current_capital"] == pytest.approx(1_000_000.0)  # 자본 불변

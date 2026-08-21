@@ -8,9 +8,11 @@ Part 3): reconciler가 최소주문금액 미만 잔고 불일치를 "설명 안
 배포된 뒤 앞으로 재발하는 건은 자동으로 처리되므로, 이 스크립트는 그 수정 이전에 이미
 생겨버린 건을 1회 정리하는 용도다.
 
-position_manager.close_position()을 쓰면 실제 매도가 없었는데도 current_capital이
-exit_price*exit_qty만큼 부풀려진다 — 그래서 db.close_position_row()를 직접 호출해
-realized_pnl=0으로 종결하고 current_capital은 건드리지 않는다.
+position_manager.close_position()을 쓰면 db.update_live_strategy_capital()이 호출되어
+current_capital이 exit_price*exit_qty(-수수료)로 통째로 대체(replace)된다 — 부풀려지는 게
+아니라, 원래 전략이 갖고 있던 current_capital(예: 100만원)이 이 더스트 포지션의 가치
+(예: 4,500원) 수준으로 리셋되어 버린다는 뜻이다. 그래서 db.close_position_row()를 직접
+호출해 realized_pnl=0으로 종결하고 current_capital은 건드리지 않는다.
 
 실행 전 trading.db를 자동 백업한다(--apply일 때만, scripts/backfill_entry_fee.py와 동일
 패턴). 기본은 드라이런(무엇을 바꿀지만 출력).
@@ -85,12 +87,13 @@ async def run(strategy_id: str, apply: bool, force: bool) -> None:
     actual_balance = await _get_actual_balance(market)
     entry_qty = position["entry_qty"]
     entry_price = position["entry_price"]
+    baseline_before = strategy["baseline_qty"] or 0.0
 
-    if abs(actual_balance - entry_qty) > _QTY_EPSILON:
+    if abs(actual_balance - (baseline_before + entry_qty)) > _QTY_EPSILON:
         print(
-            f"중단: 포지션 수량({entry_qty})과 실제 잔고({actual_balance})가 오차범위를 "
-            "벗어나 일치하지 않습니다 — 더 큰 포지션과 혼동될 위험이 있어 자동 처리를 "
-            "거부합니다. 직접 확인하세요."
+            f"중단: 포지션 수량({entry_qty})과 baseline({baseline_before})의 합이 실제 "
+            f"잔고({actual_balance})와 오차범위를 벗어나 일치하지 않습니다 - 더 큰 포지션과 "
+            "혼동될 위험이 있어 자동 처리를 거부합니다. 직접 확인하세요."
         )
         return
 
@@ -103,7 +106,6 @@ async def run(strategy_id: str, apply: bool, force: bool) -> None:
         )
         return
 
-    baseline_before = strategy["baseline_qty"] or 0.0
     print(
         f"strategy_id={strategy_id} market={market} entry_qty={entry_qty} "
         f"entry_price={entry_price} value_krw={value_krw:.0f} "

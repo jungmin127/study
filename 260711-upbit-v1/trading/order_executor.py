@@ -835,6 +835,7 @@ async def handle_signal_result(
                 strategy_id, position["entry_qty"], position["stale_resolved_qty"],
                 sellable_qty, expected_price,
             )
+            db.update_signal_result(signal_result["sell_signal_id"], None, "below_min_order_amount")
         else:
             sell_position = {**position, "entry_qty": sellable_qty}
             order = await exit(

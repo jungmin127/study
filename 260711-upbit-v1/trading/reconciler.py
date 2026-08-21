@@ -292,27 +292,6 @@ async def _reconcile_position(
     if abs(diff) <= _QTY_EPSILON:
         return {"balance_mismatch": False, "action": "none", "paused": False}
 
-    # 포지션이 없는데 실제 잔고가 최소주문금액 미만으로 남는 경우(설계 문서
-    # docs/superpowers/specs/2026-08-21-live-trading-dust-position-auto-recovery-design.md
-    # Part 1) — order_executor._run_limit_timeout()의 _finalize_first_leg()가 최소주문금액
-    # 미만 잔량을 의도적으로 매도하지 않고 포지션만 종료했을 때 이 경로를 탄다. 그 잔량은
-    # 어차피 거래소가 매도를 거부해 봇이 다룰 수 없으므로, 포지션을 재오픈하고 전략을
-    # 정지시키는 대신 baseline_qty에 그대로 흡수해 조용히 넘어간다. avg_buy_price<=0
-    # (원가 미추적 코인)이면 가치를 판단할 수 없으므로 안전하게 기존 로직(정지)으로
-    # 폴백한다. position이 이미 열려 있는 경우는 이번 설계 범위 밖이라 건드리지 않는다.
-    if position is None and diff > _QTY_EPSILON and avg_buy_price > 0:
-        dust_value_krw = diff * avg_buy_price
-        if dust_value_krw < _MIN_ORDER_AMOUNT_KRW:
-            new_baseline = baseline_qty + diff
-            db.update_live_strategy_baseline_qty(strategy["id"], new_baseline)
-            db.insert_manual_intervention_event(
-                market,
-                f"최소주문금액 미만 잔고 차이 {diff:.8f}개(≈{dust_value_krw:.0f}원) "
-                "baseline에 흡수",
-                "dust_absorbed",
-            )
-            return {"balance_mismatch": True, "action": "dust_absorbed", "paused": False}
-
     matched_orders = list(external_orders) + list(own_fills)
     done_buys = [o for o in matched_orders if o["side"] == "bid" and o["filled_volume"]]
     done_sells = [o for o in matched_orders if o["side"] == "ask" and o["filled_volume"]]
@@ -347,6 +326,31 @@ async def _reconcile_position(
             # 되돌리면 안 된다(코드 리뷰 Critical 발견, signal_engine.py 참고).
             db.update_live_strategy_status(strategy["id"], "paused", manual_pause=1)
         return {"balance_mismatch": True, "action": action, "paused": paused}
+
+    # 포지션이 없는데 실제 잔고가 최소주문금액 미만으로 남는 경우(설계 문서
+    # docs/superpowers/specs/2026-08-21-live-trading-dust-position-auto-recovery-design.md
+    # Part 1) — order_executor._run_limit_timeout()의 _finalize_first_leg()가 최소주문금액
+    # 미만 잔량을 의도적으로 매도하지 않고 포지션만 종료했을 때 이 경로를 탄다. 그 잔량은
+    # 어차피 거래소가 매도를 거부해 봇이 다룰 수 없으므로, 포지션을 재오픈하고 전략을
+    # 정지시키는 대신 baseline_qty에 그대로 흡수해 조용히 넘어간다. avg_buy_price<=0
+    # (원가 미추적 코인)이면 가치를 판단할 수 없으므로 안전하게 기존 로직(정지)으로
+    # 폴백한다. position이 이미 열려 있는 경우는 이번 설계 범위 밖이라 건드리지 않는다.
+    # 이 분기는 반드시 위의 _apply_explained_change() 시도 이후에 와야 한다(최종 브랜치
+    # 리뷰 Important 발견) — 그렇지 않으면 실제로 매칭되는 소액 외부주문/own_fill이
+    # 더스트로 오인되어 baseline에 조용히 흡수되고, baseline_qty가 그만큼 어긋나
+    # 전략이 이후 사이클마다 계속 재정지된다.
+    if position is None and diff > _QTY_EPSILON and avg_buy_price > 0:
+        dust_value_krw = diff * avg_buy_price
+        if dust_value_krw < _MIN_ORDER_AMOUNT_KRW:
+            new_baseline = baseline_qty + diff
+            db.update_live_strategy_baseline_qty(strategy["id"], new_baseline)
+            db.insert_manual_intervention_event(
+                market,
+                f"최소주문금액 미만 잔고 차이 {diff:.8f}개(≈{dust_value_krw:.0f}원) "
+                "baseline에 흡수",
+                "dust_absorbed",
+            )
+            return {"balance_mismatch": True, "action": "dust_absorbed", "paused": False}
 
     # own_fills만으로 diff가 전부 설명되면(외부주문 없이) mixed_side/topup 가드 때문에
     # 정밀 self-heal 경로를 못 탔을 뿐, 이건 우리 자신이 추적 중인 주문이 뒤늦게 두 개
