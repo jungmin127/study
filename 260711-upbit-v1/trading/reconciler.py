@@ -20,6 +20,10 @@ import trading.risk_manager as risk_manager
 import trading.upbit_client as upbit_client
 
 _QTY_EPSILON = 1e-6
+# 업비트 원화마켓 최소 주문금액(2026-08 기준, docs.upbit.com/kr/docs/krw-market-info).
+# order_executor.py의 동일 상수와 값은 같지만, 이 모듈은 그 파일에 의존하지 않는다는
+# 원칙(모듈 docstring 참고)을 지키기 위해 값을 복제한다.
+_MIN_ORDER_AMOUNT_KRW = 5000
 
 
 def _coin_currency(market: str) -> str:
@@ -287,6 +291,27 @@ async def _reconcile_position(
     diff = actual_qty - internal_qty
     if abs(diff) <= _QTY_EPSILON:
         return {"balance_mismatch": False, "action": "none", "paused": False}
+
+    # 포지션이 없는데 실제 잔고가 최소주문금액 미만으로 남는 경우(설계 문서
+    # docs/superpowers/specs/2026-08-21-live-trading-dust-position-auto-recovery-design.md
+    # Part 1) — order_executor._run_limit_timeout()의 _finalize_first_leg()가 최소주문금액
+    # 미만 잔량을 의도적으로 매도하지 않고 포지션만 종료했을 때 이 경로를 탄다. 그 잔량은
+    # 어차피 거래소가 매도를 거부해 봇이 다룰 수 없으므로, 포지션을 재오픈하고 전략을
+    # 정지시키는 대신 baseline_qty에 그대로 흡수해 조용히 넘어간다. avg_buy_price<=0
+    # (원가 미추적 코인)이면 가치를 판단할 수 없으므로 안전하게 기존 로직(정지)으로
+    # 폴백한다. position이 이미 열려 있는 경우는 이번 설계 범위 밖이라 건드리지 않는다.
+    if position is None and diff > _QTY_EPSILON and avg_buy_price > 0:
+        dust_value_krw = diff * avg_buy_price
+        if dust_value_krw < _MIN_ORDER_AMOUNT_KRW:
+            new_baseline = baseline_qty + diff
+            db.update_live_strategy_baseline_qty(strategy["id"], new_baseline)
+            db.insert_manual_intervention_event(
+                market,
+                f"최소주문금액 미만 잔고 차이 {diff:.8f}개(≈{dust_value_krw:.0f}원) "
+                "baseline에 흡수",
+                "dust_absorbed",
+            )
+            return {"balance_mismatch": True, "action": "dust_absorbed", "paused": False}
 
     matched_orders = list(external_orders) + list(own_fills)
     done_buys = [o for o in matched_orders if o["side"] == "bid" and o["filled_volume"]]

@@ -635,6 +635,82 @@ async def test_reconcile_position_treats_topup_while_open_as_unexplained(
     assert position["entry_price"] == 40_000_000.0  # 원가는 건드리지 않음
 
 
+async def test_reconcile_position_absorbs_dust_diff_into_baseline_without_pause(
+    monkeypatch, tmp_path,
+):
+    """설계 문서 2026-08-21-live-trading-dust-position-auto-recovery — limit_timeout
+    매도가 최소주문금액 미만 잔량을 의도적으로 팔지 않고 포지션을 닫으면, 그 잔량이
+    실제 지갑에 그대로 남는다. 이 잔량은 어차피 거래소가 매도를 거부해 봇이 다룰 수
+    없으므로, 포지션을 재오픈하고 전략을 정지시키는 대신 baseline_qty에 흡수해 조용히
+    넘어가야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.00005, avg_buy_price="50000000")]  # 0.00005 * 5000만 = 2,500원
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler._reconcile_position(strategy, [])
+
+    assert result == {"balance_mismatch": True, "action": "dust_absorbed", "paused": False}
+    updated = dbm.get_live_strategy(strategy["id"])
+    assert updated["baseline_qty"] == pytest.approx(0.00005)
+    assert updated["status"] == "running"
+    assert position_manager.get_open_position(strategy["id"]) is None
+    conn = dbm._connect()
+    try:
+        rows = conn.execute(
+            "SELECT action_taken, description FROM manual_intervention_events"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert any(row[0] == "dust_absorbed" for row in rows)
+
+
+async def test_reconcile_position_dust_diff_falls_back_when_avg_buy_price_zero(
+    monkeypatch, tmp_path,
+):
+    """가치를 판단할 근거(avg_buy_price)가 없으면 수량이 아무리 작아도 더스트로 단정하지
+    않고 기존 정지 경로를 그대로 따른다 — 원가 미추적 코인(입금/에어드롭)일 수 있어
+    안전하게 사람 확인을 받는 쪽을 택한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+
+    async def fake_get_accounts(*, client=None):
+        return [_account(0.00005, avg_buy_price="0")]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler._reconcile_position(strategy, [])
+
+    assert result == {"balance_mismatch": True, "action": "unexplained", "paused": True}
+    assert position_manager.get_open_position(strategy["id"]) is None
+    assert dbm.get_live_strategy(strategy["id"])["status"] == "paused"
+
+
+async def test_reconcile_position_open_position_dust_diff_still_pauses(monkeypatch, tmp_path):
+    """더스트 흡수는 position이 None일 때만 적용한다(설계 문서 결정) — 이미 열려 있는
+    포지션에서 발생한 최소금액 미만의 잔고 차이는 이번 변경 범위 밖이며, 기존 동작
+    (정지 후 수량 self-heal)을 그대로 유지해야 한다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm, baseline_qty=0.0)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 49_000_000.0, 0.01)
+
+    async def fake_get_accounts(*, client=None):
+        # 포지션 수량(0.01) + 더스트 수준 초과분(0.00005, ≈2,500원)
+        return [_account(0.01005, avg_buy_price="50000000")]
+
+    monkeypatch.setattr(upbit_client, "get_accounts", fake_get_accounts)
+
+    result = await reconciler._reconcile_position(strategy, [])
+
+    assert result["action"] == "unexplained"
+    assert result["paused"] is True
+    position = position_manager.get_open_position(strategy["id"])
+    assert position["entry_qty"] == pytest.approx(0.01005)
+
+
 async def test_reconcile_position_unexplained_open_uses_avg_buy_price(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm, baseline_qty=0.0)
