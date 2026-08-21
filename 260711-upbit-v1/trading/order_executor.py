@@ -818,15 +818,22 @@ async def handle_signal_result(
         # 그 정리분이 누락된다 — exit_for_risk()가 이미 하는 계산을 여기도 그대로
         # 적용한다.
         sellable_qty = _floor_volume(position["entry_qty"] - position["stale_resolved_qty"])
-        if sellable_qty <= 0:
+        # exit_for_risk()의 최소주문금액 가드(709-724행)와 동일한 이유로 여기도 판다
+        # (설계 문서 2026-08-21-live-trading-dust-position-auto-recovery Part 2) — 남은
+        # 수량이 있어도 그 가치가 업비트 최소주문금액 미만이면 주문 자체가 거부되므로
+        # 시도하지 않는다. 시도했다가 매 매도신호마다 예외만 반복되던 문제를 없앤다.
+        if sellable_qty <= 0 or sellable_qty * expected_price < _MIN_ORDER_AMOUNT_KRW:
             # exit_for_risk()가 이미 이 포지션을 전량 소진 처리했어야 하는 방어적
-            # 경계 케이스다(이 함수는 daemon의 전략별 lock을 잡지 않으므로, concurrent
+            # 경계 케이스이거나(이 함수는 daemon의 전략별 lock을 잡지 않으므로, concurrent
             # risk-exit tick의 close보다 살짝 먼저 읽은 stale position dict를 볼 수
-            # 있다 — 흔하지 않지만 실주문을 내는 것보다 조용히 건너뛰는 편이 안전하다).
+            # 있다), 남은 수량이 최소주문금액 미만인 경우다 — 어느 쪽이든 실주문을 내는
+            # 것보다 조용히 건너뛰는 편이 안전하다.
             logger.warning(
-                "포지션의 잔여주문 정리분이 이미 전량을 커버해 캔들 매도를 건너뛴다: "
-                "strategy_id=%s entry_qty=%s stale_resolved_qty=%s",
+                "포지션의 매도 가능 수량이 없거나 최소주문금액 미만이라 캔들 매도를 "
+                "건너뛴다: strategy_id=%s entry_qty=%s stale_resolved_qty=%s "
+                "sellable_qty=%s expected_price=%s",
                 strategy_id, position["entry_qty"], position["stale_resolved_qty"],
+                sellable_qty, expected_price,
             )
         else:
             sell_position = {**position, "entry_qty": sellable_qty}

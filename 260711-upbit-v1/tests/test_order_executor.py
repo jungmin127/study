@@ -1304,6 +1304,33 @@ async def test_handle_signal_result_skips_sell_when_manually_paused(monkeypatch,
     assert position_manager.get_open_position(strategy_id) is not None
 
 
+async def test_handle_signal_result_skips_sell_when_value_below_min_order_amount(
+    monkeypatch, tmp_path,
+):
+    """exit_for_risk()에 이미 있는 최소주문금액 가드(709-724행)를 캔들 매도 경로에도
+    동일하게 적용한다 — 안 그러면 매도 신호가 뜰 때마다 업비트가 거부할 주문을 내고
+    예외만 반복해서 로그를 채운다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy = _strategy_row(dbm)
+    position_manager.open_position(strategy["id"], "KRW-BTC", 50_000_000.0, 0.00009)  # ≈4,500원
+
+    async def fake_exit(*args, **kwargs):
+        raise AssertionError("최소주문금액 미만 잔량인데 exit()가 호출되면 안 된다")
+
+    monkeypatch.setattr(order_executor, "exit", fake_exit)
+
+    result = await order_executor.handle_signal_result(
+        strategy["id"], _signal_result(sell_signal=True, latest_close=50_000_000.0),
+        dry_run=True,
+    )
+
+    assert result["sell_action"] is None
+    assert result["sell_order_id"] is None
+    position = position_manager.get_open_position(strategy["id"])
+    assert position is not None
+    assert position["entry_qty"] == pytest.approx(0.00009)
+
+
 async def test_exit_records_signal_as_default_close_reason(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy = _strategy_row(dbm)
