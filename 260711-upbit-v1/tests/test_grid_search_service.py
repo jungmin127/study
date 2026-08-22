@@ -252,6 +252,22 @@ def test_start_job_passes_pool_and_chaining_args_to_subprocess(monkeypatch):
     assert job["indicator_pool"] == {"categories": ["추세"], "excluded_indicators": []}
 
 
+def test_start_job_raises_when_base_run_id_given_without_combinator(monkeypatch):
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+    _FakePopen.stdout_lines = []
+    _FakePopen.returncode = 0
+
+    with pytest.raises(ValueError):
+        gss.start_job(
+            market="KRW-ETH", timeframe="minutes60", capital=1_000_000,
+            start="2026-01-01", end="2026-02-01", top_n=10,
+            base_run_id="base-abc",
+        )
+
+    # 검증 실패 시 job이 시작되지 않아야 한다 — _active 슬롯이 점유되면 안 됨.
+    assert gss._active is None
+
+
 def test_reader_loop_resets_active_and_marks_failed_on_unexpected_exception(monkeypatch):
     class _NoOpThread:
         def __init__(self, target=None, args=(), kwargs=None, daemon=None):

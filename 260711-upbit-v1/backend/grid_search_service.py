@@ -196,6 +196,9 @@ def start_job(
 ) -> str:
     """grid search job을 시작하고 job_id를 반환한다. 이미 실행 중인 job이 있으면
     JobAlreadyRunningError를 던진다."""
+    if base_run_id and not combinator:
+        raise ValueError("base_run_id를 지정하면 combinator(AND 또는 OR)도 함께 지정해야 합니다.")
+
     global _active
     with _lock:
         if _active is not None:
