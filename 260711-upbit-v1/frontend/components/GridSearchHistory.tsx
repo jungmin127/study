@@ -110,7 +110,20 @@ function buildJobTree(jobs: GridSearchJob[]): JobTreeNode[] {
     }
   }
   for (const root of roots) visit(root, 0, null);
-  for (const job of orphaned) nodes.push({ job, depth: 0, baseResult: null, baseOrphaned: true });
+  for (const job of orphaned) {
+    // 베이스를 찾을 수 없어 최상위로 끌어올려진 job이지만, 이 job의 결과에서 파생된
+    // 자식 job은 여전히 존재할 수 있으므로 visit()과 동일하게 자식을 순회해야 한다.
+    // (visit()을 그대로 호출하면 이 job 자신이 baseOrphaned:false로 잘못 push되므로
+    // 자신은 직접 push하고, 자식 순회 로직만 visit()과 동일하게 인라인으로 반복한다.)
+    nodes.push({ job, depth: 0, baseResult: null, baseOrphaned: true });
+    for (const result of job.result_json ?? []) {
+      for (const child of childrenByJobId.get(job.id) ?? []) {
+        if (child.base_run_id === result.run_id) {
+          visit(child, 1, result);
+        }
+      }
+    }
+  }
 
   return nodes;
 }
