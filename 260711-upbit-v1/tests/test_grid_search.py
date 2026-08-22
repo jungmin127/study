@@ -292,6 +292,36 @@ def test_check_candle_warmup_passes_when_macd_requirement_met():
     _check_candle_warmup(df, buy_conditions, sell_conditions)
 
 
+def test_check_candle_warmup_includes_base_group_macd_requirement():
+    """체이닝 시 베이스 조건(base_sell_group)의 MACD 조합형 워밍업 요구량도 반영해야
+    한다 — 새 풀만 보면 통과하지만 베이스를 포함하면 부족한 경우를 잡아야 한다
+    (최종 리뷰 Critical #1 회귀 테스트)."""
+    df = make_oscillating_df(n=35)  # 새 풀(RSI)만 보면 충분하지만 베이스(MACD 조합)는 43봉 필요
+    buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
+    sell_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]
+    base_sell_group = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "MACD_PPO_signal", "params": {"fast": 16, "slow": 32, "signal": 12}, "operator": ">", "threshold": 1},
+        ],
+    }
+    with pytest.raises(SystemExit):
+        _check_candle_warmup(df, buy_conditions, sell_conditions, base_sell_group=base_sell_group)
+
+
+def test_check_candle_warmup_passes_when_base_group_requirement_met():
+    df = make_oscillating_df(n=43)
+    buy_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]
+    sell_conditions = [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]
+    base_sell_group = {
+        "type": "AND",
+        "conditions": [
+            {"indicator": "MACD_PPO_signal", "params": {"fast": 16, "slow": 32, "signal": 12}, "operator": ">", "threshold": 1},
+        ],
+    }
+    _check_candle_warmup(df, buy_conditions, sell_conditions, base_sell_group=base_sell_group)
+
+
 def test_watchdog_expired_when_timeout_exceeded():
     assert _watchdog_expired(last_progress_time=0.0, now=301.0, timeout_sec=300) is True
 
@@ -375,6 +405,24 @@ def test_wrap_condition_with_base_nests_group():
     assert _wrap_condition(candidate, base, "OR") == {"type": "OR", "conditions": [base, candidate]}
 
 
+def test_wrap_condition_sell_only_block_forces_or_regardless_of_combinator():
+    """손절/익절/보유기간(SELL_ONLY) 조건은 combinator로 AND를 요청해도 항상 OR로 묶여야
+    한다 — AND로 묶이면 청산 안전장치가 사실상 무력화된다(최종 리뷰 Important #2)."""
+    from scripts.grid_search import _wrap_condition
+
+    base = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]}
+    stop_loss_block = {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5}
+    assert _wrap_condition(stop_loss_block, base, "AND") == {"type": "OR", "conditions": [base, stop_loss_block]}
+
+
+def test_wrap_condition_non_sell_only_block_respects_requested_combinator():
+    from scripts.grid_search import _wrap_condition
+
+    base = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}]}
+    candidate = {"indicator": "SMA_PCT", "params": {"period": 14}, "operator": "<", "threshold": -1.0}
+    assert _wrap_condition(candidate, base, "AND") == {"type": "AND", "conditions": [base, candidate]}
+
+
 def test_run_one_combo_uses_base_group_when_provided():
     from engine.sweep import DEFAULT_RISK_CONFIG
     from scripts.grid_search import _run_one_combo
@@ -419,6 +467,61 @@ def test_main_parses_categories_and_exclude_indicators_args(monkeypatch, capsys)
         "categories": ["오실레이터", "추세"],
         "excluded_indicators": ["MOMENTUM_PCT"],
     }
+
+
+def test_main_includes_base_conditions_in_aux_data_detection(monkeypatch):
+    """체이닝 시 베이스 조건에 등장하는 지표(예: 시장심리 카테고리)가 새 풀에 없어도,
+    _fetch_backtest_dataframe에 넘기는 감지용 트리에 베이스 조건이 포함돼야 그 지표가
+    필요로 하는 보조 데이터(btc_close 등)가 함께 병합된다(최종 리뷰 Critical #1 회귀 테스트)."""
+    import sys
+    from scripts import grid_search
+    from engine.condition_tree import collect_blocks
+
+    base_sell = {
+        "type": "AND",
+        "conditions": [{"indicator": "BTC_CORRELATION", "params": {"period": 20}, "operator": ">", "threshold": 0.7}],
+    }
+    base_buy = {
+        "type": "AND",
+        "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}],
+    }
+    monkeypatch.setattr(
+        grid_search, "get_run_config",
+        lambda run_id: {"buy_conditions": base_buy, "sell_conditions": base_sell},
+    )
+    monkeypatch.setattr(
+        grid_search, "build_condition_grid",
+        lambda pool=None: (
+            [{"indicator": "SMA_PCT", "params": {"period": 20}, "operator": "<", "threshold": -1.0}],
+            [{"indicator": "EMA_PCT", "params": {"period": 20}, "operator": ">", "threshold": 1.0}],
+        ),
+    )
+    captured = {}
+
+    class _StopEarly(Exception):
+        pass
+
+    def fake_fetch(market, timeframe, start_dt, end_dt, buy_group, sell_group):
+        captured["buy_group"] = buy_group
+        captured["sell_group"] = sell_group
+        raise _StopEarly()
+
+    monkeypatch.setattr(grid_search, "_fetch_backtest_dataframe", fake_fetch)
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "grid_search.py", "--market", "KRW-ETH", "--timeframe", "minutes60",
+            "--capital", "1000000", "--start", "2026-01-01", "--end", "2026-01-02",
+            "--categories", "추세", "--base-run-id", "base-abc", "--combinator", "AND",
+        ],
+    )
+    with pytest.raises(_StopEarly):
+        grid_search.main()
+
+    sell_indicators = {b["indicator"] for b in collect_blocks(captured["sell_group"])}
+    assert "BTC_CORRELATION" in sell_indicators
+    buy_indicators = {b["indicator"] for b in collect_blocks(captured["buy_group"])}
+    assert "RSI" in buy_indicators
 
 
 def test_main_raises_when_base_run_id_not_found(monkeypatch):

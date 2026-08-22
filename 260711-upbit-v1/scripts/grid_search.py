@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from backend.main import _fetch_backtest_dataframe
 from engine.cache import get_run_config, run_backtest_cached
 from engine.condition_strategy import ConditionTreeStrategy
-from engine.condition_tree import max_required_period
+from engine.condition_tree import collect_blocks, max_required_period
 from engine.grid_search_pool import (
     INDICATOR_POOL_SPECS,
     MARKET_SENTIMENT_SPECS,
@@ -63,16 +63,25 @@ def _macd_required_bars(params: dict) -> int:
     return max(fast, slow) + signal - 1
 
 
-def _check_candle_warmup(df, buy_conditions: list[dict], sell_conditions: list[dict]) -> None:
+def _check_candle_warmup(
+    df, buy_conditions: list[dict], sell_conditions: list[dict],
+    base_buy_group: dict | None = None, base_sell_group: dict | None = None,
+) -> None:
     """그리드에 등장하는 파라미터의 최대 워밍업 봉 수보다 캔들이 적으면 명확한 에러로 중단한다.
 
     사전 체크 없이 계산을 시작하면 backtrader 내부에서 IndexError로 불명확하게 죽는다.
     max_required_period()는 MACD류의 조합형 요구량(_macd_required_bars 참고)을 과소평가하므로
-    별도로 보정한다."""
-    all_buy_group = {"type": "AND", "conditions": buy_conditions}
-    all_sell_group = {"type": "AND", "conditions": sell_conditions}
+    별도로 보정한다. 체이닝 시 베이스 조건(base_buy_group/base_sell_group)의 파라미터도
+    포함해야 한다 — 베이스가 새 풀보다 긴 워밍업을 요구하는 지표를 쓰는 경우, 이 체크 없이는
+    backtrader 내부에서 불명확하게 죽는다(최종 리뷰 Critical #1)."""
+    all_buy_group = {"type": "AND", "conditions": buy_conditions + ([base_buy_group] if base_buy_group else [])}
+    all_sell_group = {"type": "AND", "conditions": sell_conditions + ([base_sell_group] if base_sell_group else [])}
     required_bars = max(max_required_period(all_buy_group), max_required_period(all_sell_group))
-    for block in buy_conditions + sell_conditions:
+    base_blocks = (
+        (collect_blocks(base_buy_group) if base_buy_group else [])
+        + (collect_blocks(base_sell_group) if base_sell_group else [])
+    )
+    for block in buy_conditions + sell_conditions + base_blocks:
         if block["indicator"] in ("MACD_PPO", "MACD_PPO_signal"):
             required_bars = max(required_bars, _macd_required_bars(block["params"]))
     if len(df) < required_bars:
@@ -94,7 +103,15 @@ def _wrap_condition(block: dict, base_group: dict | None, combinator: str) -> di
 
     base_group이 None이면 기존과 동일하게 {"type": "AND", "conditions": [block]}로
     감싼다. base_group이 있으면(체이닝) combinator로 베이스와 block을 함께 묶는다 —
-    이렇게 만들어진 트리를 그대로 저장해야 재체이닝 시 베이스 정보가 안 사라진다."""
+    이렇게 만들어진 트리를 그대로 저장해야 재체이닝 시 베이스 정보가 안 사라진다.
+
+    손절/익절/보유기간(SELL_ONLY) 조건은 combinator와 무관하게 항상 OR로 묶는다 — AND로
+    묶으면 "손절 조건이면서 동시에 새 조건도 참"이어야 청산되어 포지션 청산 안전장치가
+    사실상 무력화되기 때문이다(최종 리뷰 Important #2). block이 이후 체이닝의 base_group으로
+    다시 쓰이므로, 이 시점에 한 번 OR로 고정해두면 이후 라운드의 combinator 선택과 무관하게
+    유지된다."""
+    if block["indicator"] in SELL_ONLY:
+        combinator = "OR"
     if base_group is None:
         return {"type": "AND", "conditions": [block]}
     return {"type": combinator, "conditions": [base_group, block]}
@@ -372,15 +389,18 @@ def main() -> None:
     )
 
     print(f"[1] 캔들 조회: {args.market} {args.timeframe} {args.start} ~ {args.end}", flush=True)
-    all_buy_group = {"type": "AND", "conditions": buy_conditions}
-    all_sell_group = {"type": "AND", "conditions": sell_conditions}
+    # 체이닝 시 베이스 조건(base_buy_group/base_sell_group)에 등장하는 지표도 감지용
+    # 트리에 포함해야 한다 — 그래야 _fetch_backtest_dataframe가 베이스가 요구하는 보조
+    # 데이터(btc_close/fear_greed_value 등)를 함께 병합한다(최종 리뷰 Critical #1).
+    detect_buy_group = {"type": "AND", "conditions": buy_conditions + ([base_buy_group] if base_buy_group else [])}
+    detect_sell_group = {"type": "AND", "conditions": sell_conditions + ([base_sell_group] if base_sell_group else [])}
     try:
-        df = _fetch_backtest_dataframe(args.market, args.timeframe, start_dt, end_dt, all_buy_group, all_sell_group)
+        df = _fetch_backtest_dataframe(args.market, args.timeframe, start_dt, end_dt, detect_buy_group, detect_sell_group)
     except HTTPException as exc:
         raise SystemExit(f"캔들/보조 데이터 조회 실패: {exc.detail}") from exc
     print(f"    캔들 수: {len(df)}", flush=True)
 
-    _check_candle_warmup(df, buy_conditions, sell_conditions)
+    _check_candle_warmup(df, buy_conditions, sell_conditions, base_buy_group, base_sell_group)
 
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": args.capital}
 
