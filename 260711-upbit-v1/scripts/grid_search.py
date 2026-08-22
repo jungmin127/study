@@ -16,6 +16,9 @@ import multiprocessing
 import time
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
+
+from backend.main import _fetch_backtest_dataframe
 from engine.cache import run_backtest_cached
 from engine.condition_strategy import ConditionTreeStrategy
 from engine.condition_tree import max_required_period
@@ -420,34 +423,56 @@ def _positive_int(value: str) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="오실레이터 그리드서치 백테스트")
+    parser = argparse.ArgumentParser(description="그리드서치 백테스트")
     parser.add_argument("--market", required=True, help="마켓코드 (예: KRW-ETH)")
     parser.add_argument("--timeframe", required=True, help="timeframe 코드 (예: minutes60)")
     parser.add_argument("--capital", required=True, type=float, help="운용자금(원)")
     parser.add_argument("--start", required=True, help="시작일 YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="종료일 YYYY-MM-DD")
     parser.add_argument("--top-n", type=_positive_int, default=20, help="저장할 상위 개수 (기본 20, 상한 50)")
+    parser.add_argument(
+        "--categories", default=None,
+        help="콤마로 구분된 지표 카테고리 목록 (예: 오실레이터,추세). 미지정 시 오실레이터만.",
+    )
+    parser.add_argument(
+        "--exclude-indicators", default=None,
+        help="콤마로 구분된, 선택된 카테고리 안에서 제외할 개별 지표 키",
+    )
     args = parser.parse_args()
 
     top_n = min(args.top_n, 50)
+
+    pool = None
+    if args.categories:
+        pool = {
+            "categories": [c.strip() for c in args.categories.split(",") if c.strip()],
+            "excluded_indicators": (
+                [i.strip() for i in args.exclude_indicators.split(",") if i.strip()]
+                if args.exclude_indicators else []
+            ),
+        }
 
     start_dt = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_dt = datetime.strptime(args.end, "%Y-%m-%d").replace(
         hour=23, minute=59, second=59, tzinfo=timezone.utc
     )
 
-    print(f"[1] 캔들 조회: {args.market} {args.timeframe} {args.start} ~ {args.end}", flush=True)
-    df = get_candles(args.market, args.timeframe, start_dt, end_dt)
-    print(f"    캔들 수: {len(df)}", flush=True)
-    if len(df) == 0:
-        raise SystemExit(f"캔들 데이터가 없습니다: {args.market} {args.timeframe} {args.start}~{args.end}")
-
-    buy_conditions, sell_conditions = build_condition_grid()
+    buy_conditions, sell_conditions = build_condition_grid(pool)
     total_combos = len(buy_conditions) * len(sell_conditions)
     print(
         f"[2] 매수 조건 {len(buy_conditions)}개 x 매도 조건 {len(sell_conditions)}개 = 총 {total_combos:,}개 조합",
         flush=True,
     )
+
+    print(f"[1] 캔들 조회: {args.market} {args.timeframe} {args.start} ~ {args.end}", flush=True)
+    all_buy_group = {"type": "AND", "conditions": buy_conditions}
+    all_sell_group = {"type": "AND", "conditions": sell_conditions}
+    try:
+        df = _fetch_backtest_dataframe(args.market, args.timeframe, start_dt, end_dt, all_buy_group, all_sell_group)
+    except HTTPException as exc:
+        raise SystemExit(f"캔들/보조 데이터 조회 실패: {exc.detail}") from exc
+    print(f"    캔들 수: {len(df)}", flush=True)
+
     _check_candle_warmup(df, buy_conditions, sell_conditions)
 
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": args.capital}

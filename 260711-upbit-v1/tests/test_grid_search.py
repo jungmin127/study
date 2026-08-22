@@ -358,3 +358,32 @@ def test_build_condition_grid_market_sentiment_pool_has_no_param_indicators():
     fear_greed_blocks = [b for b in buy_conditions if b["indicator"] == "FEAR_GREED_CMC"]
     assert fear_greed_blocks
     assert all(b["params"] == {} for b in fear_greed_blocks)
+
+
+def test_main_parses_categories_and_exclude_indicators_args(monkeypatch, capsys):
+    import sys
+    from scripts import grid_search
+
+    captured_pool = {}
+
+    def fake_build_condition_grid(pool=None):
+        captured_pool["pool"] = pool
+        return [], []
+
+    monkeypatch.setattr(grid_search, "build_condition_grid", fake_build_condition_grid)
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "grid_search.py", "--market", "KRW-ETH", "--timeframe", "minutes60",
+            "--capital", "1000000", "--start", "2026-01-01", "--end", "2026-01-02",
+            "--categories", "오실레이터,추세", "--exclude-indicators", "MOMENTUM_PCT",
+        ],
+    )
+    try:
+        grid_search.main()
+    except SystemExit:
+        pass  # 빈 조합이라 캔들 조회 이후 어딘가에서 중단돼도 괜찮다 — 파싱 결과만 검증
+    assert captured_pool["pool"] == {
+        "categories": ["오실레이터", "추세"],
+        "excluded_indicators": ["MOMENTUM_PCT"],
+    }
