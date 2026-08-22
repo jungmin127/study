@@ -64,6 +64,63 @@ function sortJobs(list: GridSearchJob[], key: SortKey | null, dir: SortDir): Gri
   });
 }
 
+interface JobTreeNode {
+  job: GridSearchJob;
+  depth: number;
+  baseResult: GridSearchSavedResult | null; // 체이닝의 경우 이 job이 seed로 쓴 결과, 최상위면 null
+  baseOrphaned: boolean; // base_run_id는 있는데 그 결과를 찾을 수 없는 경우(베이스 job/결과가 삭제됨)
+}
+
+function buildJobTree(jobs: GridSearchJob[]): JobTreeNode[] {
+  const byRunId = new Map<string, { job: GridSearchJob; result: GridSearchSavedResult }>();
+  for (const job of jobs) {
+    for (const result of job.result_json ?? []) {
+      byRunId.set(result.run_id, { job, result });
+    }
+  }
+
+  const childrenByJobId = new Map<string, GridSearchJob[]>();
+  const roots: GridSearchJob[] = [];
+  const orphaned: GridSearchJob[] = [];
+
+  for (const job of jobs) {
+    if (!job.base_run_id) {
+      roots.push(job);
+      continue;
+    }
+    const base = byRunId.get(job.base_run_id);
+    if (!base) {
+      orphaned.push(job); // 베이스 결과를 찾을 수 없음 — 최상위로 끌어올림
+      continue;
+    }
+    const siblings = childrenByJobId.get(base.job.id) ?? [];
+    siblings.push(job);
+    childrenByJobId.set(base.job.id, siblings);
+  }
+
+  const nodes: JobTreeNode[] = [];
+  function visit(job: GridSearchJob, depth: number, baseResult: GridSearchSavedResult | null) {
+    nodes.push({ job, depth, baseResult, baseOrphaned: false });
+    for (const result of job.result_json ?? []) {
+      for (const child of childrenByJobId.get(job.id) ?? []) {
+        if (child.base_run_id === result.run_id) {
+          visit(child, depth + 1, result);
+        }
+      }
+    }
+  }
+  for (const root of roots) visit(root, 0, null);
+  for (const job of orphaned) nodes.push({ job, depth: 0, baseResult: null, baseOrphaned: true });
+
+  return nodes;
+}
+
+function formatDelta(current: number, base: number, unit: string): string {
+  const diff = current - base;
+  const sign = diff >= 0 ? '+' : '';
+  return `(베이스 대비 ${sign}${diff.toFixed(2)}${unit})`;
+}
+
 type Expansion =
   | { kind: 'error'; message: string }
   | { kind: 'results'; results: GridSearchSavedResult[] }
@@ -145,6 +202,26 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
   }, [historyJobs, coinFilter, timeframeFilter]);
 
   const sorted = useMemo(() => sortJobs(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
+
+  const tree = useMemo(() => {
+    const allNodes = buildJobTree(jobs);
+    const visibleRootIds = new Set(sorted.map((j) => j.id));
+    function isDescendantOfVisibleRoot(node: JobTreeNode): boolean {
+      if (node.depth === 0) return visibleRootIds.has(node.job.id);
+      // depth > 0인 노드는 트리 생성 순서상 항상 부모 바로 뒤에 온다는 보장이 없으므로,
+      // base_run_id 체인을 거슬러 올라가 최상위 job이 필터를 통과하는지 확인한다.
+      let current: GridSearchJob | undefined = node.job;
+      while (current?.base_run_id) {
+        const parentEntry = allNodes.find((n) =>
+          (n.job.result_json ?? []).some((r) => r.run_id === current!.base_run_id)
+        );
+        if (!parentEntry) break;
+        current = parentEntry.job;
+      }
+      return current ? visibleRootIds.has(current.id) : false;
+    }
+    return allNodes.filter(isDescendantOfVisibleRoot);
+  }, [jobs, sorted]);
 
   const jobDeleteJob = useMemo(() => jobs.find((j) => j.id === jobDeleteTarget) ?? null, [jobs, jobDeleteTarget]);
   const jobDeleteResultCount = jobDeleteJob?.result_json?.length ?? 0;
@@ -285,7 +362,7 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sorted.map((job) => {
+            {tree.map(({ job, depth, baseResult, baseOrphaned }) => {
               const results = job.result_json ?? [];
               const top = results[0];
               const expansion = expansionFor(job);
@@ -316,7 +393,12 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                     <TableCell>
                       <Badge variant={STATUS_VARIANT[job.status]}>{STATUS_LABEL[job.status]}</Badge>
                     </TableCell>
-                    <TableCell>{job.market.replace('KRW-', '')}</TableCell>
+                    <TableCell style={{ paddingLeft: `${depth * 20 + 8}px` }}>
+                      {job.market.replace('KRW-', '')}
+                      {baseOrphaned && (
+                        <span className="ml-1 text-xs text-muted-foreground">(베이스 삭제됨)</span>
+                      )}
+                    </TableCell>
                     <TableCell>{formatTimeframe(job.timeframe)}</TableCell>
                     <TableCell>
                       {job.start} ~ {job.end}
@@ -400,7 +482,14 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                                     aria-label={`${r.rank}위 결과 선택`}
                                   />
                                   <span className="text-muted-foreground">{r.rank}위</span>
-                                  <span className={returnRateColor(r.return_pct)}>{r.return_pct.toFixed(2)}%</span>
+                                  <span className={returnRateColor(r.return_pct)}>
+                                    {r.return_pct.toFixed(2)}%
+                                    {baseResult && (
+                                      <span className="ml-1 text-xs text-muted-foreground">
+                                        {formatDelta(r.return_pct, baseResult.return_pct, '%p')}
+                                      </span>
+                                    )}
+                                  </span>
                                   {parsed ? (
                                     <>
                                       <span>
@@ -415,6 +504,20 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                                   )}
                                   <span className="text-xs text-muted-foreground">
                                     {formatFrequency(r.trade_count ?? 0, r.candle_count)}
+                                    {baseResult &&
+                                      typeof r.trade_count === 'number' &&
+                                      typeof baseResult.trade_count === 'number' && (
+                                        <span className="ml-1">
+                                          {formatDelta(r.trade_count, baseResult.trade_count, '건')}
+                                        </span>
+                                      )}
+                                    {baseResult &&
+                                      typeof r.max_drawdown_pct === 'number' &&
+                                      typeof baseResult.max_drawdown_pct === 'number' && (
+                                        <span className="ml-1">
+                                          MDD {formatDelta(r.max_drawdown_pct, baseResult.max_drawdown_pct, '%p')}
+                                        </span>
+                                      )}
                                   </span>
                                   <Link href={`/backtests/${r.run_id}`} className="underline">
                                     보기
