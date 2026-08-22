@@ -399,9 +399,14 @@ def main() -> None:
             description=description,
         )
         print(f"  {rank:2d}. {r['return_pct']:+.2f}%  run_id={saved['run_id'][:12]}...", flush=True)
-        saved_summaries.append(
-            {"rank": rank, "run_id": saved["run_id"], "return_pct": round(r["return_pct"], 2), "title": title}
-        )
+        saved_summaries.append({
+            "rank": rank,
+            "run_id": saved["run_id"],
+            "return_pct": round(r["return_pct"], 2),
+            "title": title,
+            "trade_count": len(saved["trades"]),
+            "candle_count": saved["candle_count"],
+        })
 
     result_json = {"total_combos": total_combos, "elapsed_sec": round(elapsed, 1), "saved": saved_summaries}
     print("\n완료.")
