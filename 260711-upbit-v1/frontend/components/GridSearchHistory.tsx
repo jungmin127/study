@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import BacktestCoinFilter, { type CoinFilterOption } from '@/components/BacktestCoinFilter';
 import { returnRateColor } from '@/lib/return-rate-color';
-import { formatDateTime, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
+import { formatDateTime, formatFrequency, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
 import { parseGridResultTitle } from '@/lib/grid-result-title';
 import { deleteGridSearchJob, deleteGridSearchResult } from '@/lib/api/eda';
 import type { GridSearchJob, GridSearchSavedResult } from '@/lib/types/eda';
@@ -383,7 +383,7 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
                               선택 삭제{jobSelected.size > 0 ? ` (${jobSelected.size})` : ''}
                             </Button>
                           </div>
-                          <div className="grid grid-cols-[auto_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 text-sm">
+                          <div className="grid grid-cols-[auto_auto_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 text-sm">
                             {expansion.results.map((r) => {
                               const parsed = parseGridResultTitle(r.title);
                               return (
@@ -407,6 +407,9 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
                                   ) : (
                                     <span className="col-span-2">{r.title}</span>
                                   )}
+                                  <span className="text-xs text-muted-foreground">
+                                    {r.candle_count != null ? formatFrequency(r.trade_count ?? 0, r.candle_count) : '-'}
+                                  </span>
                                   <Link href={`/backtests/${r.run_id}`} className="underline">
                                     보기
                                   </Link>
