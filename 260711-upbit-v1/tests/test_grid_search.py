@@ -329,3 +329,32 @@ def test_compute_grid_results_parallel_raises_on_watchdog_timeout():
             df, buy_conditions, sell_conditions, risk_config,
             processes=1, watchdog_timeout=0,
         )
+
+
+def test_build_condition_grid_default_pool_unchanged():
+    buy_conditions, sell_conditions = build_condition_grid()
+    assert len(buy_conditions) == 138
+    assert len(sell_conditions) == 150
+
+
+def test_build_condition_grid_with_trend_pool_only():
+    buy_conditions, sell_conditions = build_condition_grid({"categories": ["추세"], "excluded_indicators": []})
+    buy_indicators = {b["indicator"] for b in buy_conditions}
+    assert buy_indicators == {"SMA_PCT", "EMA_PCT", "WMA_PCT", "MOMENTUM_PCT"}
+    # 손익(SELL_ONLY)은 풀 선택과 무관하게 항상 매도 조건에 포함된다
+    sell_indicators = {s["indicator"] for s in sell_conditions}
+    assert {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT", "HOLDING_PERIOD_BARS"} <= sell_indicators
+    assert "RSI" not in buy_indicators
+
+
+def test_build_condition_grid_excludes_individual_indicators():
+    buy_conditions, _ = build_condition_grid({"categories": ["추세"], "excluded_indicators": ["MOMENTUM_PCT"]})
+    buy_indicators = {b["indicator"] for b in buy_conditions}
+    assert buy_indicators == {"SMA_PCT", "EMA_PCT", "WMA_PCT"}
+
+
+def test_build_condition_grid_market_sentiment_pool_has_no_param_indicators():
+    buy_conditions, _ = build_condition_grid({"categories": ["시장 심리"], "excluded_indicators": []})
+    fear_greed_blocks = [b for b in buy_conditions if b["indicator"] == "FEAR_GREED_CMC"]
+    assert fear_greed_blocks
+    assert all(b["params"] == {} for b in fear_greed_blocks)

@@ -64,6 +64,71 @@ OSCILLATOR_SPECS: dict[str, dict] = {
     "ATR_PCT": {"param_grid": _period_grid(), "low": [0.5, 1, 2, 3, 5, 8], "high": [], "bidirectional": True},
 }
 
+# 아래 4개 카테고리의 low/high 값은 KRW-ETH/KRW-XRP, 1시간봉, 2026-01-01~2026-08-20 구간에서
+# 실측한 값 분포의 백분위수(p10/p20/p30/p70/p80/p90)를 반올림해 정했다(스펙 문서 참고).
+# FEAR_GREED_CMC만 표본 구간이 공포 국면에 쏠려 있어 문헌상 관례값(극단적 공포<25, 극단적 탐욕>75)으로 대체했다.
+TREND_SPECS: dict[str, dict] = {
+    "SMA_PCT": {"param_grid": _period_grid(), "low": [-1.0, -0.6, -0.3], "high": [0.3, 0.5, 0.9], "bidirectional": False},
+    "EMA_PCT": {"param_grid": _period_grid(), "low": [-0.9, -0.5, -0.3], "high": [0.25, 0.45, 0.8], "bidirectional": False},
+    "WMA_PCT": {"param_grid": _period_grid(), "low": [-0.8, -0.45, -0.25], "high": [0.2, 0.4, 0.7], "bidirectional": False},
+    "MOMENTUM_PCT": {
+        "param_grid": [{"period": p} for p in (5, 10, 20)],
+        "low": [-1.1, -0.6, -0.35], "high": [0.3, 0.6, 1.0], "bidirectional": False,
+    },
+}
+
+PRICE_LEVEL_SPECS: dict[str, dict] = {
+    "FIB_382_PCT": {"param_grid": _period_grid(), "low": [-1.8, -1.2, -0.8], "high": [0.15, 0.35, 0.7], "bidirectional": False},
+    "FIB_500_PCT": {"param_grid": _period_grid(), "low": [-1.3, -0.8, -0.5], "high": [0.4, 0.7, 1.15], "bidirectional": False},
+    "FIB_618_PCT": {"param_grid": _period_grid(), "low": [-0.85, -0.45, -0.2], "high": [0.7, 1.0, 1.6], "bidirectional": False},
+    "PIVOT_P_PCT": {"param_grid": [{}], "low": [-0.5, -0.3, -0.15], "high": [0.15, 0.3, 0.5], "bidirectional": False},
+    "PIVOT_R1_PCT": {"param_grid": [{}], "low": [-1.0, -0.65, -0.5], "high": [-0.1, 0.0, 0.17], "bidirectional": False},
+    "PIVOT_S1_PCT": {"param_grid": [{}], "low": [-0.15, 0.0, 0.1], "high": [0.45, 0.65, 0.95], "bidirectional": False},
+    "VPVR_POC_PCT": {
+        "param_grid": [{"period": p} for p in (30, 50, 70)],
+        "low": [-2.3, -1.3, -0.6], "high": [0.5, 1.0, 2.0], "bidirectional": False,
+    },
+    "VPVR_VAH_PCT": {
+        "param_grid": [{"period": p} for p in (30, 50, 70)],
+        "low": [-4.0, -2.7, -2.0], "high": [-0.3, 0.0, 0.5], "bidirectional": False,
+    },
+    "VPVR_VAL_PCT": {
+        "param_grid": [{"period": p} for p in (30, 50, 70)],
+        "low": [-0.6, 0.0, 0.35], "high": [1.7, 2.4, 3.7], "bidirectional": False,
+    },
+}
+
+VOLUME_SPECS: dict[str, dict] = {
+    "OBV_ROC": {"param_grid": _period_grid(), "low": [-45, -35, -23], "high": [12, 22, 35], "bidirectional": False},
+    "VOLUME_PCT": {"param_grid": _period_grid(), "low": [-65, -53, -43], "high": [12, 40, 95], "bidirectional": False},
+    "VPIN": {"param_grid": _period_grid(), "low": [0.4, 0.45, 0.5, 0.55], "high": [], "bidirectional": True},
+}
+
+TRADE_VALUE_SPECS: dict[str, dict] = {
+    "TRADE_VALUE_PCT": {"param_grid": _period_grid(), "low": [-65, -53, -43], "high": [12, 40, 95], "bidirectional": False},
+}
+
+MARKET_SENTIMENT_SPECS: dict[str, dict] = {
+    "MARKET_TREND_PCT": {"param_grid": _period_grid(), "low": [-0.7, -0.43, -0.24], "high": [0.22, 0.38, 0.69], "bidirectional": False},
+    "BTC_CORRELATION": {"param_grid": _period_grid(), "low": [0.6, 0.71, 0.77], "high": [0.88, 0.91, 0.93], "bidirectional": False},
+    "USDT_CORRELATION": {"param_grid": _period_grid(), "low": [-0.64, -0.54, -0.44], "high": [-0.1, 0.0, 0.17], "bidirectional": False},
+    "FEAR_GREED_CMC": {"param_grid": [{}], "low": [20, 25, 30], "high": [65, 70, 75], "bidirectional": False},
+    "KOREA_PREMIUM": {"param_grid": [{}], "low": [-0.09, -0.06, -0.03], "high": [0.05, 0.07, 0.1], "bidirectional": False},
+    "FUNDING_RATE": {"param_grid": [{}], "low": [-0.008, -0.004, -0.0025], "high": [0.004, 0.0054, 0.008], "bidirectional": False},
+}
+
+# 카테고리명은 backend/main.py의 INDICATOR_CATALOG가 쓰는 표기와 동일하게 맞춘다(프론트 폼의
+# 카테고리 체크박스 라벨이 그대로 이 dict의 키가 된다). "손익"은 여기 없다 — 포지션 청산
+# 메커니즘이라 풀 선택과 무관하게 항상 SELL_ONLY로 매도 조건에 포함된다.
+INDICATOR_POOL_SPECS: dict[str, dict[str, dict]] = {
+    "오실레이터": OSCILLATOR_SPECS,
+    "추세": TREND_SPECS,
+    "가격대": PRICE_LEVEL_SPECS,
+    "거래량": VOLUME_SPECS,
+    "거래대금": TRADE_VALUE_SPECS,
+    "시장 심리": MARKET_SENTIMENT_SPECS,
+}
+
 SELL_ONLY: dict[str, tuple[str, list[int]]] = {
     "STOP_LOSS_PCT": ("<=", [-3, -5, -7, -10]),
     "TAKE_PROFIT_PCT": (">=", [5, 10, 15, 20]),
@@ -71,17 +136,40 @@ SELL_ONLY: dict[str, tuple[str, list[int]]] = {
 }
 
 
-def build_condition_grid() -> tuple[list[dict], list[dict]]:
-    """오실레이터 9종 + 매도전용 3종의 매수/매도 ConditionBlock 그리드를 생성한다.
+def _selected_specs(pool: dict | None) -> dict[str, dict]:
+    """pool 인자를 실제로 순회할 {지표명: 스펙} dict로 해석한다.
+
+    pool이 None이면 기존 동작(오실레이터 전용)과 완전히 동일하게 OSCILLATOR_SPECS만
+    반환한다 — build_condition_grid()를 인자 없이 호출하는 기존 호출부/테스트가
+    바뀌지 않아야 하기 때문이다."""
+    if pool is None:
+        return OSCILLATOR_SPECS
+    categories = pool.get("categories") or ["오실레이터"]
+    excluded = set(pool.get("excluded_indicators") or [])
+    return {
+        indicator: spec
+        for category in categories
+        for indicator, spec in INDICATOR_POOL_SPECS.get(category, {}).items()
+        if indicator not in excluded
+    }
+
+
+def build_condition_grid(pool: dict | None = None) -> tuple[list[dict], list[dict]]:
+    """선택된 지표 풀의 매수/매도 ConditionBlock 그리드를 생성한다.
+
+    Args:
+        pool: {"categories": list[str], "excluded_indicators": list[str]} 또는 None.
+            None이면 오실레이터 9종만 순회한다(기존 동작과 동일).
 
     Returns:
         (buy_conditions, sell_conditions) — 각각 ConditionBlock 딕셔너리 리스트
         ({"indicator": str, "params": dict, "operator": str, "threshold": float}).
+        손익(SELL_ONLY) 3종은 풀 선택과 무관하게 항상 매도 조건에 포함된다.
     """
     buy_conditions: list[dict] = []
     sell_conditions: list[dict] = []
 
-    for indicator, spec in OSCILLATOR_SPECS.items():
+    for indicator, spec in _selected_specs(pool).items():
         for params in spec["param_grid"]:
             if spec["bidirectional"]:
                 for t in spec["low"]:
