@@ -175,6 +175,11 @@ export interface BacktestRunSummary {
   sell_conditions: ConditionGroup;
 }
 
+export interface IndicatorPool {
+  categories: string[];
+  excluded_indicators: string[];
+}
+
 export interface GridSearchJobRequest {
   market: string;
   timeframe: string;
@@ -182,6 +187,9 @@ export interface GridSearchJobRequest {
   start: string;
   end: string;
   top_n: number;
+  indicator_pool?: IndicatorPool;
+  base_run_id?: string;
+  combinator?: 'AND' | 'OR';
 }
 
 export interface GridSearchSavedResult {
@@ -191,6 +199,8 @@ export interface GridSearchSavedResult {
   title: string;
   trade_count?: number;
   candle_count?: number;
+  max_drawdown_pct?: number | null;
+  win_rate_pct?: number | null;
 }
 
 export interface GridSearchJob {
@@ -209,4 +219,14 @@ export interface GridSearchJob {
   elapsed_sec: number | null;
   error_message: string | null;
   result_json: GridSearchSavedResult[] | null;
+  indicator_pool: IndicatorPool | null;
+  base_run_id: string | null;
+  combinator: 'AND' | 'OR' | null;
+}
+
+export interface GridSearchEstimate {
+  buy_count: number;
+  sell_count: number;
+  total_combos: number;
+  estimated_seconds: number;
 }

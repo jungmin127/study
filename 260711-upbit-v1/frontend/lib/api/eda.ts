@@ -3,9 +3,11 @@ import type {
   BacktestDetail,
   BacktestRunSummary,
   Combo,
+  GridSearchEstimate,
   GridSearchJob,
   GridSearchJobRequest,
   IndicatorCatalogItem,
+  IndicatorPool,
   Market,
   RunBacktestRequest,
   RunBacktestResponse,
@@ -109,6 +111,14 @@ export function createGridSearchJob(req: GridSearchJobRequest): Promise<GridSear
     method: 'POST',
     body: JSON.stringify(req),
   });
+}
+
+export function getGridSearchEstimate(pool: IndicatorPool): Promise<GridSearchEstimate> {
+  const params = new URLSearchParams({
+    categories: pool.categories.join(','),
+    exclude_indicators: pool.excluded_indicators.join(','),
+  });
+  return apiFetch<GridSearchEstimate>(`/api/v1/grid-search/estimate?${params.toString()}`);
 }
 
 export function getGridSearchJobs(): Promise<GridSearchJob[]> {
