@@ -389,7 +389,7 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                               선택 삭제{jobSelected.size > 0 ? ` (${jobSelected.size})` : ''}
                             </Button>
                           </div>
-                          <div className="grid grid-cols-[auto_auto_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 text-sm">
+                          <div className="grid grid-cols-[auto_auto_auto_auto_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 text-sm">
                             {expansion.results.map((r) => {
                               const parsed = parseGridResultTitle(r.title);
                               return (
