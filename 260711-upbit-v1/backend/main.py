@@ -653,6 +653,8 @@ def get_backtest_runs(market: str | None = Query(None)) -> list[dict]:
             "sharpe": r["sharpe"],
             "max_drawdown": r["max_drawdown"],
             "top_trade_contribution_pct": top_trade_contribution_pct(trades),
+            "trade_count": len(trades),
+            "candle_count": r["candle_count"],
             "is_live": is_live,
             "last_trade_status": last_trade_status,
             "buy_conditions": r["buy_conditions"],

@@ -1554,6 +1554,51 @@ def test_get_backtests_top_trade_contribution_pct_none_without_wins(monkeypatch,
     assert body[0]["top_trade_contribution_pct"] is None
 
 
+def test_get_backtests_includes_trade_count_and_candle_count(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={
+            "final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [],
+            "trades": [
+                {
+                    "entryTime": "2026-01-01T00:00:00", "exitTime": "2026-01-02T00:00:00",
+                    "entryPrice": 100.0, "exitPrice": 105.0, "returnRate": 5.0,
+                    "holdingPeriod": 1, "pnl": 50.0, "forceClosed": False, "size": 100.0,
+                },
+            ],
+            "candle_count": 240,
+        },
+    )
+
+    resp = client.get("/api/v1/backtests")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["trade_count"] == 1
+    assert body[0]["candle_count"] == 240
+
+
+def test_get_backtests_candle_count_is_none_when_not_backfilled(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10000.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    resp = client.get("/api/v1/backtests")
+    body = resp.json()
+    assert body[0]["trade_count"] == 0
+    assert body[0]["candle_count"] is None
+
+
 def test_get_backtests_created_at_has_utc_offset(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     save_result(
