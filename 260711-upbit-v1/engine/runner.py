@@ -159,7 +159,7 @@ def run_backtest(
         strategy_params: 전략 파라미터 (addstrategy에 키워드 인수로 전달)
 
     Returns:
-        {equity_curve, trades, final_value, sharpe, max_drawdown}
+        {equity_curve, trades, final_value, sharpe, max_drawdown, candle_count}
     """
     if strategy_params is None:
         strategy_params = {}
@@ -214,11 +214,11 @@ def run_backtest(
     # 상세페이지(metrics.mdd)에 정반대 부호로 표시된다.
     max_drawdown_pct = -_raw_max_drawdown if _raw_max_drawdown is not None else None
 
+    total_bars = len(df_bt)
     open_trades = strategy.analyzers.trades.get_open_trades()
     if open_trades:
         last_close = float(df_bt["close"].iloc[-1])
         last_dt = df_bt.index[-1].isoformat()
-        total_bars = len(df_bt)
 
         for ot in open_trades:
             trades.append(_build_forced_close_trade(
@@ -238,6 +238,7 @@ def run_backtest(
         "final_value": final_value,
         "sharpe": sharpe_ratio,
         "max_drawdown": max_drawdown_pct,
+        "candle_count": total_bars,
     }
 
 

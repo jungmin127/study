@@ -191,3 +191,19 @@ def test_run_backtest_with_trade_value_column_exposes_data_trade_value_line():
 
     assert captured[0] == df["trade_value"].iloc[0]
     assert captured[-1] == df["trade_value"].iloc[-1]
+
+
+def test_run_backtest_includes_candle_count():
+    df = _make_synthetic_df(n=30)
+    result = run_backtest(
+        df=df,
+        strategy_cls=BuyAndHoldOnce,
+        risk_config={
+            "initial_capital": 10000,
+            "commission_rate": 0.001,
+            "position_sizing": "percent",
+            "position_size": 100,
+        },
+    )
+
+    assert result["candle_count"] == 30
