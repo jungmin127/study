@@ -34,6 +34,7 @@
 
 ## 1차 grid search: 지표 풀 선택
 
+- **원칙: 그리드 풀에는 정규화(유계) 지표만 넣는다.** 기존 오실레이터 9종은 애초에 전부 정규화값(RSI 0~100, %B 0~1, ATR_PCT는 가격 대비 %, PPO는 EMA 차이의 % 등)이라 이 원칙이 이미 지켜지고 있었다. 새로 추가하는 카테고리도 동일 원칙을 따른다 — `SMA`/`FIB_382`/`PIVOT_P`/`VPVR_POC`/`VOLUME`/`TRADE_VALUE`/`OBV`/`MARKET_TREND`처럼 원시 가격·거래량 스케일인 지표는 제외하고, 그 정규화 버전(`SMA_PCT`, `FIB_382_PCT`, `PIVOT_P_PCT`, `VPVR_POC_PCT`, `VOLUME_PCT`, `TRADE_VALUE_PCT`, `OBV_ROC`, `MARKET_TREND_PCT`)이나 원래부터 유계인 지표(VPIN 0~1, BTC/USDT_CORRELATION -1~1, FEAR_GREED_CMC 0~100, KOREA_PREMIUM/FUNDING_RATE %)만 포함한다. 이유는 코인 간 재사용성뿐 아니라, 같은 코인의 한 백테스트 구간 안에서도 가격이 크게 이동하면 고정된 절대값 threshold는 구간 초반에만 잠깐 발동하고 이후로는 무의미해지기 때문이다 — 그리드서치의 threshold 하나가 테스트 구간 전체에서 의미를 가지려면 정규화가 필수다. 이 원칙에 따라 `INDICATOR_CATALOG`의 59개 지표 중 오실레이터 외 카테고리에서는 23개만 그리드 풀에 포함된다(나머지는 위 원시값 지표들과 그 쌍).
 - `scripts/grid_search.py`의 `OSCILLATOR_SPECS`를 카테고리별 스펙 레지스트리로 일반화한다(`INDICATOR_CATALOG`의 7개 카테고리를 그대로 따름). `build_condition_grid()`는 선택된 카테고리/지표 집합을 인자로 받아 그 풀에 한해서만 조합을 생성하도록 변경한다. 인자를 안 주면 지금처럼 오실레이터만(기존 기본 동작 보존).
 - 오실레이터 외 지표의 임계값 그리드(예: RSI의 `low=[20,30,40]`에 대응하는 값)는 지금처럼 사람이 큐레이션한다. 구현 계획 단계에서 각 지표의 실제 값 분포를 분석해 합리적인 기본 그리드를 지표별로 제안하고, 필요하면 리뷰 후 조정한다.
 - 프론트 `GridSearchForm.tsx`에 "지표 풀 선택" 섹션을 추가한다: 7개 카테고리 체크박스(기본값 = 오실레이터만 체크, 기존 폼 동작과 동일)와, 펼치면 카테고리 내 개별 지표를 체크 해제할 수 있는 세부조정 UI.
