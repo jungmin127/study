@@ -14,10 +14,12 @@ from engine.cache import (
     list_combined_ranking,
     list_distinct_combos,
     list_latest_sweep_results,
+    list_runs_missing_candle_count,
     list_segment_classification,
     list_sweep_history,
     save_segment_classification,
     save_sweep_result,
+    set_candle_count,
     list_trend_segments,
     save_trend_segments,
 )
@@ -873,3 +875,80 @@ def test_list_backtest_runs_without_market_returns_all(monkeypatch, tmp_path):
     runs = list_backtest_runs()
 
     assert {r["run_id"] for r in runs} == {"btc-run", "eth-run"}
+
+
+def test_save_result_stores_and_returns_candle_count(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy",
+        strategy_params={"buy_conditions": {}, "sell_conditions": {}},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={
+            "final_value": 10500.0, "sharpe": None, "max_drawdown": None,
+            "equity_curve": [], "trades": [], "candle_count": 240,
+        },
+    )
+
+    loaded = load_result("r1")
+    assert loaded["candle_count"] == 240
+
+    runs = list_backtest_runs()
+    assert runs[0]["candle_count"] == 240
+
+
+def test_save_result_without_candle_count_stores_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    loaded = load_result("r1")
+    assert loaded["candle_count"] is None
+
+
+def test_list_runs_missing_candle_count_returns_only_null_rows(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id="has-count", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={
+            "final_value": 10500.0, "sharpe": None, "max_drawdown": None,
+            "equity_curve": [], "trades": [], "candle_count": 100,
+        },
+    )
+    save_result(
+        run_id="missing-count", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-ETH", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    missing = list_runs_missing_candle_count()
+    assert [r["run_id"] for r in missing] == ["missing-count"]
+    assert missing[0]["market"] == "KRW-ETH"
+    assert missing[0]["timeframe"] == "days"
+
+
+def test_set_candle_count_updates_existing_row(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    save_result(
+        run_id="r1", strategy_name="ConditionTreeStrategy", strategy_params={},
+        market="KRW-BTC", timeframe="days",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc), end=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        risk_config={"initial_capital": 10000},
+        result={"final_value": 10500.0, "sharpe": None, "max_drawdown": None, "equity_curve": [], "trades": []},
+    )
+
+    set_candle_count("r1", 365)
+
+    assert load_result("r1")["candle_count"] == 365
+    assert list_runs_missing_candle_count() == []

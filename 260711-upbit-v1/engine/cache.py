@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS backtest_results (
     sharpe REAL,
     max_drawdown REAL,
     equity_curve_json TEXT NOT NULL,
-    trades_json TEXT NOT NULL
+    trades_json TEXT NOT NULL,
+    candle_count INTEGER
 );
 """
 
@@ -181,6 +182,10 @@ def _connect() -> sqlite3.Connection:
             conn.execute(f"ALTER TABLE backtest_runs ADD COLUMN {column} TEXT")
         except sqlite3.OperationalError:
             pass
+    try:
+        conn.execute("ALTER TABLE backtest_results ADD COLUMN candle_count INTEGER")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 
@@ -189,6 +194,7 @@ def load_result(run_id: str) -> dict | None:
     try:
         row = conn.execute(
             "SELECT res.final_value, res.sharpe, res.max_drawdown, res.equity_curve_json, res.trades_json, "
+            "       res.candle_count, "
             "       r.market, r.timeframe, r.start, r.end, r.risk_config_json, "
             "       r.title, r.description, r.created_at "
             "FROM backtest_results res "
@@ -202,7 +208,7 @@ def load_result(run_id: str) -> dict | None:
     if row is None:
         return None
 
-    (final_value, sharpe, max_drawdown, equity_curve_json, trades_json,
+    (final_value, sharpe, max_drawdown, equity_curve_json, trades_json, candle_count,
      market, timeframe, start, end, risk_config_json,
      title, description, created_at) = row
     risk_config = json.loads(risk_config_json)
@@ -214,6 +220,7 @@ def load_result(run_id: str) -> dict | None:
         "max_drawdown": max_drawdown,
         "equity_curve": json.loads(equity_curve_json),
         "trades": json.loads(trades_json),
+        "candle_count": candle_count,
         "market": market,
         "timeframe": timeframe,
         "start": start,
@@ -326,8 +333,8 @@ def save_result(
         )
         conn.execute(
             "INSERT OR REPLACE INTO backtest_results "
-            "(run_id, final_value, sharpe, max_drawdown, equity_curve_json, trades_json) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "(run_id, final_value, sharpe, max_drawdown, equity_curve_json, trades_json, candle_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 result["final_value"],
@@ -335,6 +342,7 @@ def save_result(
                 result["max_drawdown"],
                 json.dumps(result["equity_curve"]),
                 json.dumps(result["trades"]),
+                result.get("candle_count"),
             ),
         )
         conn.commit()
@@ -519,7 +527,7 @@ def list_backtest_runs(
         rows = conn.execute(
             "SELECT r.id, r.title, r.description, r.market, r.timeframe, r.start, r.end, "
             "       r.created_at, r.risk_config_json, r.params_json, "
-            "       res.final_value, res.sharpe, res.max_drawdown, res.trades_json "
+            "       res.final_value, res.sharpe, res.max_drawdown, res.trades_json, res.candle_count "
             "FROM backtest_runs r "
             "JOIN backtest_results res ON res.run_id = r.id "
             f"WHERE {where} "
@@ -536,7 +544,7 @@ def list_backtest_runs(
     for row in rows:
         (run_id, title, description, market_val, timeframe, start, end,
          created_at, risk_config_json, params_json,
-         final_value, sharpe, max_drawdown, trades_json) = row
+         final_value, sharpe, max_drawdown, trades_json, candle_count) = row
         risk_config = json.loads(risk_config_json)
         initial_capital = risk_config.get("initial_capital")
         commission_rate = risk_config.get("commission_rate", 0.0005)
@@ -558,6 +566,7 @@ def list_backtest_runs(
             "return_rate": return_rate,
             "sharpe": sharpe,
             "max_drawdown": max_drawdown,
+            "candle_count": candle_count,
             "initial_capital": initial_capital,
             "commission_rate": commission_rate,
             "trades": json.loads(trades_json),
@@ -565,6 +574,38 @@ def list_backtest_runs(
             "sell_conditions": params["sell_conditions"],
         })
     return runs
+
+
+def list_runs_missing_candle_count() -> list[dict]:
+    """candle_count가 아직 채워지지 않은(candle_count 컬럼 도입 이전에 저장된) run들을
+    market/timeframe/start/end와 함께 반환한다. scripts/backfill_candle_count.py 전용."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT r.id, r.market, r.timeframe, r.start, r.end "
+            "FROM backtest_runs r "
+            "JOIN backtest_results res ON res.run_id = r.id "
+            "WHERE res.candle_count IS NULL"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        {"run_id": run_id, "market": market, "timeframe": timeframe, "start": start, "end": end}
+        for run_id, market, timeframe, start, end in rows
+    ]
+
+
+def set_candle_count(run_id: str, candle_count: int) -> None:
+    """scripts/backfill_candle_count.py 전용: 이미 저장된 run의 candle_count만 갱신한다."""
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE backtest_results SET candle_count = ? WHERE run_id = ?",
+            (candle_count, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def save_segment_classification(rows: list[dict]) -> None:
