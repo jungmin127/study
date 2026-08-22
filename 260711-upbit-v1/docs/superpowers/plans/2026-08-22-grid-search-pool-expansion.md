@@ -968,6 +968,56 @@ git commit -m "feat: grid search 서비스 레이어가 지표 풀/체이닝 인
 
 ---
 
+## Task 5.5 (계획에 없던 필수 리팩터): 지표 풀 스펙을 engine/grid_search_pool.py로 추출
+
+Task 6를 실제로 구현하는 과정에서 순환 임포트가 발견됐다: `backend/main.py`가 `scripts/grid_search.py`의 `INDICATOR_POOL_SPECS`/`build_condition_grid`를 임포트해야 하는데, `scripts/grid_search.py`는 이미 Task 3에서 `backend/main.py`의 `_fetch_backtest_dataframe`를 임포트하고 있어 서로를 임포트하는 순환 구조가 된다. `_fetch_backtest_dataframe`는 `HTTPException`을 던지는 등 FastAPI API 계층에 결합돼 있어 `backend/main.py`에 남는 게 자연스럽고(다른 엔드포인트와도 공유됨), 반대로 `OSCILLATOR_SPECS`/`TREND_SPECS`/`PRICE_LEVEL_SPECS`/`VOLUME_SPECS`/`TRADE_VALUE_SPECS`/`MARKET_SENTIMENT_SPECS`/`SELL_ONLY`/`INDICATOR_POOL_SPECS`/`_selected_specs`/`build_condition_grid`는 순수 데이터/순수 함수라 FastAPI 의존이 전혀 없다. 이 순수 부분을 새 파일 `engine/grid_search_pool.py`로 옮기고, `scripts/grid_search.py`는 거기서 다시 임포트해 기존 이름(`from scripts.grid_search import build_condition_grid` 같은 기존 테스트의 임포트 경로)을 그대로 유지한다. 이렇게 하면 의존 방향이 `scripts/grid_search.py → engine/grid_search_pool.py`, `scripts/grid_search.py → backend/main.py`, `backend/main.py → engine/grid_search_pool.py`로 전부 단방향이 되어 순환이 사라진다.
+
+**Files:**
+- Create: `engine/grid_search_pool.py`
+- Modify: `scripts/grid_search.py` (해당 스펙/함수 정의를 제거하고 `engine/grid_search_pool.py`에서 임포트)
+- Test: `tests/test_grid_search.py` (기존 테스트는 수정 없이 그대로 통과해야 함 — `from scripts.grid_search import build_condition_grid` 등 기존 임포트 경로가 깨지지 않아야 한다)
+
+- [ ] **Step 1: engine/grid_search_pool.py 생성**
+
+`scripts/grid_search.py`에서 `OSCILLATOR_SPECS`부터 `build_condition_grid` 함수 끝까지(Task 2가 추가한 `TREND_SPECS`/`PRICE_LEVEL_SPECS`/`VOLUME_SPECS`/`TRADE_VALUE_SPECS`/`MARKET_SENTIMENT_SPECS`/`INDICATOR_POOL_SPECS`/`SELL_ONLY`/`_selected_specs`/`build_condition_grid` 전체, `_period_grid` 헬퍼 포함)를 그대로 `engine/grid_search_pool.py`로 옮긴다. 이 파일은 `from __future__ import annotations` 외에 다른 이 프로젝트 모듈을 임포트하지 않아야 한다(순수 데이터/함수만 담아야 순환을 만들지 않는다).
+
+- [ ] **Step 2: scripts/grid_search.py에서 옮긴 부분을 제거하고 재임포트**
+
+`scripts/grid_search.py` 상단에 추가:
+
+```python
+from engine.grid_search_pool import (
+    INDICATOR_POOL_SPECS,
+    MARKET_SENTIMENT_SPECS,
+    OSCILLATOR_SPECS,
+    PRICE_LEVEL_SPECS,
+    SELL_ONLY,
+    TRADE_VALUE_SPECS,
+    TREND_SPECS,
+    VOLUME_SPECS,
+    build_condition_grid,
+)
+```
+
+옮긴 정의들(원래 있던 자리)은 삭제한다. `_wrap_condition`/`_run_one_combo`/`_init_worker`/`compute_grid_results`/`compute_grid_results_parallel`/`main()` 등 체이닝·CLI 로직은 전부 `scripts/grid_search.py`에 그대로 남는다(이 부분은 `argparse`/서브프로세스 전용이라 `engine/`으로 옮길 이유가 없다).
+
+- [ ] **Step 3: 회귀 테스트**
+
+Run: `PYTHONPATH=. PYTHONIOENCODING=utf-8 python -m pytest tests/test_grid_search.py tests/test_grid_search_service.py -v`
+Expected: 기존 테스트 전부 그대로 통과(수정 없이) — `from scripts.grid_search import build_condition_grid, ...` 임포트 경로가 재익스포트 덕분에 그대로 유효해야 한다.
+
+Run: `PYTHONPATH=. python -c "import backend.main; import scripts.grid_search"` (두 모듈을 이 순서로 임포트해도, 반대 순서로 임포트해도 에러가 없어야 함 — 반대 순서도 확인: `PYTHONPATH=. python -c "import scripts.grid_search; import backend.main"`)
+Expected: 둘 다 에러 없이 종료.
+
+- [ ] **Step 4: 커밋**
+
+```bash
+git add engine/grid_search_pool.py scripts/grid_search.py
+git commit -m "refactor: 지표 풀 스펙을 engine/grid_search_pool.py로 분리 (backend/scripts 순환 임포트 해소)"
+```
+
+---
+
 ## Task 6: backend/main.py — API 확장 (요청 모델/검증/예상치 엔드포인트)
 
 **Files:**
@@ -1034,7 +1084,7 @@ Expected: FAIL — 404(엔드포인트 없음) / 검증 로직 없어 200 반환
 
 ```python
 from engine.cache import get_run_config  # 이미 다른 목적으로 import돼 있다면 생략
-from scripts.grid_search import INDICATOR_POOL_SPECS, build_condition_grid
+from engine.grid_search_pool import INDICATOR_POOL_SPECS, build_condition_grid
 ```
 
 `backend/main.py:1082-1088`을 교체:
