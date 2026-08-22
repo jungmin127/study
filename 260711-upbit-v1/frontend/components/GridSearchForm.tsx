@@ -62,8 +62,14 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
 
   useEffect(() => {
     getGridSearchEstimate({ categories: selectedCategories, excluded_indicators: [] })
-      .then(setEstimate)
-      .catch(() => setEstimateError('예상 조합수를 불러오지 못했습니다.'));
+      .then((data) => {
+        setEstimate(data);
+        setEstimateError(null);
+      })
+      .catch(() => {
+        setEstimateError('예상 조합수를 불러오지 못했습니다.');
+        setEstimate(null);
+      });
   }, [selectedCategories]);
 
   function toggleCategory(category: string, checked: boolean) {
