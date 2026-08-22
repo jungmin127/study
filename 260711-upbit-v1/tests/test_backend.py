@@ -2329,6 +2329,49 @@ def test_create_grid_search_job_returns_409_when_already_running(monkeypatch, tm
     assert resp.status_code == 409
 
 
+def test_grid_search_estimate_endpoint_returns_combo_counts(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/grid-search/estimate", params={"categories": "추세"})
+    assert resp.status_code == 200
+    data = resp.json()
+    # SMA_PCT/EMA_PCT/WMA_PCT/MOMENTUM_PCT * 3 param_grid values * 3 low thresholds each
+    assert data["buy_count"] == 36
+    assert data["total_combos"] == data["buy_count"] * data["sell_count"]
+    assert data["estimated_seconds"] > 0
+
+
+def test_create_grid_search_job_rejects_base_run_id_without_combinator(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-ETH"}])
+    monkeypatch.setattr(backend_module, "start_job", lambda **kwargs: "should-not-be-called")
+    resp = client.post(
+        "/api/v1/grid-search/jobs",
+        json={
+            "market": "KRW-ETH", "timeframe": "minutes60", "capital": 1000000,
+            "start": "2026-01-01", "end": "2026-02-01", "top_n": 10,
+            "base_run_id": "some-run-id",
+        },
+    )
+    assert resp.status_code == 400
+    assert "combinator" in resp.json()["detail"]
+
+
+def test_create_grid_search_job_rejects_deleted_base_run_id(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-ETH"}])
+    monkeypatch.setattr(backend_module, "get_run_config", lambda run_id: None)
+    resp = client.post(
+        "/api/v1/grid-search/jobs",
+        json={
+            "market": "KRW-ETH", "timeframe": "minutes60", "capital": 1000000,
+            "start": "2026-01-01", "end": "2026-02-01", "top_n": 10,
+            "base_run_id": "deleted-run-id", "combinator": "AND",
+        },
+    )
+    assert resp.status_code == 400
+    assert "베이스 결과" in resp.json()["detail"]
+
+
 def test_list_grid_search_jobs_returns_saved_jobs(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     from engine.cache import create_grid_search_job

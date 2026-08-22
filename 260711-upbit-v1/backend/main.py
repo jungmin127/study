@@ -69,6 +69,7 @@ from backend.grid_search_service import (
     reset_active_job,
     start_job,
 )
+from engine.grid_search_pool import INDICATOR_POOL_SPECS, build_condition_grid
 import httpx
 
 import trading.db as trading_db
@@ -1086,6 +1087,9 @@ class GridSearchJobRequest(BaseModel):
     start: str
     end: str
     top_n: int = 20
+    indicator_pool: dict | None = None
+    base_run_id: str | None = None
+    combinator: str | None = None
 
 
 def _validate_grid_search_request(req: GridSearchJobRequest) -> list[str]:
@@ -1111,6 +1115,21 @@ def _validate_grid_search_request(req: GridSearchJobRequest) -> list[str]:
     krw_markets = {m["market"] for m in get_krw_markets()}
     if req.market not in krw_markets:
         errors.append(f"{req.market}은(는) 업비트 KRW 마켓 목록에 없습니다.")
+
+    if req.indicator_pool is not None:
+        categories = req.indicator_pool.get("categories") or []
+        if not categories:
+            errors.append("지표 카테고리를 최소 1개 이상 선택하세요.")
+        unknown_categories = set(categories) - set(INDICATOR_POOL_SPECS)
+        if unknown_categories:
+            errors.append(f"알 수 없는 지표 카테고리입니다: {', '.join(sorted(unknown_categories))}")
+
+    if req.base_run_id is not None:
+        if req.combinator not in ("AND", "OR"):
+            errors.append("base_run_id를 지정하면 combinator(AND 또는 OR)도 함께 지정해야 합니다.")
+        elif get_run_config(req.base_run_id) is None:
+            errors.append(f"베이스 결과를 찾을 수 없습니다(삭제되었을 수 있습니다): {req.base_run_id}")
+
     return errors
 
 
@@ -1132,6 +1151,7 @@ def create_grid_search_job_endpoint(req: GridSearchJobRequest) -> dict:
         job_id = start_job(
             market=req.market, timeframe=req.timeframe, capital=req.capital,
             start=req.start, end=req.end, top_n=req.top_n,
+            indicator_pool=req.indicator_pool, base_run_id=req.base_run_id, combinator=req.combinator,
         )
     except JobAlreadyRunningError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1139,6 +1159,28 @@ def create_grid_search_job_endpoint(req: GridSearchJobRequest) -> dict:
     job = get_grid_search_job(job_id)
     assert job is not None
     return _grid_search_job_response(job)
+
+
+# 20,700개 조합/워커4개 기준 완료된 로컬 job들의 실측 elapsed_sec에서 뽑은 처리량
+# (data/backtest_results.db의 grid_search_jobs 이력, 이상치 1건 제외 중앙값 약 11.3
+# combos/sec) — 워커 수/머신 성능이 바뀌면 재보정이 필요하다.
+_ESTIMATED_COMBOS_PER_SEC = 11.0
+
+
+@app.get("/api/v1/grid-search/estimate")
+def estimate_grid_search_endpoint(categories: str = "", exclude_indicators: str = "") -> dict:
+    pool = {
+        "categories": [c.strip() for c in categories.split(",") if c.strip()] or ["오실레이터"],
+        "excluded_indicators": [i.strip() for i in exclude_indicators.split(",") if i.strip()],
+    }
+    buy_conditions, sell_conditions = build_condition_grid(pool)
+    total_combos = len(buy_conditions) * len(sell_conditions)
+    return {
+        "buy_count": len(buy_conditions),
+        "sell_count": len(sell_conditions),
+        "total_combos": total_combos,
+        "estimated_seconds": round(total_combos / _ESTIMATED_COMBOS_PER_SEC, 1),
+    }
 
 
 @app.get("/api/v1/grid-search/jobs")
