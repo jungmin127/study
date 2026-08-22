@@ -167,6 +167,8 @@ export interface BacktestRunSummary {
   sharpe: number | null;
   max_drawdown: number | null;
   top_trade_contribution_pct: number | null;
+  trade_count: number;
+  candle_count: number | null;
   is_live: boolean;
   last_trade_status: 'open' | 'closed' | 'none';
   buy_conditions: ConditionGroup;
@@ -187,6 +189,8 @@ export interface GridSearchSavedResult {
   run_id: string;
   return_pct: number;
   title: string;
+  trade_count?: number;
+  candle_count?: number;
 }
 
 export interface GridSearchJob {

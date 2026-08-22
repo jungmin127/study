@@ -69,3 +69,9 @@ export function formatCapital(digits: string): string {
   if (!digits) return '';
   return Number(digits).toLocaleString('ko-KR');
 }
+
+export function formatFrequency(tradeCount: number, candleCount: number | null | undefined): string {
+  if (candleCount == null) return '-';
+  const pct = candleCount > 0 ? (tradeCount / candleCount) * 100 : 0;
+  return `${tradeCount} / ${candleCount} (${pct.toFixed(1)}%)`;
+}
