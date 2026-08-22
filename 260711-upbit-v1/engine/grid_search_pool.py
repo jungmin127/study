@@ -114,31 +114,50 @@ SELL_ONLY: dict[str, tuple[str, list[int]]] = {
     "HOLDING_PERIOD_BARS": (">=", [5, 10, 20, 40]),
 }
 
+# 대상 마켓이 이 지표가 비교 대상으로 삼는 마켓 자신이면 자기상관(항상 정확히 1.0)으로
+# 퇴화한다 — RollingCorrelation(data.close, data.btc_close, ...)에서 market==KRW-BTC면
+# data.close와 data.btc_close가 같은 라인이 되기 때문(engine/indicators/market.py 참고).
+# 크래시는 안 나지만 threshold와 무관하게 조건이 항상 참/거짓으로 고정돼 그리드서치
+# 결과를 의미 없이 오염시키므로, 해당 마켓을 백테스트할 때는 풀에서 제외한다.
+SELF_CORRELATION_INDICATORS: dict[str, str] = {
+    "KRW-BTC": "BTC_CORRELATION",
+    "KRW-USDT": "USDT_CORRELATION",
+}
 
-def _selected_specs(pool: dict | None) -> dict[str, dict]:
+
+def _selected_specs(pool: dict | None, market: str | None = None) -> dict[str, dict]:
     """pool 인자를 실제로 순회할 {지표명: 스펙} dict로 해석한다.
 
     pool이 None이면 기존 동작(오실레이터 전용)과 완전히 동일하게 OSCILLATOR_SPECS만
     반환한다 — build_condition_grid()를 인자 없이 호출하는 기존 호출부/테스트가
-    바뀌지 않아야 하기 때문이다."""
+    바뀌지 않아야 하기 때문이다. market이 SELF_CORRELATION_INDICATORS에 등록된
+    마켓이면(KRW-BTC/KRW-USDT) 그 마켓 자신과의 자기상관 지표를 결과에서 제외한다."""
     if pool is None:
-        return OSCILLATOR_SPECS
-    categories = pool.get("categories") or ["오실레이터"]
-    excluded = set(pool.get("excluded_indicators") or [])
-    return {
-        indicator: spec
-        for category in categories
-        for indicator, spec in INDICATOR_POOL_SPECS.get(category, {}).items()
-        if indicator not in excluded
-    }
+        specs = dict(OSCILLATOR_SPECS)
+    else:
+        categories = pool.get("categories") or ["오실레이터"]
+        excluded = set(pool.get("excluded_indicators") or [])
+        specs = {
+            indicator: spec
+            for category in categories
+            for indicator, spec in INDICATOR_POOL_SPECS.get(category, {}).items()
+            if indicator not in excluded
+        }
+    self_correlation_indicator = SELF_CORRELATION_INDICATORS.get(market or "")
+    if self_correlation_indicator:
+        specs.pop(self_correlation_indicator, None)
+    return specs
 
 
-def build_condition_grid(pool: dict | None = None) -> tuple[list[dict], list[dict]]:
+def build_condition_grid(pool: dict | None = None, market: str | None = None) -> tuple[list[dict], list[dict]]:
     """선택된 지표 풀의 매수/매도 ConditionBlock 그리드를 생성한다.
 
     Args:
         pool: {"categories": list[str], "excluded_indicators": list[str]} 또는 None.
             None이면 오실레이터 9종만 순회한다(기존 동작과 동일).
+        market: 백테스트 대상 마켓코드(예: "KRW-BTC"). SELF_CORRELATION_INDICATORS에
+            등록된 마켓이면 자기상관으로 퇴화하는 지표를 풀에서 제외한다. None이면
+            제외 없이 기존 동작과 동일하다.
 
     Returns:
         (buy_conditions, sell_conditions) — 각각 ConditionBlock 딕셔너리 리스트
@@ -148,7 +167,7 @@ def build_condition_grid(pool: dict | None = None) -> tuple[list[dict], list[dic
     buy_conditions: list[dict] = []
     sell_conditions: list[dict] = []
 
-    for indicator, spec in _selected_specs(pool).items():
+    for indicator, spec in _selected_specs(pool, market).items():
         for params in spec["param_grid"]:
             if spec["bidirectional"]:
                 for t in spec["low"]:

@@ -381,7 +381,7 @@ def main() -> None:
         hour=23, minute=59, second=59, tzinfo=timezone.utc
     )
 
-    buy_conditions, sell_conditions = build_condition_grid(pool)
+    buy_conditions, sell_conditions = build_condition_grid(pool, market=args.market)
     total_combos = len(buy_conditions) * len(sell_conditions)
     print(
         f"[2] 매수 조건 {len(buy_conditions)}개 x 매도 조건 {len(sell_conditions)}개 = 총 {total_combos:,}개 조합",

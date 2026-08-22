@@ -390,6 +390,35 @@ def test_build_condition_grid_market_sentiment_pool_has_no_param_indicators():
     assert all(b["params"] == {} for b in fear_greed_blocks)
 
 
+def test_build_condition_grid_excludes_btc_correlation_for_krw_btc_market():
+    """KRW-BTC를 백테스트하면 BTC_CORRELATION은 대상 코인 종가와 KRW-BTC 종가를 비교하는
+    자기상관이 되어 항상 정확히 1.0으로 퇴화한다(engine/indicators/market.py의
+    RollingCorrelation(data.close, data.btc_close, ...) 참고) — 풀에서 제외해야 한다."""
+    buy_conditions, sell_conditions = build_condition_grid(
+        {"categories": ["시장 심리"], "excluded_indicators": []}, market="KRW-BTC"
+    )
+    indicators = {b["indicator"] for b in buy_conditions} | {s["indicator"] for s in sell_conditions}
+    assert "BTC_CORRELATION" not in indicators
+    assert "USDT_CORRELATION" in indicators  # 다른 마켓의 자기상관 지표는 영향받지 않는다
+
+
+def test_build_condition_grid_excludes_usdt_correlation_for_krw_usdt_market():
+    buy_conditions, sell_conditions = build_condition_grid(
+        {"categories": ["시장 심리"], "excluded_indicators": []}, market="KRW-USDT"
+    )
+    indicators = {b["indicator"] for b in buy_conditions} | {s["indicator"] for s in sell_conditions}
+    assert "USDT_CORRELATION" not in indicators
+    assert "BTC_CORRELATION" in indicators
+
+
+def test_build_condition_grid_keeps_correlation_indicators_for_other_markets():
+    buy_conditions, _ = build_condition_grid(
+        {"categories": ["시장 심리"], "excluded_indicators": []}, market="KRW-ETH"
+    )
+    indicators = {b["indicator"] for b in buy_conditions}
+    assert {"BTC_CORRELATION", "USDT_CORRELATION"} <= indicators
+
+
 def test_wrap_condition_without_base_matches_existing_shape():
     from scripts.grid_search import _wrap_condition
 
@@ -446,7 +475,7 @@ def test_main_parses_categories_and_exclude_indicators_args(monkeypatch, capsys)
 
     captured_pool = {}
 
-    def fake_build_condition_grid(pool=None):
+    def fake_build_condition_grid(pool=None, market=None):
         captured_pool["pool"] = pool
         return [], []
 
@@ -491,7 +520,7 @@ def test_main_includes_base_conditions_in_aux_data_detection(monkeypatch):
     )
     monkeypatch.setattr(
         grid_search, "build_condition_grid",
-        lambda pool=None: (
+        lambda pool=None, market=None: (
             [{"indicator": "SMA_PCT", "params": {"period": 20}, "operator": "<", "threshold": -1.0}],
             [{"indicator": "EMA_PCT", "params": {"period": 20}, "operator": ">", "threshold": 1.0}],
         ),

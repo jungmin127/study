@@ -61,7 +61,7 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
   }, []);
 
   useEffect(() => {
-    getGridSearchEstimate({ categories: selectedCategories, excluded_indicators: [] })
+    getGridSearchEstimate({ categories: selectedCategories, excluded_indicators: [] }, market)
       .then((data) => {
         setEstimate(data);
         setEstimateError(null);
@@ -70,7 +70,7 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
         setEstimateError('예상 조합수를 불러오지 못했습니다.');
         setEstimate(null);
       });
-  }, [selectedCategories]);
+  }, [selectedCategories, market]);
 
   function toggleCategory(category: string, checked: boolean) {
     setSelectedCategories((prev) =>

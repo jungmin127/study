@@ -113,10 +113,11 @@ export function createGridSearchJob(req: GridSearchJobRequest): Promise<GridSear
   });
 }
 
-export function getGridSearchEstimate(pool: IndicatorPool): Promise<GridSearchEstimate> {
+export function getGridSearchEstimate(pool: IndicatorPool, market?: string): Promise<GridSearchEstimate> {
   const params = new URLSearchParams({
     categories: pool.categories.join(','),
     exclude_indicators: pool.excluded_indicators.join(','),
+    ...(market ? { market } : {}),
   });
   return apiFetch<GridSearchEstimate>(`/api/v1/grid-search/estimate?${params.toString()}`);
 }

@@ -1168,12 +1168,12 @@ _ESTIMATED_COMBOS_PER_SEC = 11.0
 
 
 @app.get("/api/v1/grid-search/estimate")
-def estimate_grid_search_endpoint(categories: str = "", exclude_indicators: str = "") -> dict:
+def estimate_grid_search_endpoint(categories: str = "", exclude_indicators: str = "", market: str = "") -> dict:
     pool = {
         "categories": [c.strip() for c in categories.split(",") if c.strip()] or ["오실레이터"],
         "excluded_indicators": [i.strip() for i in exclude_indicators.split(",") if i.strip()],
     }
-    buy_conditions, sell_conditions = build_condition_grid(pool)
+    buy_conditions, sell_conditions = build_condition_grid(pool, market=market or None)
     total_combos = len(buy_conditions) * len(sell_conditions)
     return {
         "buy_count": len(buy_conditions),
