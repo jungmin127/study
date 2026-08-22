@@ -785,6 +785,37 @@ def test_delete_grid_search_job_returns_false_for_missing_job(monkeypatch, tmp_p
     assert delete_grid_search_job("does-not-exist") is False
 
 
+def test_create_grid_search_job_persists_chaining_fields(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    job_id = "test-chain-job-1"
+    create_grid_search_job(
+        job_id=job_id, market="KRW-ETH", timeframe="minutes60", capital=1_000_000,
+        start="2026-01-01", end="2026-02-01", top_n=10,
+        indicator_pool_json=json.dumps({"categories": ["추세"], "excluded_indicators": []}),
+        base_run_id="base-run-abc",
+        combinator="OR",
+    )
+    job = get_grid_search_job(job_id)
+    assert job is not None
+    assert job["indicator_pool"] == {"categories": ["추세"], "excluded_indicators": []}
+    assert job["base_run_id"] == "base-run-abc"
+    assert job["combinator"] == "OR"
+
+
+def test_create_grid_search_job_without_chaining_fields_defaults_to_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    job_id = "test-chain-job-2"
+    create_grid_search_job(
+        job_id=job_id, market="KRW-ETH", timeframe="minutes60", capital=1_000_000,
+        start="2026-01-01", end="2026-02-01", top_n=10,
+    )
+    job = get_grid_search_job(job_id)
+    assert job is not None
+    assert job["indicator_pool"] is None
+    assert job["base_run_id"] is None
+    assert job["combinator"] is None
+
+
 def test_save_and_list_trend_segments_round_trips(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
 

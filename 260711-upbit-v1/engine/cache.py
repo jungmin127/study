@@ -186,6 +186,11 @@ def _connect() -> sqlite3.Connection:
         conn.execute("ALTER TABLE backtest_results ADD COLUMN candle_count INTEGER")
     except sqlite3.OperationalError:
         pass
+    for column in ("indicator_pool", "base_run_id", "combinator"):
+        try:
+            conn.execute(f"ALTER TABLE grid_search_jobs ADD COLUMN {column} TEXT")
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 
@@ -698,14 +703,19 @@ def list_trend_segments(market: str) -> list[dict]:
 def create_grid_search_job(
     job_id: str, market: str, timeframe: str, capital: float,
     start: str, end: str, top_n: int,
+    indicator_pool_json: str | None = None,
+    base_run_id: str | None = None,
+    combinator: str | None = None,
 ) -> None:
     conn = _connect()
     try:
         conn.execute(
             "INSERT INTO grid_search_jobs "
-            "(id, market, timeframe, capital, start, end, top_n, status, done_combos, started_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 0, datetime('now'))",
-            (job_id, market, timeframe, capital, start, end, top_n),
+            "(id, market, timeframe, capital, start, end, top_n, status, done_combos, started_at, "
+            " indicator_pool, base_run_id, combinator) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 0, datetime('now'), ?, ?, ?)",
+            (job_id, market, timeframe, capital, start, end, top_n,
+             indicator_pool_json, base_run_id, combinator),
         )
         conn.commit()
     finally:
@@ -787,7 +797,7 @@ def delete_grid_search_job(job_id: str) -> bool:
 def _row_to_grid_search_job_dict(row: tuple) -> dict:
     (job_id, market, timeframe, capital, start, end, top_n, status,
      total_combos, done_combos, started_at, finished_at, elapsed_sec,
-     error_message, result_json) = row
+     error_message, result_json, indicator_pool_json, base_run_id, combinator) = row
     return {
         "id": job_id,
         "market": market,
@@ -804,6 +814,9 @@ def _row_to_grid_search_job_dict(row: tuple) -> dict:
         "elapsed_sec": elapsed_sec,
         "error_message": error_message,
         "result_json": json.loads(result_json) if result_json else None,
+        "indicator_pool": json.loads(indicator_pool_json) if indicator_pool_json else None,
+        "base_run_id": base_run_id,
+        "combinator": combinator,
     }
 
 
@@ -813,7 +826,7 @@ def get_grid_search_job(job_id: str) -> dict | None:
         row = conn.execute(
             "SELECT id, market, timeframe, capital, start, end, top_n, status, "
             "       total_combos, done_combos, started_at, finished_at, elapsed_sec, "
-            "       error_message, result_json "
+            "       error_message, result_json, indicator_pool, base_run_id, combinator "
             "FROM grid_search_jobs WHERE id = ?",
             (job_id,),
         ).fetchone()
@@ -828,7 +841,7 @@ def list_grid_search_jobs() -> list[dict]:
         rows = conn.execute(
             "SELECT id, market, timeframe, capital, start, end, top_n, status, "
             "       total_combos, done_combos, started_at, finished_at, elapsed_sec, "
-            "       error_message, result_json "
+            "       error_message, result_json, indicator_pool, base_run_id, combinator "
             "FROM grid_search_jobs ORDER BY started_at DESC, rowid DESC"
         ).fetchall()
     finally:
