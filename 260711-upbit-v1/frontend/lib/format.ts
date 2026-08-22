@@ -73,5 +73,6 @@ export function formatCapital(digits: string): string {
 export function formatFrequency(tradeCount: number, candleCount: number | null | undefined): string {
   if (candleCount == null) return '-';
   const pct = candleCount > 0 ? (tradeCount / candleCount) * 100 : 0;
-  return `${tradeCount} / ${candleCount} (${pct.toFixed(1)}%)`;
+  const pctText = pct > 0 && pct < 0.1 ? pct.toPrecision(2) : pct.toFixed(1);
+  return `${tradeCount} / ${candleCount} (${pctText}%)`;
 }

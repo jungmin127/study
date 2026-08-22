@@ -408,7 +408,7 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
                                     <span className="col-span-2">{r.title}</span>
                                   )}
                                   <span className="text-xs text-muted-foreground">
-                                    {r.candle_count != null ? formatFrequency(r.trade_count ?? 0, r.candle_count) : '-'}
+                                    {formatFrequency(r.trade_count ?? 0, r.candle_count)}
                                   </span>
                                   <Link href={`/backtests/${r.run_id}`} className="underline">
                                     보기

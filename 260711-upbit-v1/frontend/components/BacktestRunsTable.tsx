@@ -308,7 +308,7 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
               </button>
             </TableHead>
             <TableHead className="text-right">최대거래 기여도(%)</TableHead>
-            <TableHead>frequency</TableHead>
+            <TableHead className="text-right">frequency</TableHead>
             <TableHead>상태</TableHead>
             <TableHead>
               <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('created_at')}>
@@ -336,11 +336,11 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
                   aria-label={`${run.title || run.run_id} 선택`}
                 />
               </TableCell>
-              <TableCell className="max-w-[160px]">
-                <div
-                  className="truncate"
-                  title={[run.title, run.description].filter(Boolean).join(' — ') || undefined}
-                >
+              <TableCell
+                className="max-w-[160px]"
+                title={[run.title, run.description].filter(Boolean).join(' — ') || undefined}
+              >
+                <div className="truncate">
                   {run.title || <span className="text-muted-foreground">(제목 없음)</span>}
                 </div>
                 {run.description && (
