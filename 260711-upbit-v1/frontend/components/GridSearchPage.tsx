@@ -107,7 +107,7 @@ export default function GridSearchPage() {
       )}
       {runningJob && <GridSearchProgress job={runningJob} onCancel={handleCancel} />}
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-      <GridSearchHistory jobs={jobs} onRefresh={refresh} />
+      <GridSearchHistory jobs={jobs} onRefresh={refresh} onSubmit={handleSubmit} />
     </div>
   );
 }

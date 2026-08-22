@@ -23,7 +23,7 @@ import { returnRateColor } from '@/lib/return-rate-color';
 import { formatDateTime, formatFrequency, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
 import { parseGridResultTitle } from '@/lib/grid-result-title';
 import { deleteGridSearchJob, deleteGridSearchResult } from '@/lib/api/eda';
-import type { GridSearchJob, GridSearchSavedResult } from '@/lib/types/eda';
+import type { GridSearchJob, GridSearchJobRequest, GridSearchSavedResult } from '@/lib/types/eda';
 
 const STATUS_LABEL: Record<GridSearchJob['status'], string> = {
   running: '진행중',
@@ -93,9 +93,10 @@ function ResultTitle({ result }: { result: GridSearchSavedResult }) {
 interface GridSearchHistoryProps {
   jobs: GridSearchJob[];
   onRefresh: () => void | Promise<void>;
+  onSubmit: (request: GridSearchJobRequest) => Promise<void>;
 }
 
-export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistoryProps) {
+export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSearchHistoryProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [coinFilter, setCoinFilter] = useState<string | null>(null);
   const [timeframeFilterValue, setTimeframeFilterValue] = useState<string>(ALL_TIMEFRAMES);
@@ -108,6 +109,11 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
   const [jobDeleteTarget, setJobDeleteTarget] = useState<string | null>(null);
   const [jobDeleteBusy, setJobDeleteBusy] = useState(false);
   const [jobDeleteError, setJobDeleteError] = useState<string | null>(null);
+  const [chainingTarget, setChainingTarget] = useState<{ jobId: string; result: GridSearchSavedResult } | null>(null);
+  const [chainCombinator, setChainCombinator] = useState<'AND' | 'OR'>('AND');
+  const [chainCategories, setChainCategories] = useState<string[]>([]);
+  const [chainSubmitting, setChainSubmitting] = useState(false);
+  const [chainError, setChainError] = useState<string | null>(null);
 
   const timeframeFilter = timeframeFilterValue === ALL_TIMEFRAMES ? null : timeframeFilterValue;
 
@@ -413,6 +419,18 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
                                   <Link href={`/backtests/${r.run_id}`} className="underline">
                                     보기
                                   </Link>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setChainingTarget({ jobId: job.id, result: r });
+                                      setChainCombinator('AND');
+                                      setChainCategories([]);
+                                      setChainError(null);
+                                    }}
+                                  >
+                                    이 결과 기반으로 추가 탐색
+                                  </Button>
                                 </Fragment>
                               );
                             })}
@@ -477,6 +495,84 @@ export default function GridSearchHistory({ jobs, onRefresh }: GridSearchHistory
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmJobDelete} disabled={jobDeleteBusy}>
               {jobDeleteBusy ? '삭제 중...' : '삭제'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={chainingTarget !== null} onOpenChange={(open) => !open && setChainingTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>추가 탐색 (2차 grid search)</AlertDialogTitle>
+            <AlertDialogDescription>
+              선택한 결과의 매수/매도 조건을 베이스로 고정하고, 아래에서 고른 지표 풀에서 새 후보 1개씩을 결합 방식으로 이어붙여 탐색합니다.
+              AND는 베이스 조건을 좁히기만 해 항상 안전합니다(최악의 경우 거래 0건). OR은 베이스와 새 조건 중 하나만 맞아도 매매하므로,
+              새 조건의 질이 낮으면 베이스의 성과가 오히려 나빠질 수 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-3">
+            <div className="flex gap-4">
+              {(['AND', 'OR'] as const).map((c) => (
+                <label key={c} className="flex items-center gap-1.5 text-sm">
+                  <input type="radio" checked={chainCombinator === c} onChange={() => setChainCombinator(c)} />
+                  {c}
+                </label>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {['추세', '가격대', '거래량', '거래대금', '시장 심리', '오실레이터'].map((category) => (
+                <label key={category} className="flex items-center gap-1.5 text-sm">
+                  <Checkbox
+                    checked={chainCategories.includes(category)}
+                    onCheckedChange={(checked) =>
+                      setChainCategories((prev) =>
+                        checked === true ? [...prev, category] : prev.filter((c) => c !== category)
+                      )
+                    }
+                  />
+                  {category}
+                </label>
+              ))}
+            </div>
+            {chainError && <p className="text-sm text-destructive">{chainError}</p>}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={chainSubmitting}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!chainingTarget) return;
+                if (chainCategories.length === 0) {
+                  setChainError('지표 카테고리를 최소 1개 이상 선택하세요.');
+                  return;
+                }
+                const parentJob = jobs.find((j) => j.id === chainingTarget.jobId);
+                if (!parentJob) return;
+                setChainSubmitting(true);
+                setChainError(null);
+                try {
+                  await onSubmit({
+                    market: parentJob.market,
+                    timeframe: parentJob.timeframe,
+                    capital: parentJob.capital,
+                    start: parentJob.start,
+                    end: parentJob.end,
+                    top_n: parentJob.top_n,
+                    indicator_pool: { categories: chainCategories, excluded_indicators: [] },
+                    base_run_id: chainingTarget.result.run_id,
+                    combinator: chainCombinator,
+                  });
+                  setChainingTarget(null);
+                  await onRefresh();
+                } catch {
+                  setChainError('체이닝 job 시작에 실패했습니다.');
+                } finally {
+                  setChainSubmitting(false);
+                }
+              }}
+            >
+              {chainSubmitting ? '시작하는 중...' : '탐색 시작'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
