@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { summarizeGroup } from '@/lib/condition-summary';
-import { formatDateTime, formatTimeframe } from '@/lib/format';
+import { formatDateTime, formatFrequency, formatTimeframe } from '@/lib/format';
 import { buildCopyHref } from '@/components/BacktestRunsTable';
 import type { BacktestRunSummary } from '@/lib/types/eda';
 
@@ -57,6 +57,7 @@ export default function BacktestRunCard({ run, marketName, selected, onToggleSel
         <span className="text-muted-foreground">
           최대거래 기여도 {run.top_trade_contribution_pct != null ? `${run.top_trade_contribution_pct.toFixed(1)}%` : '-'}
         </span>
+        <span className="text-muted-foreground">frequency {formatFrequency(run.trade_count, run.candle_count)}</span>
         <LastTradeStatusBadge status={run.last_trade_status} />
       </div>
 
