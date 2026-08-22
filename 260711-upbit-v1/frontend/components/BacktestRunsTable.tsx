@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { summarizeGroup } from '@/lib/condition-summary';
-import { formatDateTime, formatTimeframe } from '@/lib/format';
+import { formatDateTime, formatFrequency, formatTimeframe } from '@/lib/format';
 import { deleteBacktestRun } from '@/lib/api/eda';
 import type { BacktestRunSummary } from '@/lib/types/eda';
 
@@ -308,6 +308,7 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
               </button>
             </TableHead>
             <TableHead className="text-right">최대거래 기여도(%)</TableHead>
+            <TableHead>frequency</TableHead>
             <TableHead>상태</TableHead>
             <TableHead>
               <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort('created_at')}>
@@ -321,7 +322,7 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
         <TableBody>
           {sorted.length === 0 && (
             <TableRow>
-              <TableCell colSpan={14} className="text-center text-muted-foreground">
+              <TableCell colSpan={15} className="text-center text-muted-foreground">
                 조건에 맞는 결과가 없습니다.
               </TableCell>
             </TableRow>
@@ -335,9 +336,16 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
                   aria-label={`${run.title || run.run_id} 선택`}
                 />
               </TableCell>
-              <TableCell>
-                {run.title || <span className="text-muted-foreground">(제목 없음)</span>}
-                {run.description && <p className="text-xs text-muted-foreground">{run.description}</p>}
+              <TableCell className="max-w-[160px]">
+                <div
+                  className="truncate"
+                  title={[run.title, run.description].filter(Boolean).join(' — ') || undefined}
+                >
+                  {run.title || <span className="text-muted-foreground">(제목 없음)</span>}
+                </div>
+                {run.description && (
+                  <p className="truncate text-xs text-muted-foreground">{run.description}</p>
+                )}
               </TableCell>
               <TableCell>
                 {run.market}
@@ -362,6 +370,9 @@ export default function BacktestRunsTable({ runs, marketNames }: BacktestRunsTab
               <TableCell className="text-right tabular-nums">{run.max_drawdown?.toFixed(2) ?? '-'}</TableCell>
               <TableCell className="text-right tabular-nums">
                 {run.top_trade_contribution_pct != null ? run.top_trade_contribution_pct.toFixed(1) : '-'}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {formatFrequency(run.trade_count, run.candle_count)}
               </TableCell>
               <TableCell>
                 <LastTradeStatusBadge status={run.last_trade_status} />
