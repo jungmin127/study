@@ -2,19 +2,23 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import CoinSelect, { sortMarkets } from '@/components/CoinSelect';
 import { ApiError } from '@/lib/api/client';
-import { getMarkets } from '@/lib/api/eda';
+import { getGridSearchEstimate, getMarkets } from '@/lib/api/eda';
 import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 import { defaultDate, formatCapital, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
-import type { GridSearchJobRequest } from '@/lib/types/eda';
+import type { GridSearchEstimate, GridSearchJobRequest } from '@/lib/types/eda';
 import type { Market } from '@/lib/types/eda';
 
 const TIMEFRAME_OPTIONS = TIMEFRAME_CODES.map((timeframe) => ({
   label: formatTimeframe(timeframe),
   timeframe,
 }));
+
+const POOL_CATEGORIES = ['오실레이터', '추세', '가격대', '거래량', '거래대금', '시장 심리'] as const;
+const DEFAULT_CATEGORIES: string[] = ['오실레이터'];
 
 export interface GridSearchFormInitial {
   market: string;
@@ -42,6 +46,9 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
   const [topN, setTopN] = useState(initial.topN);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [estimate, setEstimate] = useState<GridSearchEstimate | null>(null);
+  const [estimateError, setEstimateError] = useState<string | null>(null);
 
   useEffect(() => {
     getMarkets()
@@ -52,6 +59,18 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
       })
       .catch((err) => setMarketsError(err instanceof ApiError ? err.message : '코인 목록을 불러오지 못했습니다.'));
   }, []);
+
+  useEffect(() => {
+    getGridSearchEstimate({ categories: selectedCategories, excluded_indicators: [] })
+      .then(setEstimate)
+      .catch(() => setEstimateError('예상 조합수를 불러오지 못했습니다.'));
+  }, [selectedCategories]);
+
+  function toggleCategory(category: string, checked: boolean) {
+    setSelectedCategories((prev) =>
+      checked ? [...prev, category] : prev.filter((c) => c !== category)
+    );
+  }
 
   async function handleSubmit() {
     setValidationError(null);
@@ -64,10 +83,17 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
       setValidationError('상위N개는 1~50 사이의 정수여야 합니다.');
       return;
     }
+    if (selectedCategories.length === 0) {
+      setValidationError('지표 카테고리를 최소 1개 이상 선택하세요.');
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await onSubmit({ market, timeframe, capital: Number(capital), start, end, top_n: topNValue });
+      await onSubmit({
+        market, timeframe, capital: Number(capital), start, end, top_n: topNValue,
+        indicator_pool: { categories: selectedCategories, excluded_indicators: [] },
+      });
     } finally {
       setSubmitting(false);
     }
@@ -125,6 +151,30 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
           <label className="mb-1.5 block text-sm font-medium">상위N개</label>
           <Input type="number" min={1} max={50} value={topN} onChange={(e) => setTopN(e.target.value)} />
         </div>
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-sm font-medium">지표 풀 선택</label>
+        <div className="flex flex-wrap gap-3">
+          {POOL_CATEGORIES.map((category) => (
+            <label key={category} className="flex items-center gap-1.5 text-sm">
+              <Checkbox
+                checked={selectedCategories.includes(category)}
+                onCheckedChange={(checked) => toggleCategory(category, checked === true)}
+              />
+              {category}
+            </label>
+          ))}
+        </div>
+        {estimateError && <p className="mt-1 text-xs text-destructive">{estimateError}</p>}
+        {estimate && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            예상 조합수 {estimate.total_combos.toLocaleString()}개, 약 {Math.round(estimate.estimated_seconds / 60)}분 소요 예상
+            {estimate.total_combos > 40000 && (
+              <span className="ml-1 text-amber-600">— 조합이 많아 오래 걸릴 수 있습니다. 카테고리를 나눠서 실행하는 것을 추천합니다.</span>
+            )}
+          </p>
+        )}
       </div>
 
       {validationError && <p className="text-sm text-destructive">{validationError}</p>}
