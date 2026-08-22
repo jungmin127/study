@@ -224,6 +224,34 @@ def test_start_job_spawns_script_with_required_env_and_flags(monkeypatch):
     assert proc.kwargs["creationflags"] == gss.subprocess.CREATE_NEW_PROCESS_GROUP
 
 
+def test_start_job_passes_pool_and_chaining_args_to_subprocess(monkeypatch):
+    monkeypatch.setattr(gss.threading, "Thread", _NoOpThread)
+    _FakePopen.stdout_lines = []
+    _FakePopen.returncode = 0
+
+    job_id = gss.start_job(
+        market="KRW-ETH", timeframe="minutes60", capital=1_000_000,
+        start="2026-01-01", end="2026-02-01", top_n=10,
+        indicator_pool={"categories": ["추세"], "excluded_indicators": []},
+        base_run_id="base-abc",
+        combinator="OR",
+    )
+
+    proc = gss._active["proc"]
+    args = proc.args
+    assert "--categories" in args
+    assert args[args.index("--categories") + 1] == "추세"
+    assert "--base-run-id" in args
+    assert args[args.index("--base-run-id") + 1] == "base-abc"
+    assert "--combinator" in args
+    assert args[args.index("--combinator") + 1] == "OR"
+
+    job = get_grid_search_job(job_id)
+    assert job["base_run_id"] == "base-abc"
+    assert job["combinator"] == "OR"
+    assert job["indicator_pool"] == {"categories": ["추세"], "excluded_indicators": []}
+
+
 def test_reader_loop_resets_active_and_marks_failed_on_unexpected_exception(monkeypatch):
     class _NoOpThread:
         def __init__(self, target=None, args=(), kwargs=None, daemon=None):

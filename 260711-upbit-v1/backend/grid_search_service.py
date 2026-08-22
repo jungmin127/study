@@ -188,7 +188,12 @@ def reset_active_job(expected_job_id: str | None = None) -> str | None:
     return job_id
 
 
-def start_job(market: str, timeframe: str, capital: float, start: str, end: str, top_n: int) -> str:
+def start_job(
+    market: str, timeframe: str, capital: float, start: str, end: str, top_n: int,
+    indicator_pool: dict | None = None,
+    base_run_id: str | None = None,
+    combinator: str | None = None,
+) -> str:
     """grid search job을 시작하고 job_id를 반환한다. 이미 실행 중인 job이 있으면
     JobAlreadyRunningError를 던진다."""
     global _active
@@ -200,18 +205,28 @@ def start_job(market: str, timeframe: str, capital: float, start: str, end: str,
         create_grid_search_job(
             job_id=job_id, market=market, timeframe=timeframe, capital=capital,
             start=start, end=end, top_n=top_n,
+            indicator_pool_json=json.dumps(indicator_pool) if indicator_pool else None,
+            base_run_id=base_run_id, combinator=combinator,
         )
 
         env = {**os.environ, "PYTHONPATH": str(REPO_ROOT), "PYTHONIOENCODING": "utf-8"}
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+        cli_args = [
+            sys.executable, "scripts/grid_search.py",
+            "--market", market, "--timeframe", timeframe,
+            "--capital", str(capital), "--start", start, "--end", end,
+            "--top-n", str(top_n),
+        ]
+        if indicator_pool:
+            cli_args += ["--categories", ",".join(indicator_pool.get("categories") or [])]
+            excluded = indicator_pool.get("excluded_indicators") or []
+            if excluded:
+                cli_args += ["--exclude-indicators", ",".join(excluded)]
+        if base_run_id:
+            cli_args += ["--base-run-id", base_run_id, "--combinator", combinator]
         try:
             proc = subprocess.Popen(
-                [
-                    sys.executable, "scripts/grid_search.py",
-                    "--market", market, "--timeframe", timeframe,
-                    "--capital", str(capital), "--start", start, "--end", end,
-                    "--top-n", str(top_n),
-                ],
+                cli_args,
                 cwd=str(REPO_ROOT),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
