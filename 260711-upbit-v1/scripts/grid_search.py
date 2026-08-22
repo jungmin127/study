@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from backend.main import _fetch_backtest_dataframe
-from engine.cache import run_backtest_cached
+from engine.cache import get_run_config, run_backtest_cached
 from engine.condition_strategy import ConditionTreeStrategy
 from engine.condition_tree import max_required_period
 from engine.runner import run_backtest
@@ -235,14 +235,29 @@ def _watchdog_expired(last_progress_time: float, now: float, timeout_sec: float)
     return (now - last_progress_time) > timeout_sec
 
 
-def _run_one_combo(df, risk_config: dict, buy_block: dict, sell_block: dict) -> dict:
+def _wrap_condition(block: dict, base_group: dict | None, combinator: str) -> dict:
+    """block(단일 ConditionBlock)을 실행 가능한 ConditionGroup으로 감싼다.
+
+    base_group이 None이면 기존과 동일하게 {"type": "AND", "conditions": [block]}로
+    감싼다. base_group이 있으면(체이닝) combinator로 베이스와 block을 함께 묶는다 —
+    이렇게 만들어진 트리를 그대로 저장해야 재체이닝 시 베이스 정보가 안 사라진다."""
+    if base_group is None:
+        return {"type": "AND", "conditions": [block]}
+    return {"type": combinator, "conditions": [base_group, block]}
+
+
+def _run_one_combo(
+    df, risk_config: dict, buy_block: dict, sell_block: dict,
+    base_buy_group: dict | None = None, base_sell_group: dict | None = None, combinator: str = "AND",
+) -> dict:
     """조합 하나(매수 블록 1개 x 매도 블록 1개)에 대해 run_backtest를 1회 호출한다.
 
     순차 실행(compute_grid_results)과 병렬 워커(compute_grid_results_parallel) 양쪽에서
     공유하는 단일 진입점 — 조합당 실제로 무엇을 계산하는지는 여기 한 곳에만 있다.
+    base_buy_group/base_sell_group이 주어지면(체이닝) 베이스 조건과 combinator로 묶는다.
     """
-    buy_group = {"type": "AND", "conditions": [buy_block]}
-    sell_group = {"type": "AND", "conditions": [sell_block]}
+    buy_group = _wrap_condition(buy_block, base_buy_group, combinator)
+    sell_group = _wrap_condition(sell_block, base_sell_group, combinator)
     result = run_backtest(
         df,
         ConditionTreeStrategy,
@@ -262,20 +277,32 @@ def _run_one_combo(df, risk_config: dict, buy_block: dict, sell_block: dict) -> 
 
 _worker_df = None
 _worker_risk_config: dict | None = None
+_worker_base_buy_group: dict | None = None
+_worker_base_sell_group: dict | None = None
+_worker_combinator: str = "AND"
 
 
-def _init_worker(df, risk_config: dict) -> None:
-    """Pool 워커 프로세스가 (재)시작될 때마다 호출 — df/risk_config를 워커 전역에 저장해
-    태스크마다 재직렬화하지 않는다."""
-    global _worker_df, _worker_risk_config
+def _init_worker(
+    df, risk_config: dict,
+    base_buy_group: dict | None = None, base_sell_group: dict | None = None, combinator: str = "AND",
+) -> None:
+    """Pool 워커 프로세스가 (재)시작될 때마다 호출 — df/risk_config/베이스 조건을 워커
+    전역에 저장해 태스크마다 재직렬화하지 않는다."""
+    global _worker_df, _worker_risk_config, _worker_base_buy_group, _worker_base_sell_group, _worker_combinator
     _worker_df = df
     _worker_risk_config = risk_config
+    _worker_base_buy_group = base_buy_group
+    _worker_base_sell_group = base_sell_group
+    _worker_combinator = combinator
 
 
 def _run_one_combo_worker(buy_block: dict, sell_block: dict) -> dict:
     """Pool.apply_async에 전달되는 워커 측 진입점. 모듈 최상위 함수여야 Windows spawn에서
     pickle 가능하다."""
-    return _run_one_combo(_worker_df, _worker_risk_config, buy_block, sell_block)
+    return _run_one_combo(
+        _worker_df, _worker_risk_config, buy_block, sell_block,
+        _worker_base_buy_group, _worker_base_sell_group, _worker_combinator,
+    )
 
 
 def compute_grid_results(
@@ -283,6 +310,9 @@ def compute_grid_results(
     buy_conditions: list[dict],
     sell_conditions: list[dict],
     risk_config: dict,
+    base_buy_group: dict | None = None,
+    base_sell_group: dict | None = None,
+    combinator: str = "AND",
 ) -> list[dict]:
     """buy_conditions x sell_conditions 전 조합을 순차로 계산한다(테스트/소규모 실행용).
 
@@ -296,7 +326,9 @@ def compute_grid_results(
 
     for i, buy_block in enumerate(buy_conditions):
         for sell_block in sell_conditions:
-            results.append(_run_one_combo(df, risk_config, buy_block, sell_block))
+            results.append(
+                _run_one_combo(df, risk_config, buy_block, sell_block, base_buy_group, base_sell_group, combinator)
+            )
         if (i + 1) % 5 == 0 or (i + 1) == len(buy_conditions):
             done = (i + 1) * len(sell_conditions)
             print(f"    매수조건 {i + 1}/{len(buy_conditions)} 완료 ({done}/{total}건)", flush=True)
@@ -312,6 +344,9 @@ def compute_grid_results_parallel(
     processes: int = WORKER_COUNT,
     max_tasks_per_child: int = MAX_TASKS_PER_CHILD,
     watchdog_timeout: float = WATCHDOG_TIMEOUT_SEC,
+    base_buy_group: dict | None = None,
+    base_sell_group: dict | None = None,
+    combinator: str = "AND",
 ) -> list[dict]:
     """buy_conditions x sell_conditions 전 조합을 워커 풀로 병렬 계산한다(대규모 실행용).
 
@@ -332,7 +367,7 @@ def compute_grid_results_parallel(
         processes=processes,
         maxtasksperchild=max_tasks_per_child,
         initializer=_init_worker,
-        initargs=(df, risk_config),
+        initargs=(df, risk_config, base_buy_group, base_sell_group, combinator),
     )
     try:
         async_results = [pool.apply_async(_run_one_combo_worker, (b, s)) for b, s in combos]
@@ -438,7 +473,21 @@ def main() -> None:
         "--exclude-indicators", default=None,
         help="콤마로 구분된, 선택된 카테고리 안에서 제외할 개별 지표 키",
     )
+    parser.add_argument("--base-run-id", default=None, help="체이닝 베이스로 삼을 결과의 run_id")
+    parser.add_argument("--combinator", choices=["AND", "OR"], default=None, help="베이스 조건과 새 후보를 결합하는 연산자")
     args = parser.parse_args()
+
+    if args.base_run_id and not args.combinator:
+        raise SystemExit("--base-run-id를 주면 --combinator(AND 또는 OR)도 함께 지정해야 합니다.")
+
+    base_buy_group: dict | None = None
+    base_sell_group: dict | None = None
+    if args.base_run_id:
+        base_config = get_run_config(args.base_run_id)
+        if base_config is None:
+            raise SystemExit(f"베이스 결과를 찾을 수 없습니다(삭제되었을 수 있습니다): {args.base_run_id}")
+        base_buy_group = base_config["buy_conditions"]
+        base_sell_group = base_config["sell_conditions"]
 
     top_n = min(args.top_n, 50)
 
@@ -478,7 +527,11 @@ def main() -> None:
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": args.capital}
 
     t0 = time.perf_counter()
-    results = compute_grid_results_parallel(df, buy_conditions, sell_conditions, risk_config)
+    results = compute_grid_results_parallel(
+        df, buy_conditions, sell_conditions, risk_config,
+        base_buy_group=base_buy_group, base_sell_group=base_sell_group,
+        combinator=args.combinator or "AND",
+    )
     elapsed = time.perf_counter() - t0
     print(f"\n[3] 전체 계산 완료: {len(results)}건, {elapsed:.1f}초 ({elapsed / 60:.1f}분)", flush=True)
 
@@ -488,8 +541,8 @@ def main() -> None:
     saved_summaries = []
     for rank, r in enumerate(top_results, start=1):
         buy_block, sell_block = r["buy_block"], r["sell_block"]
-        buy_group = {"type": "AND", "conditions": [buy_block]}
-        sell_group = {"type": "AND", "conditions": [sell_block]}
+        buy_group = _wrap_condition(buy_block, base_buy_group, args.combinator or "AND")
+        sell_group = _wrap_condition(sell_block, base_sell_group, args.combinator or "AND")
         title = (
             f"[Grid] 매수 {buy_block['indicator']}{buy_block['params']}{buy_block['operator']}{buy_block['threshold']} "
             f"/ 매도 {sell_block['indicator']}{sell_block['params']}{sell_block['operator']}{sell_block['threshold']}"
@@ -511,14 +564,20 @@ def main() -> None:
             title=title,
             description=description,
         )
+        trades = saved["trades"]
+        win_rate_pct = (
+            round(sum(1 for t in trades if t["pnl"] > 0) / len(trades) * 100, 2) if trades else None
+        )
         print(f"  {rank:2d}. {r['return_pct']:+.2f}%  run_id={saved['run_id'][:12]}...", flush=True)
         saved_summaries.append({
             "rank": rank,
             "run_id": saved["run_id"],
             "return_pct": round(r["return_pct"], 2),
             "title": title,
-            "trade_count": len(saved["trades"]),
+            "trade_count": len(trades),
             "candle_count": saved["candle_count"],
+            "max_drawdown_pct": saved.get("max_drawdown"),
+            "win_rate_pct": win_rate_pct,
         })
 
     result_json = {"total_combos": total_combos, "elapsed_sec": round(elapsed, 1), "saved": saved_summaries}

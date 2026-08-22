@@ -360,6 +360,38 @@ def test_build_condition_grid_market_sentiment_pool_has_no_param_indicators():
     assert all(b["params"] == {} for b in fear_greed_blocks)
 
 
+def test_wrap_condition_without_base_matches_existing_shape():
+    from scripts.grid_search import _wrap_condition
+
+    block = {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}
+    assert _wrap_condition(block, None, "AND") == {"type": "AND", "conditions": [block]}
+
+
+def test_wrap_condition_with_base_nests_group():
+    from scripts.grid_search import _wrap_condition
+
+    base = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}]}
+    candidate = {"indicator": "SMA_PCT", "params": {"period": 14}, "operator": "<", "threshold": -1.0}
+    assert _wrap_condition(candidate, base, "OR") == {"type": "OR", "conditions": [base, candidate]}
+
+
+def test_run_one_combo_uses_base_group_when_provided():
+    from engine.sweep import DEFAULT_RISK_CONFIG
+    from scripts.grid_search import _run_one_combo
+    from tests.signal_fixtures import make_oscillating_df
+
+    df = make_oscillating_df()
+    buy_block = {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 90}  # 거의 항상 참
+    sell_block = {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 10}  # 거의 항상 참
+    base_buy = {"type": "AND", "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 0}]}  # 항상 거짓
+    result = _run_one_combo(
+        df, DEFAULT_RISK_CONFIG, buy_block, sell_block,
+        base_buy_group=base_buy, base_sell_group=None, combinator="AND",
+    )
+    # base_buy가 항상 거짓인 AND 결합이므로, 매수 조건 자체가 성립할 수 없어 거래가 0건이어야 한다
+    assert result["trades"] == []
+
+
 def test_main_parses_categories_and_exclude_indicators_args(monkeypatch, capsys):
     import sys
     from scripts import grid_search
