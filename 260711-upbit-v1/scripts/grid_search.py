@@ -486,6 +486,10 @@ def main() -> None:
         base_config = get_run_config(args.base_run_id)
         if base_config is None:
             raise SystemExit(f"베이스 결과를 찾을 수 없습니다(삭제되었을 수 있습니다): {args.base_run_id}")
+        if base_config["buy_conditions"] is None or base_config["sell_conditions"] is None:
+            raise SystemExit(
+                f"베이스 결과에 매수/매도 조건이 없습니다(체이닝을 지원하지 않는 결과 유형일 수 있습니다): {args.base_run_id}"
+            )
         base_buy_group = base_config["buy_conditions"]
         base_sell_group = base_config["sell_conditions"]
 

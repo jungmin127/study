@@ -419,3 +419,44 @@ def test_main_parses_categories_and_exclude_indicators_args(monkeypatch, capsys)
         "categories": ["오실레이터", "추세"],
         "excluded_indicators": ["MOMENTUM_PCT"],
     }
+
+
+def test_main_raises_when_base_run_id_not_found(monkeypatch):
+    import sys
+    from scripts import grid_search
+
+    monkeypatch.setattr(grid_search, "get_run_config", lambda run_id: None)
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "grid_search.py", "--market", "KRW-ETH", "--timeframe", "minutes60",
+            "--capital", "1000000", "--start", "2026-01-01", "--end", "2026-01-02",
+            "--base-run-id", "nonexistent-id-xyz", "--combinator", "AND",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        grid_search.main()
+
+
+def test_main_raises_when_base_run_id_has_no_conditions(monkeypatch):
+    """get_run_config()가 None이 아닌 dict를 반환하더라도(예: ConditionTreeStrategy가
+    아닌 SignalStrategy 결과), buy_conditions/sell_conditions가 None이면 체이닝이
+    불가능하므로 명확한 SystemExit으로 실패해야 한다 — 조용히 일반 그리드서치로
+    진행되면 안 된다."""
+    import sys
+    from scripts import grid_search
+
+    monkeypatch.setattr(
+        grid_search, "get_run_config",
+        lambda run_id: {"buy_conditions": None, "sell_conditions": None},
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "grid_search.py", "--market", "KRW-ETH", "--timeframe", "minutes60",
+            "--capital", "1000000", "--start", "2026-01-01", "--end", "2026-01-02",
+            "--base-run-id", "signal-strategy-run-id", "--combinator", "AND",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        grid_search.main()
