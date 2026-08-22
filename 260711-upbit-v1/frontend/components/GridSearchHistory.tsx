@@ -23,6 +23,7 @@ import { returnRateColor } from '@/lib/return-rate-color';
 import { formatDateTime, formatFrequency, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
 import { parseGridResultTitle } from '@/lib/grid-result-title';
 import { deleteGridSearchJob, deleteGridSearchResult } from '@/lib/api/eda';
+import { ApiError } from '@/lib/api/client';
 import type { GridSearchJob, GridSearchJobRequest, GridSearchSavedResult } from '@/lib/types/eda';
 
 const STATUS_LABEL: Record<GridSearchJob['status'], string> = {
@@ -186,6 +187,7 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
   const [chainError, setChainError] = useState<string | null>(null);
 
   const timeframeFilter = timeframeFilterValue === ALL_TIMEFRAMES ? null : timeframeFilterValue;
+  const isJobRunning = jobs.some((j) => j.status === 'running');
 
   const historyJobs = useMemo(() => jobs.filter((j) => j.status !== 'running'), [jobs]);
 
@@ -538,6 +540,7 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                                   <Button
                                     variant="outline"
                                     size="sm"
+                                    disabled={isJobRunning}
                                     onClick={() => {
                                       setChainingTarget({ jobId: job.id, result: r });
                                       setChainCombinator('AND');
@@ -655,7 +658,7 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction
-              disabled={chainSubmitting}
+              disabled={chainSubmitting || isJobRunning}
               onClick={async (e) => {
                 e.preventDefault();
                 if (!chainingTarget) return;
@@ -681,8 +684,8 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                   });
                   setChainingTarget(null);
                   await onRefresh();
-                } catch {
-                  setChainError('체이닝 job 시작에 실패했습니다.');
+                } catch (err) {
+                  setChainError(err instanceof ApiError ? err.message : '체이닝 job 시작에 실패했습니다.');
                 } finally {
                   setChainSubmitting(false);
                 }

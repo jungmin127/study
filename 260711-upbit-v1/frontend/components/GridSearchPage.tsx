@@ -54,6 +54,7 @@ export default function GridSearchPage() {
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : 'grid search 시작 중 오류가 발생했습니다.');
       setSubmitErrorStatus(err instanceof ApiError ? err.status : null);
+      throw err;
     }
   }
 
