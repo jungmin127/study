@@ -82,3 +82,44 @@ def test_evaluate_market_raises_value_error_when_candle_count_exceeds_max(monkey
             "KRW-BTC", "days",
             datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 1, tzinfo=timezone.utc),
         )
+
+
+def test_evaluate_market_current_prediction_matches_last_candle(monkeypatch):
+    closes = [100.0 * (1.01**i) for i in range(40)]
+    monkeypatch.setattr(regime_service, "get_candles", lambda *a, **k: _make_candle_df(closes))
+
+    result = evaluate_market(
+        "KRW-BTC", "days",
+        datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 2, 10, tzinfo=timezone.utc),
+    )
+
+    assert result["current_prediction"] is not None
+    assert result["current_prediction"]["time"] == result["candles"][-1]["time"]
+    assert result["current_prediction"]["predicted_category"] == result["candles"][-1]["predicted_category"]
+    assert result["current_prediction"]["probs"] is not None
+    assert sum(result["current_prediction"]["probs"].values()) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_evaluate_market_current_prediction_is_none_when_warmup_not_reached(monkeypatch):
+    closes = [100.0, 101.0, 102.0]
+    monkeypatch.setattr(regime_service, "get_candles", lambda *a, **k: _make_candle_df(closes))
+
+    result = evaluate_market(
+        "KRW-BTC", "days",
+        datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 4, tzinfo=timezone.utc),
+    )
+
+    assert result["current_prediction"] is not None
+    assert result["current_prediction"]["predicted_category"] is None
+    assert result["current_prediction"]["probs"] is None
+
+
+def test_evaluate_market_current_prediction_is_none_when_no_candles(monkeypatch):
+    monkeypatch.setattr(regime_service, "get_candles", lambda *a, **k: pd.DataFrame(columns=_CANDLE_COLUMNS))
+
+    result = evaluate_market(
+        "KRW-BTC", "days",
+        datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 2, tzinfo=timezone.utc),
+    )
+
+    assert result["current_prediction"] is None

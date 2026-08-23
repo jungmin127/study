@@ -49,6 +49,8 @@ def evaluate_market(market: str, timeframe: str, start: datetime, end: datetime)
       candles: [{time, open, high, low, close, predicted_category}, ...] — 워밍업 미달
         구간은 predicted_category가 None. 마지막 n_bars 구간도 "정답"을 매길 미래 데이터가
         없어 confusion/actual_totals 집계에서는 빠지지만, candles에는 예측값이 그대로 담긴다.
+      current_prediction: {time, predicted_category, probs} — candles의 마지막 원소와
+        동일한 시점의 예측(확률벡터 포함). candles가 비어있으면 None.
       confusion: {예측카테고리: {실제카테고리: 건수}}
       actual_totals: {실제카테고리: 건수}
       correlation: 확률벡터 기댓값과 정규화된 실현수익률의 상관계수(샘플 2건 미만이면 None)
@@ -86,6 +88,15 @@ def evaluate_market(market: str, timeframe: str, start: datetime, end: datetime)
             "predicted_category": predicted_category,
         })
 
+    current_prediction: dict | None = None
+    if candles:
+        last_probs = regime_series[-1] if regime_series else None
+        current_prediction = {
+            "time": candles[-1]["time"],
+            "predicted_category": candles[-1]["predicted_category"],
+            "probs": last_probs,
+        }
+
     for t in range(len(df) - n_bars):
         probs = regime_series[t]
         if probs is None:
@@ -117,6 +128,7 @@ def evaluate_market(market: str, timeframe: str, start: datetime, end: datetime)
         "half_life_bars": half_life_bars,
         "n_bars": n_bars,
         "candles": candles,
+        "current_prediction": current_prediction,
         "confusion": confusion,
         "actual_totals": actual_totals,
         "correlation": correlation,
