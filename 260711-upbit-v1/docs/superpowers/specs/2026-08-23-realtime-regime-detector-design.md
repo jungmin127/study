@@ -50,11 +50,18 @@ def compute_regime_probs(df: pd.DataFrame, half_life_bars: float) -> dict[str, f
 ```
 
 - **위험조정 모멘텀 스코어**: `momentum_ewma = returns.ewm(halflife=half_life_bars).mean()`,
-  `volatility_ewma = returns.abs().ewm(halflife=half_life_bars).mean()`,
+  `volatility_ewma = returns.ewm(halflife=half_life_bars).std()`,
   `score = momentum_ewma.iloc[-1] / max(volatility_ewma.iloc[-1], _MIN_VOLATILITY_FLOOR)`
   (0-나눔 가드). 변동성으로 나눠 정규화하므로 변동성이 다른 코인끼리도 같은 척도로 비교
   가능하다(`trend_segments.py`가 30일 변동성으로 threshold_pct를 정규화하던 것과 같은 원리,
   단 이쪽은 별도 함수 호출 없이 같은 시계열/타임프레임 안에서 자체 정규화한다).
+  **정정(Task 3 최종리뷰, 2026-08-23)**: 최초 설계는 `volatility_ewma`를
+  `returns.abs().ewm(...).mean()`(수익률 절댓값의 평균)로 정의했는데, 이러면 분자·분모가
+  같은 가중치 구조라 삼각부등식에 의해 `score`가 항상 [-1, 1]로 갇혀 카테고리 대표값
+  ±2.0(급상승/급하락)에 영원히 도달할 수 없는 버그가 있었다(구현 후 리뷰에서 실측 발견 —
+  하루 +2%씩 오르는 추세와 +50%씩 오르는 추세가 똑같이 score=1.0을 냄). pandas 내장
+  지수가중 **표준편차**(`.ewm().std()`)로 교체해 해결 — 표준편차는 이 방식으로 갇히지 않아,
+  분산이 작고 방향이 일관된 강한 추세일수록 비율이 커져 실제로 급상승/급하락에 도달한다.
 - **half_life_bars 환산**: `half_life_days = 1.0`(확정값, 상수)을 캘린더 시간으로 정의하고,
   호출 시점에 전략의 `timeframe`으로
   `half_life_bars = half_life_days * 86400 / timeframe_duration(timeframe).total_seconds()`
