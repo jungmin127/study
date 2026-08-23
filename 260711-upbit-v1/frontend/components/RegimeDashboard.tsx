@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import RegimeBacktestForm, { type RegimeBacktestParams } from '@/components/RegimeBacktestForm';
 import RegimeChart from '@/components/RegimeChart';
+import RegimeAccuracyReport from '@/components/RegimeAccuracyReport';
 import { ApiError } from '@/lib/api/client';
 import { getRegimeBacktest } from '@/lib/api/eda';
 import type { RegimeBacktestResult } from '@/lib/types/eda';
@@ -38,13 +39,7 @@ export default function RegimeDashboard() {
       {result && result.candles.length > 0 && (
         <>
           <RegimeChart candles={result.candles} timeframe={timeframe} />
-          <pre className="max-h-96 overflow-auto rounded-lg border bg-muted p-4 text-xs">
-            {JSON.stringify(
-              { confusion: result.confusion, actual_totals: result.actual_totals, correlation: result.correlation },
-              null,
-              2,
-            )}
-          </pre>
+          <RegimeAccuracyReport report={result} />
         </>
       )}
     </div>
