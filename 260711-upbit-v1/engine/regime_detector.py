@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import math
 
+from upbit_data_service import timeframe_duration
+
+HALF_LIFE_DAYS = 1.0
 TEMPERATURE = 1.0
 
 CATEGORY_REFERENCE_SCORES: dict[str, float] = {
@@ -31,3 +34,10 @@ def _softmax_categorize(score: float, temperature: float = TEMPERATURE) -> dict[
     exp_vals = [math.exp(v - max_val) for v in neg_distances]
     total = sum(exp_vals)
     return {label: exp_val / total for label, exp_val in zip(labels, exp_vals)}
+
+
+def half_life_bars_for_timeframe(timeframe: str) -> float:
+    """전략의 timeframe(예: 'minutes60', 'days')에서 HALF_LIFE_DAYS에 해당하는 봉 수를
+    환산한다. 타임프레임이 달라도 체감 반응속도가 동일하게 유지된다."""
+    bar_seconds = timeframe_duration(timeframe).total_seconds()
+    return HALF_LIFE_DAYS * 86400.0 / bar_seconds
