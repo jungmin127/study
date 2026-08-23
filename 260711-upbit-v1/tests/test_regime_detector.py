@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from engine.regime_detector import CATEGORY_REFERENCE_SCORES, _softmax_categorize, half_life_bars_for_timeframe
 from engine.regime_detector import (
+    CATEGORY_REFERENCE_SCORES,
+    _softmax_categorize,
     compute_regime_probs,
     compute_regime_probs_series,
     ewm_volatility,
+    half_life_bars_for_timeframe,
 )
 
 
@@ -58,10 +61,22 @@ def _make_price_df(closes: list[float]) -> pd.DataFrame:
     return pd.DataFrame({"candle_time": dates, "close": closes})
 
 
-def test_ewm_volatility_of_constant_returns_equals_abs_value():
+def test_ewm_volatility_of_constant_returns_is_near_zero():
+    """수익률이 일정하면 지수가중 표준편차는 0에 가까워야 한다(EWMA 절댓값평균이던
+    구버전에서는 이 값이 0.01이 나왔지만, 삼각부등식으로 score가 [-1, 1]에 갇히는 버그의
+    원인이었다 — 표준편차 기반으로 바뀐 지금은 변동성이 없는 시계열의 분산은 0이 맞다)."""
     returns = pd.Series([0.01] * 30)
     vol = ewm_volatility(returns, half_life_bars=5.0)
-    assert vol == pytest.approx(0.01, rel=1e-6)
+    assert vol == pytest.approx(0.0, abs=1e-9)
+
+
+def test_ewm_volatility_matches_pandas_ewm_std():
+    """ewm_volatility가 pandas의 지수가중 표준편차와 동일한 값을 내는지 직접 대조한다."""
+    rng = np.random.default_rng(seed=42)
+    returns = pd.Series(rng.normal(loc=0.0, scale=0.02, size=30))
+    vol = ewm_volatility(returns, half_life_bars=5.0)
+    expected = float(returns.ewm(halflife=5.0).std().iloc[-1])
+    assert vol == pytest.approx(expected, rel=1e-9)
 
 
 def test_compute_regime_probs_none_when_insufficient_warmup():
@@ -93,6 +108,26 @@ def test_compute_regime_probs_flat_prices_favor_sideways():
     assert max(probs, key=probs.get) == "횡보"
 
 
+def test_compute_regime_probs_empty_df_returns_none():
+    df = pd.DataFrame({"candle_time": [], "close": []})
+    assert compute_regime_probs(df, half_life_bars=3.0) is None
+
+
+def test_compute_regime_probs_missing_close_column_returns_none():
+    df = pd.DataFrame({"candle_time": pd.date_range("2026-01-01", periods=5, freq="D")})
+    assert compute_regime_probs(df, half_life_bars=3.0) is None
+
+
+def test_compute_regime_probs_series_empty_df_returns_empty_list():
+    df = pd.DataFrame({"candle_time": [], "close": []})
+    assert compute_regime_probs_series(df, half_life_bars=3.0) == []
+
+
+def test_compute_regime_probs_series_missing_close_column_returns_empty_list():
+    df = pd.DataFrame({"candle_time": pd.date_range("2026-01-01", periods=5, freq="D")})
+    assert compute_regime_probs_series(df, half_life_bars=3.0) == []
+
+
 def test_compute_regime_probs_probabilities_sum_to_one():
     closes = [100.0 * (1.01**i) for i in range(60)]
     df = _make_price_df(closes)
@@ -101,15 +136,53 @@ def test_compute_regime_probs_probabilities_sum_to_one():
     assert sum(probs.values()) == pytest.approx(1.0, abs=1e-9)
 
 
+def _make_noisy_trend_df(
+    base_daily_return: float, noise_scale: float, seed: int, n: int = 60
+) -> pd.DataFrame:
+    """일정한 추세(base_daily_return) 위에 정규분포 노이즈(noise_scale)를 더한
+    비단조(non-monotonic) 수익률 시계열을 만든다. 시드 고정으로 결정론적."""
+    rng = np.random.default_rng(seed=seed)
+    noise = rng.normal(0.0, noise_scale, size=n)
+    returns = [base_daily_return + noise[i] for i in range(n)]
+    closes = [100.0]
+    for r in returns:
+        closes.append(closes[-1] * (1.0 + r))
+    return _make_price_df(closes)
+
+
 def test_compute_regime_probs_scale_invariant_across_volatility():
-    """변동성이 다른 두 코인이 '위험조정 기준 동일한 강도'의 순수 추세일 때
-    같은 카테고리가 우세해야 한다(변동성 정규화 검증)."""
-    low_vol_closes = [100.0 * (1.005**i) for i in range(60)]
-    high_vol_closes = [100.0 * (1.02**i) for i in range(60)]
-    probs_low = compute_regime_probs(_make_price_df(low_vol_closes), half_life_bars=3.0)
-    probs_high = compute_regime_probs(_make_price_df(high_vol_closes), half_life_bars=3.0)
+    """변동성이 다른 두 코인이 '위험조정 기준(추세/노이즈 비율) 동일한 강도'의
+    노이즈 섞인 비단조 추세일 때 같은 카테고리가 우세해야 한다(변동성 정규화 검증).
+    구버전 테스트는 둘 다 단조추세라 새 공식으로도 여전히 포화돼 아무것도 검증하지
+    못하는 동어반복이었다 — 노이즈를 섞은 비단조 시계열로 다시 짰다."""
+    # 추세/노이즈 비율(0.4)은 동일, 절대 변동성(noise_scale)은 4배 차이, 시드도 다르게
+    low_vol_df = _make_noisy_trend_df(base_daily_return=0.005, noise_scale=0.002, seed=10)
+    high_vol_df = _make_noisy_trend_df(base_daily_return=0.02, noise_scale=0.008, seed=99)
+    probs_low = compute_regime_probs(low_vol_df, half_life_bars=3.0)
+    probs_high = compute_regime_probs(high_vol_df, half_life_bars=3.0)
     assert probs_low is not None and probs_high is not None
-    assert max(probs_low, key=probs_low.get) == max(probs_high, key=probs_high.get)
+    assert max(probs_low, key=probs_low.get) == max(probs_high, key=probs_high.get) == "급상승"
+
+
+def test_compute_regime_probs_strong_consistent_uptrend_reaches_surge_up():
+    """분산이 거의 0인 강한 일관된 상승 추세(매 봉 +5%)는 실제로 '급상승'을 최댓값으로
+    내야 한다 — EWMA 절댓값평균 버그에서는 score가 [-1, 1]에 갇혀 급상승(대표값 +2.0)에
+    영원히 도달할 수 없었다. 이 테스트가 그 버그가 실제로 고쳐졌음을 직접 증명한다."""
+    closes = [100.0 * (1.05**i) for i in range(60)]
+    df = _make_price_df(closes)
+    probs = compute_regime_probs(df, half_life_bars=3.0)
+    assert probs is not None
+    assert max(probs, key=probs.get) == "급상승"
+
+
+def test_compute_regime_probs_strong_consistent_downtrend_reaches_surge_down():
+    """대칭 검증: 분산이 거의 0인 강한 일관된 하락 추세(매 봉 -5%)는 '급하락'을
+    최댓값으로 내야 한다."""
+    closes = [100.0 * (0.95**i) for i in range(60)]
+    df = _make_price_df(closes)
+    probs = compute_regime_probs(df, half_life_bars=3.0)
+    assert probs is not None
+    assert max(probs, key=probs.get) == "급하락"
 
 
 def test_compute_regime_probs_shorter_half_life_reacts_faster_to_recent_reversal():

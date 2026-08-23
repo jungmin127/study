@@ -49,14 +49,17 @@ WARMUP_MULTIPLIER = 5.0
 _MIN_VOLATILITY_FLOOR = 1e-6
 
 
-def _ewm_series(returns: pd.Series, half_life_bars: float, abs_values: bool = False) -> pd.Series:
-    series = returns.abs() if abs_values else returns
-    return series.ewm(halflife=half_life_bars).mean()
+def _ewm_series(returns: pd.Series, half_life_bars: float) -> pd.Series:
+    """수익률의 지수가중이동평균(모멘텀 계산 전용)."""
+    return returns.ewm(halflife=half_life_bars).mean()
 
 
 def ewm_volatility(returns: pd.Series, half_life_bars: float) -> float:
-    """수익률 절댓값의 지수가중이동평균(가장 최근 값) — 변동성 정규화용."""
-    return float(_ewm_series(returns, half_life_bars, abs_values=True).iloc[-1])
+    """수익률의 지수가중 표준편차(가장 최근 값) — 변동성 정규화용.
+    분자(모멘텀=EWMA 평균)와 분모가 서로 다른 통계량이어야 score가 카테고리 대표값
+    ±2.0(급상승/급하락)에 실제로 도달할 수 있다(EWMA 절댓값평균을 쓰면 삼각부등식으로
+    score가 [-1, 1]에 갇히는 버그가 있었다 — Task 3 최종리뷰에서 발견)."""
+    return float(returns.ewm(halflife=half_life_bars).std().iloc[-1])
 
 
 def compute_regime_probs_series(
@@ -66,11 +69,13 @@ def compute_regime_probs_series(
     벡터화 버전 — compute_regime_probs(df.iloc[:t+1], ...)를 매 t마다 반복호출하면
     O(n^2)라 느림). 두 방식이 동일한 결과를 내는지는
     test_compute_regime_probs_series_matches_pointwise_calls로 고정한다."""
+    if df.empty or "close" not in df.columns:
+        return []
     min_bars = int(half_life_bars * WARMUP_MULTIPLIER)
     returns = df["close"].pct_change(fill_method=None)
     valid_counts = returns.notna().cumsum()
     momentum_series = _ewm_series(returns, half_life_bars)
-    volatility_series = _ewm_series(returns, half_life_bars, abs_values=True)
+    volatility_series = returns.ewm(halflife=half_life_bars).std()
 
     results: list[dict[str, float] | None] = []
     for i in range(len(df)):
@@ -90,5 +95,7 @@ def compute_regime_probs_series(
 def compute_regime_probs(df: pd.DataFrame, half_life_bars: float) -> dict[str, float] | None:
     """df: candle_time 오름차순, close 컬럼 포함(get_candles()가 반환하는 형태 그대로).
     워밍업(half_life_bars * WARMUP_MULTIPLIER) 미만이면 None(판단불가) 반환."""
+    if df.empty or "close" not in df.columns:
+        return None
     series = compute_regime_probs_series(df, half_life_bars)
     return series[-1] if series else None
