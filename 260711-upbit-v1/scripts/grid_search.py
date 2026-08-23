@@ -46,7 +46,15 @@ from upbit_data_service import get_candles
 # 워커당 평균 8,363회 정도의 그리드에서는 재시작이 한 번도 안 일어나 안전장치가 사실상
 # 무력화돼 있었다. 카테고리 조합에 따라 leak rate가 더 벌어질 수 있으므로 이후에도 큰 그리드를
 # 새로 돌릴 때는 재측정을 권장한다.
-WORKER_COUNT = 4
+#
+# WORKER_COUNT는 2026-08-23, 이 개발 머신(물리 6코어/12스레드, RAM 16GB)에서 4개와 6개를
+# 동일 조건(위와 같은 KRW-BTC 그리드)으로 직접 비교해 4→6으로 올렸다. steady-state 처리
+# 속도가 270.4 combos/min(4개) → 471.7 combos/min(6개)로 약 1.5~1.75배 빨라졌고(측정 구간이
+# 그리드의 서로 다른 부분이라 정확한 배율엔 오차가 있음), 6개 기준 워커당 RSS는 10분간
+# 148MB→233MB로 완만히 늘어 MAX_TASKS_PER_CHILD가 보장하는 916MB 상한에 여유 있게 못
+# 미쳤다. 6은 이 머신의 물리 코어 수와 같아 하이퍼스레딩 경합 없이 쓸 수 있는 자연스러운
+# 상한이기도 하다. 다른 머신(코어/RAM이 다른)에서 돌릴 때는 이 값이 안전하지 않을 수 있다.
+WORKER_COUNT = 6
 MAX_TASKS_PER_CHILD = 5359
 WATCHDOG_TIMEOUT_SEC = 300
 PROGRESS_LOG_INTERVAL = 1000
