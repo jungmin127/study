@@ -2340,6 +2340,21 @@ def test_grid_search_estimate_endpoint_returns_combo_counts(monkeypatch, tmp_pat
     assert data["estimated_seconds"] > 0
 
 
+def test_grid_search_indicator_pool_endpoint_returns_per_category_indicators(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/grid-search/indicator-pool")
+    assert resp.status_code == 200
+    data = resp.json()
+    trend = {item["value"] for item in data["추세"]}
+    assert trend == {"SMA_PCT", "EMA_PCT", "WMA_PCT", "MOMENTUM_PCT"}
+    # 카탈로그 라벨이 채워져 있어야 한다(빈 문자열/값 그대로 폴백이 아니라 실제 한글 라벨)
+    sma_pct = next(item for item in data["추세"] if item["value"] == "SMA_PCT")
+    assert sma_pct["label"] not in ("", "SMA_PCT")
+    # 손익(SELL_ONLY)은 카테고리 토글 대상이 아니므로 어떤 카테고리에도 안 나온다
+    all_values = {item["value"] for items in data.values() for item in items}
+    assert not {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT", "HOLDING_PERIOD_BARS"} & all_values
+
+
 def test_create_grid_search_job_rejects_base_run_id_without_combinator(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-ETH"}])

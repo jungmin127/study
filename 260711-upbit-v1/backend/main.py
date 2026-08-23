@@ -1183,6 +1183,21 @@ def estimate_grid_search_endpoint(categories: str = "", exclude_indicators: str 
     }
 
 
+@app.get("/api/v1/grid-search/indicator-pool")
+def get_grid_search_indicator_pool_endpoint() -> dict[str, list[dict]]:
+    """카테고리별로 그리드서치 풀에 실제로 포함된 지표 목록(개별 지표 세부조정 UI용)을
+    반환한다. INDICATOR_POOL_SPECS(engine/grid_search_pool.py)가 단일 소스이므로, 카테고리
+    확장 시 이 엔드포인트가 자동으로 최신 지표 목록을 반영한다."""
+    catalog_labels = {item["value"]: item["label"] for item in INDICATOR_CATALOG}
+    return {
+        category: [
+            {"value": indicator, "label": catalog_labels.get(indicator, indicator)}
+            for indicator in specs
+        ]
+        for category, specs in INDICATOR_POOL_SPECS.items()
+    }
+
+
 @app.get("/api/v1/grid-search/jobs")
 def list_grid_search_jobs_endpoint() -> list[dict]:
     return [_grid_search_job_response(j) for j in list_grid_search_jobs()]

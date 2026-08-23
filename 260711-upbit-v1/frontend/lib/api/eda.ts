@@ -4,6 +4,7 @@ import type {
   BacktestRunSummary,
   Combo,
   GridSearchEstimate,
+  GridSearchIndicatorPoolCatalog,
   GridSearchJob,
   GridSearchJobRequest,
   IndicatorCatalogItem,
@@ -111,6 +112,10 @@ export function createGridSearchJob(req: GridSearchJobRequest): Promise<GridSear
     method: 'POST',
     body: JSON.stringify(req),
   });
+}
+
+export function getGridSearchIndicatorPool(): Promise<GridSearchIndicatorPoolCatalog> {
+  return apiFetch<GridSearchIndicatorPoolCatalog>('/api/v1/grid-search/indicator-pool');
 }
 
 export function getGridSearchEstimate(pool: IndicatorPool, market?: string): Promise<GridSearchEstimate> {

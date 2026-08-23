@@ -230,3 +230,10 @@ export interface GridSearchEstimate {
   total_combos: number;
   estimated_seconds: number;
 }
+
+export interface GridSearchPoolIndicator {
+  value: string;
+  label: string;
+}
+
+export type GridSearchIndicatorPoolCatalog = Record<string, GridSearchPoolIndicator[]>;

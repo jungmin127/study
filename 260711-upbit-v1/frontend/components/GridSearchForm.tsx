@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import CoinSelect, { sortMarkets } from '@/components/CoinSelect';
 import { ApiError } from '@/lib/api/client';
-import { getGridSearchEstimate, getMarkets } from '@/lib/api/eda';
+import { getGridSearchEstimate, getGridSearchIndicatorPool, getMarkets } from '@/lib/api/eda';
 import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 import { defaultDate, formatCapital, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
-import type { GridSearchEstimate, GridSearchJobRequest } from '@/lib/types/eda';
+import type { GridSearchEstimate, GridSearchIndicatorPoolCatalog, GridSearchJobRequest } from '@/lib/types/eda';
 import type { Market } from '@/lib/types/eda';
 
 const TIMEFRAME_OPTIONS = TIMEFRAME_CODES.map((timeframe) => ({
@@ -49,6 +50,9 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
   const [selectedCategories, setSelectedCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [estimate, setEstimate] = useState<GridSearchEstimate | null>(null);
   const [estimateError, setEstimateError] = useState<string | null>(null);
+  const [indicatorPool, setIndicatorPool] = useState<GridSearchIndicatorPoolCatalog | null>(null);
+  const [excludedIndicators, setExcludedIndicators] = useState<string[]>([]);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     getMarkets()
@@ -61,7 +65,13 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
   }, []);
 
   useEffect(() => {
-    getGridSearchEstimate({ categories: selectedCategories, excluded_indicators: [] }, market)
+    getGridSearchIndicatorPool().catch(() => setIndicatorPool(null)).then((data) => {
+      if (data) setIndicatorPool(data);
+    });
+  }, []);
+
+  useEffect(() => {
+    getGridSearchEstimate({ categories: selectedCategories, excluded_indicators: excludedIndicators }, market)
       .then((data) => {
         setEstimate(data);
         setEstimateError(null);
@@ -70,11 +80,26 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
         setEstimateError('예상 조합수를 불러오지 못했습니다.');
         setEstimate(null);
       });
-  }, [selectedCategories, market]);
+  }, [selectedCategories, excludedIndicators, market]);
 
   function toggleCategory(category: string, checked: boolean) {
     setSelectedCategories((prev) =>
       checked ? [...prev, category] : prev.filter((c) => c !== category)
+    );
+  }
+
+  function toggleCategoryExpanded(category: string) {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  }
+
+  function toggleIndicator(indicator: string, checked: boolean) {
+    setExcludedIndicators((prev) =>
+      checked ? prev.filter((i) => i !== indicator) : [...prev, indicator]
     );
   }
 
@@ -98,7 +123,7 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
     try {
       await onSubmit({
         market, timeframe, capital: Number(capital), start, end, top_n: topNValue,
-        indicator_pool: { categories: selectedCategories, excluded_indicators: [] },
+        indicator_pool: { categories: selectedCategories, excluded_indicators: excludedIndicators },
       });
     } finally {
       setSubmitting(false);
@@ -161,16 +186,45 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
 
       <div>
         <label className="mb-1.5 block text-sm font-medium">지표 풀 선택</label>
-        <div className="flex flex-wrap gap-3">
-          {POOL_CATEGORIES.map((category) => (
-            <label key={category} className="flex items-center gap-1.5 text-sm">
-              <Checkbox
-                checked={selectedCategories.includes(category)}
-                onCheckedChange={(checked) => toggleCategory(category, checked === true)}
-              />
-              {category}
-            </label>
-          ))}
+        <div className="space-y-1.5">
+          {POOL_CATEGORIES.map((category) => {
+            const indicators = indicatorPool?.[category] ?? [];
+            const expanded = expandedCategories.has(category);
+            return (
+              <div key={category}>
+                <div className="flex items-center gap-1.5 text-sm">
+                  <Checkbox
+                    checked={selectedCategories.includes(category)}
+                    onCheckedChange={(checked) => toggleCategory(category, checked === true)}
+                  />
+                  <span>{category}</span>
+                  {indicators.length > 0 && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleCategoryExpanded(category)}
+                      aria-label={`${category} 개별 지표 세부조정`}
+                    >
+                      {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    </button>
+                  )}
+                </div>
+                {expanded && indicators.length > 0 && (
+                  <div className="ml-6 mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                    {indicators.map((indicator) => (
+                      <label key={indicator.value} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Checkbox
+                          checked={!excludedIndicators.includes(indicator.value)}
+                          onCheckedChange={(checked) => toggleIndicator(indicator.value, checked === true)}
+                        />
+                        {indicator.label}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
         {estimateError && <p className="mt-1 text-xs text-destructive">{estimateError}</p>}
         {estimate && (
