@@ -14,14 +14,21 @@ import pandas as pd
 from upbit_data_service import timeframe_duration
 
 HALF_LIFE_DAYS = 1.0
-TEMPERATURE = 1.0
+TEMPERATURE = 0.1
 
+# 2026-08-23 실측 재보정: KRW-BTC/ETH/XRP 1시간봉(2024-01-01~현재, half_life_bars=24)의
+# 실제 score 풀표본(n=69,045) std≈0.11 기준으로 산출. 완만=±1σ 근방(0.15), 급=±p98~99
+# 근방(0.35) — 원래 값(±0.7/±2.0)은 이 스케일에서 급상승/급하락이 통계적으로 도달
+# 불가능했다(score std≈0.12인데 대표값 2.0은 ~17시그마). TEMPERATURE도 대표값 간격에
+# 맞춰 같이 낮췄다(1.0을 그대로 두면 모든 확률이 ~0.2로 뭉개짐, _softmax_categorize
+# docstring 참고). 재보정 근거: scripts/regime_backtest.py 실행 결과 +
+# docs/superpowers/specs/2026-08-23-realtime-regime-detector-design.md의 재보정 노트.
 CATEGORY_REFERENCE_SCORES: dict[str, float] = {
-    "급하락": -2.0,
-    "완만하락": -0.7,
+    "급하락": -0.35,
+    "완만하락": -0.15,
     "횡보": 0.0,
-    "완만상승": 0.7,
-    "급상승": 2.0,
+    "완만상승": 0.15,
+    "급상승": 0.35,
 }
 
 
@@ -29,9 +36,9 @@ def _softmax_categorize(score: float, temperature: float = TEMPERATURE) -> dict[
     """score와 각 카테고리 대표값의 거리에 softmax를 적용해 확률벡터를 만든다.
     합계는 항상 1.0.
 
-    L1 거리 커널이라 |score|가 가장 바깥 대표값(현재 2.0)을 넘어서면 확률벡터가
-    포화된다 — score=2.0과 score=100이 동일한 벡터를 내고, 최댓값 확률은 절대
-    0.67을 넘지 않는다(최종 브랜치 리뷰 실측). CATEGORY_REFERENCE_SCORES를
+    L1 거리 커널이라 |score|가 가장 바깥 대표값(현재 0.35)을 넘어서면 확률벡터가
+    포화된다 — score=0.35와 score=1000이 동일한 벡터를 내고, 최댓값 확률은 절대
+    0.852를 넘지 않는다(2026-08-23 재보정 실측). CATEGORY_REFERENCE_SCORES를
     재보정할 때는 temperature도 같이 조정해야 한다 — 대표값 간격만 좁히고
     temperature를 그대로 두면 모든 확률이 ~0.2로 뭉개져 신뢰도 수치가 무의미해진다."""
     labels = list(CATEGORY_REFERENCE_SCORES.keys())

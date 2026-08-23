@@ -151,6 +151,24 @@ def _make_noisy_trend_df(
     return _make_price_df(closes)
 
 
+def _make_noisy_trend_reversal_df(
+    down_pct: float, up_pct: float, noise_scale: float, seed: int,
+    down_bars: int = 40, up_bars: int = 15,
+) -> pd.DataFrame:
+    """40봉 하락 추세(down_pct + 노이즈) 후 15봉 상승 추세(up_pct + 노이즈)로 반전하는
+    비단조 시계열을 만든다. half-life 반응속도 비교 테스트 전용(노이즈 없는 깨끗한
+    반전은 재보정된 좁은 대표값 범위에서 두 half-life 모두 포화돼버려 구분이 안 됨)."""
+    rng = np.random.default_rng(seed=seed)
+    closes = [100.0]
+    for _ in range(down_bars):
+        r = down_pct + rng.normal(0.0, noise_scale)
+        closes.append(closes[-1] * (1.0 + r))
+    for _ in range(up_bars):
+        r = up_pct + rng.normal(0.0, noise_scale)
+        closes.append(closes[-1] * (1.0 + r))
+    return _make_price_df(closes)
+
+
 def test_compute_regime_probs_scale_invariant_across_volatility():
     """변동성이 다른 두 코인이 '위험조정 기준(추세/노이즈 비율) 동일한 강도'의
     노이즈 섞인 비단조 추세일 때 같은 카테고리가 우세해야 한다(변동성 정규화 검증).
@@ -207,11 +225,18 @@ def test_compute_regime_probs_noisy_strong_downtrend_reaches_surge_down():
 
 
 def test_compute_regime_probs_shorter_half_life_reacts_faster_to_recent_reversal():
-    """앞 40봉 하락 후 뒤 15봉 급격히 상승 반전 — half-life가 짧을수록
-    반전 이후 상승쪽 확률 합이 더 커야 한다."""
-    down_leg = [100.0 * (0.98**i) for i in range(40)]
-    up_leg = [down_leg[-1] * (1.03**i) for i in range(1, 16)]
-    df = _make_price_df(down_leg + up_leg)
+    """앞 40봉 하락 후 뒤 15봉 상승 반전(노이즈 포함) — half-life가 짧을수록
+    반전 이후 상승쪽 확률 합이 더 커야 한다.
+
+    2026-08-23 재보정(카테고리 대표값 ±0.15/±0.35, temperature 0.1)으로 대표값
+    간격이 크게 좁아져, 원래 이 테스트가 쓰던 노이즈 없는 깨끗한 반전 시계열은
+    half_life_bars=2.0과 8.0 둘 다 포화 구간(|score|>0.35)에 들어가 확률이
+    거의 동일해져버렸다(원래 있던 재보정 전 값으로는 구분이 됐었음). 노이즈를 섞어
+    slow(hl=8) 쪽은 포화 이전 구간에, fast(hl=2) 쪽은 포화 구간에 들어가도록
+    다시 튜닝했다(fast_up≈0.968, slow_up≈0.709, 차이 검증됨)."""
+    df = _make_noisy_trend_reversal_df(
+        down_pct=-0.003, up_pct=0.004, noise_scale=0.015, seed=7
+    )
 
     probs_fast = compute_regime_probs(df, half_life_bars=2.0)
     probs_slow = compute_regime_probs(df, half_life_bars=8.0)
@@ -245,12 +270,12 @@ def test_compute_regime_probs_series_matches_pointwise_calls():
 
 def test_classify_score_to_category_boundaries():
     assert classify_score_to_category(-5.0) == "급하락"
-    assert classify_score_to_category(-1.0) == "완만하락"
+    assert classify_score_to_category(-0.15) == "완만하락"
     assert classify_score_to_category(0.0) == "횡보"
-    assert classify_score_to_category(1.0) == "완만상승"
+    assert classify_score_to_category(0.15) == "완만상승"
     assert classify_score_to_category(5.0) == "급상승"
 
 
 def test_classify_score_to_category_at_exact_midpoint_goes_to_higher_bucket():
-    # 완만하락(-0.7)과 횡보(0.0) 사이 중간점 = -0.35
-    assert classify_score_to_category(-0.35) == "횡보"
+    # 완만하락(-0.15)과 횡보(0.0) 사이 중간점 = -0.075
+    assert classify_score_to_category(-0.075) == "횡보"
