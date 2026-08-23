@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, BookOpen, ClipboardList, FlaskConical, Grid3x3, Rocket, Settings } from 'lucide-react';
+import { Activity, BarChart3, BookOpen, ClipboardList, FlaskConical, Grid3x3, Rocket, Settings } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import MobileNavDrawer from '@/components/MobileNavDrawer';
 import { isActive } from '@/lib/nav-active';
@@ -14,6 +14,7 @@ const STEPS = [
   { href: '/live-strategies', title: '라이브 전략', icon: Rocket },
   { href: '/journal', title: '매매일지', icon: ClipboardList },
   { href: '/analysis', title: '세그먼트', icon: BarChart3 },
+  { href: '/regime', title: '장세 판별', icon: Activity },
   { href: '/guide', title: '지표 가이드', icon: BookOpen },
 ];
 

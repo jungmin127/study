@@ -1,0 +1,42 @@
+'use client';
+
+import { useState } from 'react';
+import RegimeBacktestForm, { type RegimeBacktestParams } from '@/components/RegimeBacktestForm';
+import { ApiError } from '@/lib/api/client';
+import { getRegimeBacktest } from '@/lib/api/eda';
+import type { RegimeBacktestResult } from '@/lib/types/eda';
+
+export default function RegimeDashboard() {
+  const [result, setResult] = useState<RegimeBacktestResult | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(params: RegimeBacktestParams) {
+    setSubmitting(true);
+    setError(null);
+    setResult(null);
+    try {
+      const data = await getRegimeBacktest(params);
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '장세 판별 결과를 불러오지 못했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <RegimeBacktestForm submitting={submitting} onSubmit={handleSubmit} />
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {result && result.candles.length === 0 && (
+        <p className="text-sm text-muted-foreground">선택한 기간에 데이터가 부족합니다.</p>
+      )}
+      {result && result.candles.length > 0 && (
+        <pre className="max-h-96 overflow-auto rounded-lg border bg-muted p-4 text-xs">
+          {JSON.stringify(result, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
