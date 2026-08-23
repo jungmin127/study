@@ -2851,3 +2851,33 @@ def test_replace_live_strategy_returns_409_when_position_open(monkeypatch, tmp_p
     )
 
     assert resp.status_code == 409
+
+
+def test_regime_backtest_returns_evaluated_result(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    captured = {}
+
+    def _fake_evaluate_market(market, timeframe, start, end):
+        captured["args"] = (market, timeframe, start, end)
+        return {
+            "half_life_bars": 24.0, "n_bars": 60, "candles": [],
+            "confusion": {}, "actual_totals": {}, "correlation": None,
+        }
+
+    monkeypatch.setattr(backend_module, "evaluate_market", _fake_evaluate_market)
+
+    resp = client.get(
+        "/api/v1/regime/backtest",
+        params={"market": "KRW-BTC", "timeframe": "minutes60", "start": "2026-01-01", "end": "2026-01-31"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "half_life_bars": 24.0, "n_bars": 60, "candles": [],
+        "confusion": {}, "actual_totals": {}, "correlation": None,
+    }
+    market, timeframe, start, end = captured["args"]
+    assert market == "KRW-BTC"
+    assert timeframe == "minutes60"
+    assert start == datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert end == datetime(2026, 1, 31, 23, 59, 59, tzinfo=timezone.utc)

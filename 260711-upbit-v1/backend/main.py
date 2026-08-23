@@ -69,6 +69,7 @@ from backend.grid_search_service import (
     reset_active_job,
     start_job,
 )
+from backend.regime_service import evaluate_market
 from engine.grid_search_pool import INDICATOR_POOL_SPECS, build_condition_grid
 import httpx
 
@@ -593,6 +594,20 @@ def get_trend_segments_endpoint(market: str) -> dict:
 def refresh_trend_segments_endpoint(market: str) -> dict:
     result = get_or_compute_trend_segments(market, force_refresh=True)
     return {**result, "ohlcv": _trend_segment_ohlcv(market)}
+
+
+@app.get("/api/v1/regime/backtest")
+def get_regime_backtest_endpoint(
+    market: str = Query(...),
+    timeframe: str = Query(...),
+    start: str = Query(...),
+    end: str = Query(...),
+) -> dict:
+    start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt = datetime.strptime(end, "%Y-%m-%d").replace(
+        hour=23, minute=59, second=59, tzinfo=timezone.utc
+    )
+    return evaluate_market(market, timeframe, start_dt, end_dt)
 
 
 @app.get("/api/v1/indicators/catalog")
