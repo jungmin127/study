@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import RegimeBacktestForm, { type RegimeBacktestParams } from '@/components/RegimeBacktestForm';
+import RegimeCurrentPrediction from '@/components/RegimeCurrentPrediction';
 import RegimeChart from '@/components/RegimeChart';
 import RegimeAccuracyReport from '@/components/RegimeAccuracyReport';
 import { ApiError } from '@/lib/api/client';
@@ -10,6 +11,7 @@ import type { RegimeBacktestResult } from '@/lib/types/eda';
 
 export default function RegimeDashboard() {
   const [result, setResult] = useState<RegimeBacktestResult | null>(null);
+  const [market, setMarket] = useState('');
   const [timeframe, setTimeframe] = useState('minutes60');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +22,7 @@ export default function RegimeDashboard() {
     setResult(null);
     try {
       const data = await getRegimeBacktest(params);
+      setMarket(params.market);
       setTimeframe(params.timeframe);
       setResult(data);
     } catch (err) {
@@ -38,6 +41,7 @@ export default function RegimeDashboard() {
       )}
       {result && result.candles.length > 0 && (
         <>
+          <RegimeCurrentPrediction result={result} market={market} timeframe={timeframe} />
           <RegimeChart candles={result.candles} timeframe={timeframe} />
           <RegimeAccuracyReport report={result} />
         </>
