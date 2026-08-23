@@ -9,7 +9,10 @@ Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/regime_backtest.py
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
+
+import numpy as np
 
 from engine.regime_detector import (
     CATEGORY_REFERENCE_SCORES,
@@ -27,16 +30,26 @@ VALIDATION_START = datetime(2024, 1, 1, tzinfo=timezone.utc)
 VALIDATION_END = datetime.now(timezone.utc)
 
 
-def _evaluate_market(market: str, half_life_bars: float, n_bars: int) -> dict[str, dict[str, int]]:
-    """market 하나의 카테고리별 hit/total 카운트를 반환한다."""
+def _evaluate_market(market: str, half_life_bars: float, n_bars: int) -> dict:
+    """market 하나의 (예측 카테고리 x 실제 카테고리) confusion matrix, 실제 카테고리
+    전체분포, 확률벡터-실현수익률 상관계수를 반환한다.
+
+    "적중" 기준의 정규화는 판별 스코어(compute_regime_probs)와 동일하게 봉당 스케일로
+    맞춘다 — realized_return(N_BARS봉 누적수익률)을 그대로 쓰면 realized_volatility(봉당
+    변동성)와 시간 스케일이 안 맞아(대략 sqrt(N_BARS)배) 무의미한 비교가 된다. 정정 내역:
+    docs/superpowers/specs/2026-08-23-realtime-regime-detector-design.md
+    "정정(Task 5 최종리뷰, 2026-08-23)" 문단.
+    """
     df = get_candles(market, TIMEFRAME, VALIDATION_START, VALIDATION_END)
     closes = df["close"]
     returns = closes.pct_change(fill_method=None)
     regime_series = compute_regime_probs_series(df, half_life_bars)
 
-    counts: dict[str, dict[str, int]] = {
-        label: {"hit": 0, "total": 0} for label in CATEGORY_REFERENCE_SCORES
-    }
+    labels = list(CATEGORY_REFERENCE_SCORES.keys())
+    confusion: dict[str, dict[str, int]] = {p: {a: 0 for a in labels} for p in labels}
+    actual_totals: dict[str, int] = {a: 0 for a in labels}
+    predicted_probs: list[float] = []
+    normalized_realized_values: list[float] = []
 
     for t in range(len(df) - n_bars):
         probs = regime_series[t]
@@ -47,18 +60,28 @@ def _evaluate_market(market: str, half_life_bars: float, n_bars: int) -> dict[st
         future_returns = returns.iloc[t + 1 : t + 1 + n_bars]
         if future_returns.empty or future_returns.isna().any():
             continue
-        realized_return = closes.iloc[t + n_bars] / closes.iloc[t] - 1.0
         realized_volatility = ewm_volatility(future_returns, half_life_bars)
         if realized_volatility <= 0:
             continue
-        normalized_realized = realized_return / realized_volatility
+        # 봉당 평균수익률 / 봉당 변동성 (== realized_return / n_bars / realized_volatility) —
+        # 판별 스코어(EWMA 봉당평균 / EWMA 봉당표준편차)와 동일한 시간 스케일.
+        normalized_realized = future_returns.mean() / realized_volatility
         actual = classify_score_to_category(normalized_realized)
 
-        counts[predicted]["total"] += 1
-        if actual == predicted:
-            counts[predicted]["hit"] += 1
+        confusion[predicted][actual] += 1
+        actual_totals[actual] += 1
+        predicted_probs.append(probs[predicted])
+        normalized_realized_values.append(normalized_realized)
 
-    return counts
+    correlation = float("nan")
+    if len(predicted_probs) >= 2:
+        correlation = float(np.corrcoef(predicted_probs, normalized_realized_values)[0, 1])
+
+    return {
+        "confusion": confusion,
+        "actual_totals": actual_totals,
+        "correlation": correlation,
+    }
 
 
 def main() -> None:
@@ -68,14 +91,33 @@ def main() -> None:
 
     for market in MARKETS:
         print(f"\n=== {market} ({TIMEFRAME}) ===")
-        counts = _evaluate_market(market, half_life_bars, n_bars)
+        result = _evaluate_market(market, half_life_bars, n_bars)
+        confusion = result["confusion"]
+        actual_totals = result["actual_totals"]
+        correlation = result["correlation"]
+
+        print("  [예측 카테고리별 hit-rate]")
         for label in CATEGORY_REFERENCE_SCORES:
-            c = counts[label]
-            if c["total"] == 0:
-                print(f"  {label}: 샘플 없음")
+            row = confusion[label]
+            total = sum(row.values())
+            if total == 0:
+                print(f"    {label}: 샘플 없음")
                 continue
-            hit_rate = c["hit"] / c["total"] * 100
-            print(f"  {label}: {c['hit']}/{c['total']} 적중 ({hit_rate:.1f}%)")
+            hit = row[label]
+            hit_rate = hit / total * 100
+            print(f"    {label}: {hit}/{total} 적중 ({hit_rate:.1f}%)")
+
+        if math.isnan(correlation):
+            print("  [확률벡터-실현수익률 상관계수] 계산 불가(샘플 부족)")
+        else:
+            print(f"  [확률벡터-실현수익률 상관계수] {correlation:.3f}")
+
+        total_samples = sum(actual_totals.values())
+        print(f"  [실제 카테고리 분포(전체 샘플 {total_samples}건 기준)]")
+        for label in CATEGORY_REFERENCE_SCORES:
+            n = actual_totals[label]
+            pct = n / total_samples * 100 if total_samples else 0.0
+            print(f"    {label}: {n} ({pct:.1f}%)")
 
 
 if __name__ == "__main__":
