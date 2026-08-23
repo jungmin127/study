@@ -90,6 +90,10 @@
     --marker-exit: oklch(0.705 0.213 47.604);
     --marker-boundary: oklch(0.708 0 0);
     --trend-unclassified: oklch(0.75 0.02 240 / 55%);
+    --regime-surge-up: oklch(0.5 0.27 27.325);
+    --regime-mild-up: oklch(0.75 0.14 35);
+    --regime-mild-down: oklch(0.75 0.1 255);
+    --regime-surge-down: oklch(0.48 0.24 262.881);
   }
   .dark {
     --background: oklch(0.145 0 0);
@@ -129,6 +133,10 @@
     --marker-exit: oklch(0.705 0.213 47.604);
     --marker-boundary: oklch(0.708 0 0);
     --trend-unclassified: oklch(0.75 0.02 240 / 55%);
+    --regime-surge-up: oklch(0.5 0.27 27.325);
+    --regime-mild-up: oklch(0.75 0.14 35);
+    --regime-mild-down: oklch(0.75 0.1 255);
+    --regime-surge-down: oklch(0.48 0.24 262.881);
   }
   * {
     @apply border-border;
