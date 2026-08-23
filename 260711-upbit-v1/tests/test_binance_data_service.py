@@ -127,6 +127,63 @@ def test_parse_klines_empty_input():
     assert df.empty
 
 
+def test_parse_klines_returns_us_resolution_candle_time():
+    """upbit_data_service.get_candles()가 candle_time을 us로 반환하므로(_CANDLE_TIME_UNIT),
+    여기서 ns를 반환하면 backend/main.py의 KOREA_PREMIUM merge(df.merge(binance_df,
+    on="candle_time"))가 "incompatible merge keys ... datetime64[us, UTC] and
+    datetime64[ns, UTC]"로 죽는다(실제로 재현된 버그)."""
+    raw = [_kline(1767225600000, 1922.23)]
+    df = _parse_klines(raw)
+    assert df["candle_time"].dt.unit == "us"
+
+
+def test_load_cache_normalizes_legacy_ns_cache_to_us(monkeypatch, tmp_path):
+    """과거 코드가 ns 해상도로 저장해둔 parquet 캐시 파일을 그대로 읽어도, 반환값은
+    us로 정규화돼야 한다 — 그래야 오늘 캐시가 이미 요청 구간을 전부 커버해 새로 fetch할
+    필요가 없는 경우(gaps=[])에도 merge가 깨지지 않는다."""
+    monkeypatch.setattr(bds, "CACHE_DIR", tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    legacy_ns = pd.DataFrame({
+        "candle_time": pd.date_range("2026-01-01", "2026-01-10", freq="D", tz="UTC"),  # ns by default
+        "close": 1000.0,
+    })
+    assert legacy_ns["candle_time"].dt.unit == "ns"
+    legacy_ns.to_parquet(tmp_path / "ETHUSDT_days.parquet", index=False)
+
+    loaded = bds._load_cache("ETHUSDT", "days")
+
+    assert loaded["candle_time"].dt.unit == "us"
+
+
+def test_get_binance_close_concats_legacy_ns_cache_with_fresh_us_fetch_without_error(monkeypatch, tmp_path):
+    """캐시가 ns(과거 저장분)이고 새로 fetch한 구간이 us(_parse_klines, 현재 파싱 결과)일 때,
+    두 프레임을 concat해도 dtype이 object로 붕괴하거나 에러가 나면 안 된다."""
+    monkeypatch.setattr(bds, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(
+        bds, "datetime",
+        type("_FixedDatetime", (), {
+            "now": staticmethod(lambda tz=None: datetime(2026, 1, 20, tzinfo=timezone.utc))
+        }),
+    )
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    legacy_ns = pd.DataFrame({
+        "candle_time": pd.date_range("2026-01-01", "2026-01-05", freq="D", tz="UTC"),
+        "close": 1000.0,
+    })
+    legacy_ns.to_parquet(tmp_path / "ETHUSDT_days.parquet", index=False)
+
+    def fake_fetch_range(symbol, timeframe, start, end, client=None):
+        idx = pd.date_range(start, end, freq="D", tz="UTC").as_unit("us")  # _parse_klines가 반환하는 것과 동일한 해상도
+        return pd.DataFrame({"candle_time": idx, "close": 2000.0})
+
+    monkeypatch.setattr(bds, "_fetch_range", fake_fetch_range)
+
+    df = get_binance_close("ETHUSDT", "days", datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 10, tzinfo=timezone.utc))
+
+    assert df["candle_time"].dt.unit == "us"
+    assert len(df) == 10
+
+
 def test_fetch_range_single_page_when_within_limit(monkeypatch):
     monkeypatch.setattr(bds, "REQUEST_DELAY_SECONDS", 0.0)
 
@@ -261,6 +318,28 @@ def test_parse_funding_empty_input():
     df = bds._parse_funding([])
     assert list(df.columns) == ["funding_time", "funding_rate"]
     assert df.empty
+
+
+def test_parse_funding_returns_us_resolution_funding_time():
+    """merge_funding_rate가 upbit 캔들(us)과 merge_asof하므로, 여기서 ns를 반환하면
+    "incompatible merge keys ... datetime64[us, UTC] and datetime64[ns, UTC]"로 죽는다."""
+    df = bds._parse_funding([_funding_event(1784073600000, 0.0005)])
+    assert df["funding_time"].dt.unit == "us"
+
+
+def test_load_funding_cache_normalizes_legacy_ns_cache_to_us(monkeypatch, tmp_path):
+    monkeypatch.setattr(bds, "FUNDING_CACHE_DIR", tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    legacy_ns = pd.DataFrame({
+        "funding_time": pd.date_range("2026-01-01", "2026-01-10", freq="D", tz="UTC"),
+        "funding_rate": 0.01,
+    })
+    assert legacy_ns["funding_time"].dt.unit == "ns"
+    legacy_ns.to_parquet(tmp_path / "ETHUSDT.parquet", index=False)
+
+    loaded = bds._load_funding_cache("ETHUSDT")
+
+    assert loaded["funding_time"].dt.unit == "us"
 
 
 def test_fetch_funding_page_returns_raw_events():

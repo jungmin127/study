@@ -77,6 +77,30 @@ def test_parse_fear_greed_empty_input():
     assert df.empty
 
 
+def test_parse_fear_greed_returns_us_resolution_date():
+    """upbit 캔들(candle_time)이 us 해상도라서, 여기서 ns를 반환하면 merge_fear_greed의
+    merge_asof가 "incompatible merge keys ... datetime64[us, UTC] and datetime64[ns, UTC]"로
+    죽는다(실제로 재현된 버그 — 그리드서치에서 시장심리 카테고리를 선택하면 발생)."""
+    raw = [{"value": "42", "value_classification": "Fear", "timestamp": "1517443200"}]
+    df = _parse_fear_greed(raw)
+    assert df["date"].dt.unit == "us"
+
+
+def test_get_fear_greed_cmc_returns_us_resolution_even_from_legacy_ns_cache(monkeypatch, tmp_path):
+    """과거 코드가 ns로 저장해둔 캐시가 아직 fresh해서(오늘 날짜 포함) 그대로 반환되는
+    경로에서도, 결과는 us로 정규화돼야 한다."""
+    monkeypatch.setattr(eds, "CACHE_DIR", tmp_path)
+    today = datetime.now(timezone.utc)
+    cached = pd.DataFrame({"date": pd.to_datetime([today.date()], utc=True), "fear_greed_value": [55.0]})
+    assert cached["date"].dt.unit == "ns"
+    cached.to_parquet(tmp_path / "fear_greed_cmc.parquet", index=False)
+    monkeypatch.setattr(eds, "_fetch_fear_greed_all", _fail_fetch)
+
+    result = get_fear_greed_cmc(today - timedelta(days=1), today)
+
+    assert result["date"].dt.unit == "us"
+
+
 def test_get_fear_greed_cmc_skips_fetch_when_cache_is_fresh(monkeypatch, tmp_path):
     monkeypatch.setattr(eds, "CACHE_DIR", tmp_path)
     today = datetime.now(timezone.utc)

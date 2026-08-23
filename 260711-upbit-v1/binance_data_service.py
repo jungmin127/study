@@ -109,7 +109,11 @@ def _parse_klines(raw: list[list]) -> pd.DataFrame:
             "taker_buy_base", "taker_buy_quote", "ignore",
         ],
     )
-    df["candle_time"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+    # us로 맞춘다 — upbit_data_service.get_candles()가 candle_time을 us로 정규화해서 반환하는데
+    # (upbit_data_service._CANDLE_TIME_UNIT 참고), 여기서 ns 그대로 두면 backend/main.py의
+    # KOREA_PREMIUM merge(df.merge(binance_df, on="candle_time"))가 "incompatible merge keys ...
+    # datetime64[us, UTC] and datetime64[ns, UTC]"로 죽는다.
+    df["candle_time"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True).dt.as_unit("us")
     df["close"] = df["close"].astype(float)
     return df[_CLOSE_COLUMNS].sort_values("candle_time").reset_index(drop=True)
 
@@ -159,6 +163,22 @@ def _fetch_range(
             client.close()
 
 
+def _as_us(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
+    """df[time_col]의 datetime64 해상도를 us로 맞춘다(upbit_data_service._CANDLE_TIME_UNIT과
+    동일). 캐시 parquet 파일(과거 코드가 저장한 것은 ns일 수 있음)을 그대로 읽어 쓰거나,
+    ns로 갓 파싱된 데이터와 concat하면 pandas가 dtype을 object로 붕괴시키거나, 이후
+    backend/main.py의 merge(df.merge(...)/merge_asof)에서 "incompatible merge keys ...
+    datetime64[us, UTC] and datetime64[ns, UTC]"로 죽는다(upbit_data_service.py의
+    _concat_candles와 동일한 클래스의 문제) — 빈 프레임은 그대로 반환한다."""
+    if df.empty or df[time_col].dt.unit == "us":
+        return df
+    return df.assign(**{time_col: df[time_col].dt.as_unit("us")})
+
+
+def _align_time_unit(frames: list[pd.DataFrame], time_col: str) -> list[pd.DataFrame]:
+    return [_as_us(f, time_col) for f in frames]
+
+
 def _compute_gaps(
     cached: pd.DataFrame, start: datetime, end: datetime, time_col: str = "candle_time"
 ) -> list[tuple[datetime, datetime]]:
@@ -187,7 +207,7 @@ def _load_cache(symbol: str, timeframe: str) -> pd.DataFrame:
     path = _cache_path(symbol, timeframe)
     if not path.exists():
         return pd.DataFrame(columns=_CLOSE_COLUMNS)
-    return pd.read_parquet(path)
+    return _as_us(pd.read_parquet(path), "candle_time")
 
 
 def _save_cache(symbol: str, timeframe: str, df: pd.DataFrame) -> None:
@@ -208,7 +228,7 @@ def get_binance_close(symbol: str, timeframe: str, start: datetime, end: datetim
         to_concat = [df for df in [cached, *fetched] if not df.empty]
         if to_concat:
             cached = (
-                pd.concat(to_concat)
+                pd.concat(_align_time_unit(to_concat, "candle_time"))
                 .drop_duplicates(subset="candle_time")
                 .sort_values("candle_time")
                 .reset_index(drop=True)
@@ -267,7 +287,9 @@ def _parse_funding(raw: list[dict]) -> pd.DataFrame:
     if not raw:
         return pd.DataFrame(columns=_FUNDING_COLUMNS)
     df = pd.DataFrame(raw)
-    df["funding_time"] = pd.to_datetime(df["fundingTime"].astype("int64"), unit="ms", utc=True)
+    # us로 맞춘다 — merge_funding_rate()의 merge_asof가 df["candle_time"](upbit, us)과 비교하므로
+    # 여기서 ns 그대로 두면 동일한 "incompatible merge keys" MergeError로 죽는다.
+    df["funding_time"] = pd.to_datetime(df["fundingTime"].astype("int64"), unit="ms", utc=True).dt.as_unit("us")
     df["funding_rate"] = df["fundingRate"].astype(float) * 100
     return (
         df[_FUNDING_COLUMNS]
@@ -324,7 +346,7 @@ def _load_funding_cache(symbol: str) -> pd.DataFrame:
     path = _funding_cache_path(symbol)
     if not path.exists():
         return pd.DataFrame(columns=_FUNDING_COLUMNS)
-    return pd.read_parquet(path)
+    return _as_us(pd.read_parquet(path), "funding_time")
 
 
 def _save_funding_cache(symbol: str, df: pd.DataFrame) -> None:
@@ -344,7 +366,7 @@ def get_binance_funding_rate(symbol: str, start: datetime, end: datetime) -> pd.
         fetched = [_fetch_funding_range(symbol, g_start, g_end) for g_start, g_end in gaps]
         to_concat = [df for df in [cached, *fetched] if not df.empty]
         cached = (
-            pd.concat(to_concat)
+            pd.concat(_align_time_unit(to_concat, "funding_time"))
             .drop_duplicates(subset="funding_time")
             .sort_values("funding_time")
             .reset_index(drop=True)

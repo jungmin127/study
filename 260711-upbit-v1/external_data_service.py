@@ -59,7 +59,11 @@ def _parse_fear_greed(raw: list[dict]) -> pd.DataFrame:
         return pd.DataFrame(columns=_FNG_COLUMNS)
 
     df = pd.DataFrame(raw)
-    df["date"] = pd.to_datetime(df["timestamp"].astype(int), unit="s", utc=True).dt.normalize()
+    # us로 맞춘다 — upbit_data_service.get_candles()가 candle_time을 us로 정규화해서 반환하는데
+    # (upbit_data_service._CANDLE_TIME_UNIT 참고), 여기서 ns 그대로 두면 merge_fear_greed()의
+    # merge_asof가 "incompatible merge keys ... datetime64[us, UTC] and datetime64[ns, UTC]"로
+    # 죽는다.
+    df["date"] = pd.to_datetime(df["timestamp"].astype(int), unit="s", utc=True).dt.normalize().dt.as_unit("us")
     df["fear_greed_value"] = df["value"].astype(float)
     return df[_FNG_COLUMNS].drop_duplicates(subset="date").sort_values("date").reset_index(drop=True)
 
@@ -72,7 +76,13 @@ def _load_cache() -> pd.DataFrame:
     path = _cache_path()
     if not path.exists():
         return pd.DataFrame(columns=_FNG_COLUMNS)
-    return pd.read_parquet(path)
+    df = pd.read_parquet(path)
+    # us로 맞춘다 — _parse_fear_greed와 동일한 이유(merge_fear_greed의 merge_asof가
+    # 업비트 캔들의 us 해상도와 비교하므로, 과거에 ns로 저장된 캐시 파일이 그대로 반환되면
+    # MergeError를 던진다).
+    if not df.empty and df["date"].dt.unit != "us":
+        df = df.assign(date=df["date"].dt.as_unit("us"))
+    return df
 
 
 def _save_cache(df: pd.DataFrame) -> None:
