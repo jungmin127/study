@@ -50,53 +50,66 @@ export default function RegimeAccuracyReport({ report }: RegimeAccuracyReportPro
         </p>
       </div>
 
-      <div>
-        <h2 className="mb-2 text-sm font-semibold">Confusion Matrix (행=예측, 열=실제)</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="py-1.5">예측\실제</th>
-                {CATEGORY_ORDER.map((label) => (
-                  <th key={label} className="py-1.5 text-right">
-                    {label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {CATEGORY_ORDER.map((predicted) => (
-                <tr key={predicted} className="border-b last:border-0">
-                  <td className="py-1.5 font-medium">{predicted}</td>
-                  {CATEGORY_ORDER.map((actual) => (
-                    <td key={actual} className="py-1.5 text-right tabular-nums">
-                      {confusion[predicted][actual]}
-                    </td>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div>
+          <h2 className="mb-2 text-sm font-semibold">Confusion Matrix (행=실제, 열=예측)</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="py-1.5">실제\예측</th>
+                  {CATEGORY_ORDER.map((label) => (
+                    <th key={label} className="py-1.5 text-right">
+                      {label}
+                    </th>
                   ))}
                 </tr>
-              ))}
+              </thead>
+              <tbody>
+                {CATEGORY_ORDER.map((actual) => {
+                  const rowTotal = actual_totals[actual];
+                  return (
+                    <tr key={actual} className="border-b last:border-0">
+                      <td className="py-1.5 font-medium">{actual}</td>
+                      {CATEGORY_ORDER.map((predicted) => {
+                        const value = confusion[predicted][actual];
+                        const ratio = rowTotal ? value / rowTotal : 0;
+                        return (
+                          <td
+                            key={predicted}
+                            className="py-1.5 text-right tabular-nums"
+                            style={{ backgroundColor: `oklch(0.55 0.2 255 / ${(ratio * 0.5).toFixed(2)})` }}
+                          >
+                            {value}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div>
+          <h2 className="mb-2 text-sm font-semibold">실제 카테고리 분포 (전체 {totalSamples}건)</h2>
+          <table className="w-full text-sm">
+            <tbody>
+              {CATEGORY_ORDER.map((label) => {
+                const n = actual_totals[label];
+                const pct = totalSamples ? (n / totalSamples) * 100 : 0;
+                return (
+                  <tr key={label} className="border-b last:border-0">
+                    <td className="py-1.5">{label}</td>
+                    <td className="py-1.5 text-right tabular-nums">{n}</td>
+                    <td className="py-1.5 text-right tabular-nums">{pct.toFixed(1)}%</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-sm font-semibold">실제 카테고리 분포 (전체 {totalSamples}건)</h2>
-        <table className="w-full text-sm">
-          <tbody>
-            {CATEGORY_ORDER.map((label) => {
-              const n = actual_totals[label];
-              const pct = totalSamples ? (n / totalSamples) * 100 : 0;
-              return (
-                <tr key={label} className="border-b last:border-0">
-                  <td className="py-1.5">{label}</td>
-                  <td className="py-1.5 text-right tabular-nums">{n}</td>
-                  <td className="py-1.5 text-right tabular-nums">{pct.toFixed(1)}%</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
       </div>
     </div>
   );
