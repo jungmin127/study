@@ -115,6 +115,26 @@ export interface TrendSegmentAnalysis {
   ohlcv: OhlcvPoint[];
 }
 
+export type RegimeCategory = '급상승' | '완만상승' | '횡보' | '완만하락' | '급하락';
+
+export interface RegimeCandle {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  predicted_category: RegimeCategory | null;
+}
+
+export interface RegimeBacktestResult {
+  half_life_bars: number;
+  n_bars: number;
+  candles: RegimeCandle[];
+  confusion: Record<RegimeCategory, Record<RegimeCategory, number>>;
+  actual_totals: Record<RegimeCategory, number>;
+  correlation: number | null;
+}
+
 export interface IndicatorParamDef {
   key: string;
   label: string;
