@@ -507,6 +507,16 @@ git commit -m "feat: 실현수익률 정답 라벨링용 하드 분류 함수 �
 이 태스크는 pytest 테스트가 아니라 스크립트를 실제로 실행해 출력을 확인하는 것으로
 검증한다(스펙의 "사람이 눈으로 보는 도구" 방침).
 
+> **정정(최종 브랜치 리뷰, 2026-08-23, 커밋 436732f/9bf2106):** 아래 Step 1의
+> `normalized_realized = realized_return / realized_volatility`(N_BARS 누적수익률을
+> 봉당 변동성으로 나눔)는 **버그다** — 판별 스코어는 봉당 스케일인데 이건 60배 어긋난
+> 값이라 hit-rate 측정 자체가 무의미했다(순수 랜덤워크 시뮬레이션으로 실제 버그있는
+> 콘솔출력을 그대로 재현해 증명됨). 아래 `main()`도 상관계수/confusion matrix/실제분포
+> 출력이 빠져있다. **실제로 구현된 최종 코드는 `future_returns.mean() / realized_volatility`
+> (봉당 평균)로 정규화하고, 부호있는 기댓값(`Σ probs[label]*CATEGORY_REFERENCE_SCORES[label]`)
+> 기준 상관계수 + confusion matrix를 출력한다.** 아래 코드 블록은 스냅샷이니, 참고할 일이
+> 있으면 `scripts/regime_backtest.py`의 실제 코드 + 스펙 문서의 정정 노트를 따를 것.
+
 - [ ] **Step 1: 스크립트 작성**
 
 `scripts/regime_backtest.py` 신규 생성:

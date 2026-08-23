@@ -27,7 +27,13 @@ CATEGORY_REFERENCE_SCORES: dict[str, float] = {
 
 def _softmax_categorize(score: float, temperature: float = TEMPERATURE) -> dict[str, float]:
     """score와 각 카테고리 대표값의 거리에 softmax를 적용해 확률벡터를 만든다.
-    합계는 항상 1.0."""
+    합계는 항상 1.0.
+
+    L1 거리 커널이라 |score|가 가장 바깥 대표값(현재 2.0)을 넘어서면 확률벡터가
+    포화된다 — score=2.0과 score=100이 동일한 벡터를 내고, 최댓값 확률은 절대
+    0.67을 넘지 않는다(최종 브랜치 리뷰 실측). CATEGORY_REFERENCE_SCORES를
+    재보정할 때는 temperature도 같이 조정해야 한다 — 대표값 간격만 좁히고
+    temperature를 그대로 두면 모든 확률이 ~0.2로 뭉개져 신뢰도 수치가 무의미해진다."""
     labels = list(CATEGORY_REFERENCE_SCORES.keys())
     neg_distances = [
         -abs(score - CATEGORY_REFERENCE_SCORES[label]) / temperature for label in labels
