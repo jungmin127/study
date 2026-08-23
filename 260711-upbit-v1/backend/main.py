@@ -914,7 +914,13 @@ def _fetch_backtest_dataframe(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if df.empty:
-        raise HTTPException(status_code=400, detail="해당 기간에 캔들 데이터가 없습니다")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"해당 기간에 캔들 데이터가 없습니다: {market} {timeframe} "
+                f"{start_dt.date()}~{end_dt.date()}"
+            ),
+        )
 
     required_bars = max(max_required_period(buy_dict), max_required_period(sell_dict))
     if len(df) < required_bars:
@@ -1169,8 +1175,14 @@ _ESTIMATED_COMBOS_PER_SEC = 11.0
 
 @app.get("/api/v1/grid-search/estimate")
 def estimate_grid_search_endpoint(categories: str = "", exclude_indicators: str = "", market: str = "") -> dict:
+    selected_categories = [c.strip() for c in categories.split(",") if c.strip()] or ["오실레이터"]
+    unknown_categories = set(selected_categories) - set(INDICATOR_POOL_SPECS)
+    if unknown_categories:
+        raise HTTPException(
+            status_code=400, detail=f"알 수 없는 지표 카테고리입니다: {', '.join(sorted(unknown_categories))}"
+        )
     pool = {
-        "categories": [c.strip() for c in categories.split(",") if c.strip()] or ["오실레이터"],
+        "categories": selected_categories,
         "excluded_indicators": [i.strip() for i in exclude_indicators.split(",") if i.strip()],
     }
     buy_conditions, sell_conditions = build_condition_grid(pool, market=market or None)

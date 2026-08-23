@@ -2340,6 +2340,13 @@ def test_grid_search_estimate_endpoint_returns_combo_counts(monkeypatch, tmp_pat
     assert data["estimated_seconds"] > 0
 
 
+def test_grid_search_estimate_endpoint_rejects_unknown_category(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    resp = client.get("/api/v1/grid-search/estimate", params={"categories": "존재안함"})
+    assert resp.status_code == 400
+    assert "존재안함" in resp.json()["detail"]
+
+
 def test_grid_search_indicator_pool_endpoint_returns_per_category_indicators(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     resp = client.get("/api/v1/grid-search/indicator-pool")

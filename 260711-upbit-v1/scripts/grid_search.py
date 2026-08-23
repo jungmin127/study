@@ -384,11 +384,11 @@ def main() -> None:
     buy_conditions, sell_conditions = build_condition_grid(pool, market=args.market)
     total_combos = len(buy_conditions) * len(sell_conditions)
     print(
-        f"[2] 매수 조건 {len(buy_conditions)}개 x 매도 조건 {len(sell_conditions)}개 = 총 {total_combos:,}개 조합",
+        f"[1] 매수 조건 {len(buy_conditions)}개 x 매도 조건 {len(sell_conditions)}개 = 총 {total_combos:,}개 조합",
         flush=True,
     )
 
-    print(f"[1] 캔들 조회: {args.market} {args.timeframe} {args.start} ~ {args.end}", flush=True)
+    print(f"[2] 캔들 조회: {args.market} {args.timeframe} {args.start} ~ {args.end}", flush=True)
     # 체이닝 시 베이스 조건(base_buy_group/base_sell_group)에 등장하는 지표도 감지용
     # 트리에 포함해야 한다 — 그래야 _fetch_backtest_dataframe가 베이스가 요구하는 보조
     # 데이터(btc_close/fear_greed_value 등)를 함께 병합한다(최종 리뷰 Critical #1).

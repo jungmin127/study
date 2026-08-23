@@ -479,7 +479,16 @@ def test_main_parses_categories_and_exclude_indicators_args(monkeypatch, capsys)
         captured_pool["pool"] = pool
         return [], []
 
+    class _StopEarly(Exception):
+        pass
+
+    def fake_fetch(*args, **kwargs):
+        raise _StopEarly()
+
     monkeypatch.setattr(grid_search, "build_condition_grid", fake_build_condition_grid)
+    # 캔들 조회는 이 테스트의 관심사가 아니다 — 실 네트워크/캐시에 의존하지 않도록 파싱 결과를
+    # 검증하는 시점(build_condition_grid 호출 직후)에 바로 멈춘다.
+    monkeypatch.setattr(grid_search, "_fetch_backtest_dataframe", fake_fetch)
     monkeypatch.setattr(
         sys, "argv",
         [
@@ -488,10 +497,8 @@ def test_main_parses_categories_and_exclude_indicators_args(monkeypatch, capsys)
             "--categories", "오실레이터,추세", "--exclude-indicators", "MOMENTUM_PCT",
         ],
     )
-    try:
+    with pytest.raises(_StopEarly):
         grid_search.main()
-    except SystemExit:
-        pass  # 빈 조합이라 캔들 조회 이후 어딘가에서 중단돼도 괜찮다 — 파싱 결과만 검증
     assert captured_pool["pool"] == {
         "categories": ["오실레이터", "추세"],
         "excluded_indicators": ["MOMENTUM_PCT"],
@@ -566,8 +573,10 @@ def test_main_raises_when_base_run_id_not_found(monkeypatch):
             "--base-run-id", "nonexistent-id-xyz", "--combinator", "AND",
         ],
     )
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc_info:
         grid_search.main()
+    assert "베이스 결과를 찾을 수 없습니다" in str(exc_info.value)
+    assert "nonexistent-id-xyz" in str(exc_info.value)
 
 
 def test_main_raises_when_base_run_id_has_no_conditions(monkeypatch):
@@ -590,5 +599,7 @@ def test_main_raises_when_base_run_id_has_no_conditions(monkeypatch):
             "--base-run-id", "signal-strategy-run-id", "--combinator", "AND",
         ],
     )
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc_info:
         grid_search.main()
+    assert "베이스 결과에 매수/매도 조건이 없습니다" in str(exc_info.value)
+    assert "signal-strategy-run-id" in str(exc_info.value)

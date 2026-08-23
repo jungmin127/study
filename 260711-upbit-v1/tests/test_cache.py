@@ -802,6 +802,61 @@ def test_create_grid_search_job_persists_chaining_fields(monkeypatch, tmp_path):
     assert job["combinator"] == "OR"
 
 
+def test_pre_existing_grid_search_job_row_survives_chaining_columns_migration(monkeypatch, tmp_path):
+    """ALTER TABLE로 indicator_pool/base_run_id/combinator 3개 컬럼이 추가되기 전에 이미
+    저장돼 있던 job row가, 마이그레이션(engine.cache._connect) 이후에도 손상 없이 그대로
+    조회돼야 한다(최종 리뷰가 이월한 Task 1 백로그 — 실 DB 수동 확인은 됐지만 자동 회귀
+    테스트가 없었다)."""
+    import sqlite3
+
+    db_path = tmp_path / "results.db"
+    monkeypatch.setattr(cache_module, "DB_PATH", db_path)
+
+    # 구버전 스키마(신규 3개 컬럼 없음)를 직접 만들고 행을 하나 심어둔다.
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE grid_search_jobs (
+            id             TEXT PRIMARY KEY,
+            market         TEXT NOT NULL,
+            timeframe      TEXT NOT NULL,
+            capital        REAL NOT NULL,
+            start          TEXT NOT NULL,
+            end            TEXT NOT NULL,
+            top_n          INTEGER NOT NULL,
+            status         TEXT NOT NULL,
+            total_combos   INTEGER,
+            done_combos    INTEGER NOT NULL DEFAULT 0,
+            started_at     TEXT NOT NULL,
+            finished_at    TEXT,
+            elapsed_sec    REAL,
+            error_message  TEXT,
+            result_json    TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO grid_search_jobs "
+        "(id, market, timeframe, capital, start, end, top_n, status, done_combos, started_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("legacy-job", "KRW-BTC", "minutes60", 1_000_000.0, "2026-01-01", "2026-02-01", 20, "completed", 100, "2026-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    # get_grid_search_job() 내부에서 _connect()가 호출되며 ALTER TABLE 마이그레이션이 실행된다.
+    job = get_grid_search_job("legacy-job")
+
+    assert job is not None
+    assert job["id"] == "legacy-job"
+    assert job["market"] == "KRW-BTC"
+    assert job["status"] == "completed"
+    assert job["done_combos"] == 100
+    assert job["indicator_pool"] is None
+    assert job["base_run_id"] is None
+    assert job["combinator"] is None
+
+
 def test_create_grid_search_job_without_chaining_fields_defaults_to_none(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
     job_id = "test-chain-job-2"
