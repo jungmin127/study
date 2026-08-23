@@ -54,12 +54,19 @@ def _ewm_series(returns: pd.Series, half_life_bars: float) -> pd.Series:
     return returns.ewm(halflife=half_life_bars).mean()
 
 
+def _ewm_std_series(returns: pd.Series, half_life_bars: float) -> pd.Series:
+    """수익률의 지수가중 표준편차 시계열(변동성 계산 전용). ewm_volatility와
+    compute_regime_probs_series가 공유한다(momentum이 _ewm_series를 공유하는 것과
+    대칭 구조)."""
+    return returns.ewm(halflife=half_life_bars).std()
+
+
 def ewm_volatility(returns: pd.Series, half_life_bars: float) -> float:
     """수익률의 지수가중 표준편차(가장 최근 값) — 변동성 정규화용.
     분자(모멘텀=EWMA 평균)와 분모가 서로 다른 통계량이어야 score가 카테고리 대표값
     ±2.0(급상승/급하락)에 실제로 도달할 수 있다(EWMA 절댓값평균을 쓰면 삼각부등식으로
     score가 [-1, 1]에 갇히는 버그가 있었다 — Task 3 최종리뷰에서 발견)."""
-    return float(returns.ewm(halflife=half_life_bars).std().iloc[-1])
+    return float(_ewm_std_series(returns, half_life_bars).iloc[-1])
 
 
 def compute_regime_probs_series(
@@ -75,7 +82,7 @@ def compute_regime_probs_series(
     returns = df["close"].pct_change(fill_method=None)
     valid_counts = returns.notna().cumsum()
     momentum_series = _ewm_series(returns, half_life_bars)
-    volatility_series = returns.ewm(halflife=half_life_bars).std()
+    volatility_series = _ewm_std_series(returns, half_life_bars)
 
     results: list[dict[str, float] | None] = []
     for i in range(len(df)):
@@ -95,7 +102,5 @@ def compute_regime_probs_series(
 def compute_regime_probs(df: pd.DataFrame, half_life_bars: float) -> dict[str, float] | None:
     """df: candle_time 오름차순, close 컬럼 포함(get_candles()가 반환하는 형태 그대로).
     워밍업(half_life_bars * WARMUP_MULTIPLIER) 미만이면 None(판단불가) 반환."""
-    if df.empty or "close" not in df.columns:
-        return None
     series = compute_regime_probs_series(df, half_life_bars)
     return series[-1] if series else None

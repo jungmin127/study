@@ -185,6 +185,26 @@ def test_compute_regime_probs_strong_consistent_downtrend_reaches_surge_down():
     assert max(probs, key=probs.get) == "급하락"
 
 
+def test_compute_regime_probs_noisy_strong_uptrend_reaches_surge_up():
+    """위 두 테스트는 분산이 거의 0이라 _MIN_VOLATILITY_FLOOR에 걸리는 퇴화 케이스다
+    (구공식 대비 신공식을 구분하는 증거로는 유효하지만, 실제 volatility 항이 쓰이는지는
+    검증하지 못한다). 매 봉 +5% 근처에 ±0.5% 노이즈를 섞어 분산이 뚜렷이 0보다 큰
+    비퇴화 케이스에서도 여전히 급상승이 최댓값이 되는지 확인한다(score ≈ 8.8)."""
+    df = _make_noisy_trend_df(base_daily_return=0.05, noise_scale=0.005, seed=3, n=60)
+    probs = compute_regime_probs(df, half_life_bars=3.0)
+    assert probs is not None
+    assert max(probs, key=probs.get) == "급상승"
+
+
+def test_compute_regime_probs_noisy_strong_downtrend_reaches_surge_down():
+    """대칭 검증: 매 봉 -5% 근처에 ±0.5% 노이즈를 섞은 비퇴화 하락 케이스에서도
+    급하락이 최댓값이 되는지 확인한다."""
+    df = _make_noisy_trend_df(base_daily_return=-0.05, noise_scale=0.005, seed=4, n=60)
+    probs = compute_regime_probs(df, half_life_bars=3.0)
+    assert probs is not None
+    assert max(probs, key=probs.get) == "급하락"
+
+
 def test_compute_regime_probs_shorter_half_life_reacts_faster_to_recent_reversal():
     """앞 40봉 하락 후 뒤 15봉 급격히 상승 반전 — half-life가 짧을수록
     반전 이후 상승쪽 확률 합이 더 커야 한다."""
@@ -203,9 +223,15 @@ def test_compute_regime_probs_shorter_half_life_reacts_faster_to_recent_reversal
 
 def test_compute_regime_probs_series_matches_pointwise_calls():
     """벡터화 버전이 매 시점 truncated df로 개별 호출한 것과 동일한 결과를 내는지
-    고정한다(인과성 회귀가드 — 미래 데이터가 새어 들어가면 이 테스트가 깨진다)."""
-    closes = [100.0 * (1.01**i) for i in range(60)]
-    df = _make_price_df(closes)
+    고정한다(인과성 회귀가드 — 미래 데이터가 새어 들어가면 이 테스트가 깨진다).
+
+    등비수열(노이즈 없는 완전 매끄러운 시계열)을 쓰면 EWMA 표준편차가 거의 0
+    (1e-17 수준)이 되어 _MIN_VOLATILITY_FLOOR(1e-6)에 항상 걸리고, score가 항상
+    momentum / floor가 되어 volatility 항이 전혀 안 쓰인다 — 그 결과 volatility
+    계산부에 미래 데이터 누수가 생겨도 이 테스트가 못 잡는 사각지대가 있었다
+    (Task 3 재리뷰에서 발견). 노이즈 섞인 비단조 시계열(_make_noisy_trend_df)로
+    바꿔 실제 표준편차 값이 쓰이는 상황에서 인과성을 검증한다."""
+    df = _make_noisy_trend_df(base_daily_return=0.01, noise_scale=0.006, seed=7, n=60)
     half_life_bars = 3.0
 
     series = compute_regime_probs_series(df, half_life_bars)
