@@ -48,7 +48,7 @@ def _evaluate_market(market: str, half_life_bars: float, n_bars: int) -> dict:
     labels = list(CATEGORY_REFERENCE_SCORES.keys())
     confusion: dict[str, dict[str, int]] = {p: {a: 0 for a in labels} for p in labels}
     actual_totals: dict[str, int] = {a: 0 for a in labels}
-    predicted_probs: list[float] = []
+    expected_scores: list[float] = []
     normalized_realized_values: list[float] = []
 
     for t in range(len(df) - n_bars):
@@ -70,12 +70,16 @@ def _evaluate_market(market: str, half_life_bars: float, n_bars: int) -> dict:
 
         confusion[predicted][actual] += 1
         actual_totals[actual] += 1
-        predicted_probs.append(probs[predicted])
+        # probs[predicted](=max 확률, 항상 양수인 "확신도")는 부호가 없어 실현값의
+        # 방향과 상관시키면 급상승 확신과 급하락 확신이 서로 상쇄돼 신호가 사라진다
+        # (Task 5 재리뷰, 2026-08-23). 확률벡터의 기댓값(부호 있는 스코어)을 대신 쓴다.
+        expected_score = sum(probs[label] * CATEGORY_REFERENCE_SCORES[label] for label in probs)
+        expected_scores.append(expected_score)
         normalized_realized_values.append(normalized_realized)
 
     correlation = float("nan")
-    if len(predicted_probs) >= 2:
-        correlation = float(np.corrcoef(predicted_probs, normalized_realized_values)[0, 1])
+    if len(expected_scores) >= 2:
+        correlation = float(np.corrcoef(expected_scores, normalized_realized_values)[0, 1])
 
     return {
         "confusion": confusion,
@@ -111,6 +115,16 @@ def main() -> None:
             print("  [확률벡터-실현수익률 상관계수] 계산 불가(샘플 부족)")
         else:
             print(f"  [확률벡터-실현수익률 상관계수] {correlation:.3f}")
+
+        print("  [confusion matrix] 행=예측, 열=실제")
+        header = "    " + "예측\\실제".ljust(10) + "".join(label.ljust(10) for label in CATEGORY_REFERENCE_SCORES)
+        print(header)
+        for predicted_label in CATEGORY_REFERENCE_SCORES:
+            row = confusion[predicted_label]
+            row_str = "    " + predicted_label.ljust(10) + "".join(
+                str(row[actual_label]).ljust(10) for actual_label in CATEGORY_REFERENCE_SCORES
+            )
+            print(row_str)
 
         total_samples = sum(actual_totals.values())
         print(f"  [실제 카테고리 분포(전체 샘플 {total_samples}건 기준)]")
