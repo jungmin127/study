@@ -1,5 +1,5 @@
 import type { RegimeBacktestResult, RegimeCategory } from '@/lib/types/eda';
-import { formatTimeframe } from '@/lib/format';
+import { formatDateTime, formatTimeframe } from '@/lib/format';
 
 const CATEGORY_ORDER: RegimeCategory[] = ['급상승', '완만상승', '횡보', '완만하락', '급하락'];
 
@@ -33,7 +33,7 @@ export default function RegimeCurrentPrediction({ result, market, timeframe }: R
 
   const { time, predicted_category, probs } = current_prediction;
   const daysAhead = (n_bars / half_life_bars).toFixed(1);
-  const formattedTime = new Date(time).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
+  const formattedTime = formatDateTime(time);
 
   return (
     <div className="rounded-xl border p-6 shadow-sm">

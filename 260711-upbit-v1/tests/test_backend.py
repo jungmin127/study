@@ -2862,6 +2862,7 @@ def test_regime_backtest_returns_evaluated_result(monkeypatch, tmp_path):
         return {
             "half_life_bars": 24.0, "n_bars": 60, "candles": [],
             "confusion": {}, "actual_totals": {}, "correlation": None,
+            "current_prediction": None,
         }
 
     monkeypatch.setattr(backend_module, "evaluate_market", _fake_evaluate_market)
@@ -2875,6 +2876,7 @@ def test_regime_backtest_returns_evaluated_result(monkeypatch, tmp_path):
     assert resp.json() == {
         "half_life_bars": 24.0, "n_bars": 60, "candles": [],
         "confusion": {}, "actual_totals": {}, "correlation": None,
+        "current_prediction": None,
     }
     market, timeframe, start, end = captured["args"]
     assert market == "KRW-BTC"
