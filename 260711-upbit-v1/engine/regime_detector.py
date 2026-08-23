@@ -104,3 +104,17 @@ def compute_regime_probs(df: pd.DataFrame, half_life_bars: float) -> dict[str, f
     워밍업(half_life_bars * WARMUP_MULTIPLIER) 미만이면 None(판단불가) 반환."""
     series = compute_regime_probs_series(df, half_life_bars)
     return series[-1] if series else None
+
+
+def classify_score_to_category(score: float) -> str:
+    """score를 CATEGORY_REFERENCE_SCORES 대표값 사이 중간점 경계로 하드 분류한다
+    (검증스크립트가 실현수익률의 "정답" 카테고리를 매길 때 사용 — compute_regime_probs의
+    softmax 확률과 달리 단일 라벨만 반환)."""
+    ordered = sorted(CATEGORY_REFERENCE_SCORES.items(), key=lambda kv: kv[1])
+    for i in range(len(ordered) - 1):
+        label, ref = ordered[i]
+        _next_label, next_ref = ordered[i + 1]
+        boundary = (ref + next_ref) / 2
+        if score < boundary:
+            return label
+    return ordered[-1][0]

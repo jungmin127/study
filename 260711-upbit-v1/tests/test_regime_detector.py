@@ -7,6 +7,7 @@ import pytest
 from engine.regime_detector import (
     CATEGORY_REFERENCE_SCORES,
     _softmax_categorize,
+    classify_score_to_category,
     compute_regime_probs,
     compute_regime_probs_series,
     ewm_volatility,
@@ -240,3 +241,16 @@ def test_compute_regime_probs_series_matches_pointwise_calls():
     for t in (20, 40, 59):
         pointwise = compute_regime_probs(df.iloc[: t + 1], half_life_bars)
         assert series[t] == pointwise
+
+
+def test_classify_score_to_category_boundaries():
+    assert classify_score_to_category(-5.0) == "급하락"
+    assert classify_score_to_category(-1.0) == "완만하락"
+    assert classify_score_to_category(0.0) == "횡보"
+    assert classify_score_to_category(1.0) == "완만상승"
+    assert classify_score_to_category(5.0) == "급상승"
+
+
+def test_classify_score_to_category_at_exact_midpoint_goes_to_higher_bucket():
+    # 완만하락(-0.7)과 횡보(0.0) 사이 중간점 = -0.35
+    assert classify_score_to_category(-0.35) == "횡보"
