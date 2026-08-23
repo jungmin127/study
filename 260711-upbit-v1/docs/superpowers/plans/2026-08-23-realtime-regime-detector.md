@@ -218,6 +218,17 @@ git commit -m "feat: 타임프레임별 half-life 봉수 환산 함수 추가"
 
 ## Task 3: EWMA 위험조정 모멘텀 스코어 + regime_probs 계산
 
+> **정정(Task 3 최종리뷰+재검증, 2026-08-23, 커밋 a9587ad):** 아래 Step 3의
+> `_ewm_series(..., abs_values=True)`/`returns.abs().ewm(...).mean()` 기반 변동성 계산은
+> **버그다** — 분자·분모가 같은 가중치 구조라 삼각부등식에 의해 score가 항상 [-1, 1]에
+> 갇혀 급상승/급하락(±2.0) 카테고리에 영원히 도달할 수 없다(실측: 랜덤 시뮬레이션에서
+> `|score|` 최댓값 0.991, 하루 +2%/+50% 추세가 똑같이 score=1.0). **실제로 구현된 최종
+> 코드는 변동성을 `returns.ewm(halflife=half_life_bars).std()`(지수가중 표준편차)로
+> 계산한다** — `abs_values` 파라미터는 제거되고 `_ewm_series`는 momentum 전용으로
+> 단순화됐다. 아래 코드 블록은 이 태스크가 처음 실행됐을 때의 스냅샷이라 이 버그를
+> 그대로 담고 있으니, 이 플랜을 다시 실행하거나 참고할 일이 있으면 **아래 코드가 아니라
+> `engine/regime_detector.py`의 실제 코드 + 스펙 문서의 정정 노트를 따를 것.**
+
 **Files:**
 - Modify: `engine/regime_detector.py`
 - Test: `tests/test_regime_detector.py`
