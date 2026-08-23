@@ -71,3 +71,14 @@ def test_evaluate_market_uptrend_confusion_favors_up_categories(monkeypatch):
     total_predictions = sum(sum(row.values()) for row in result["confusion"].values())
     assert total_predictions > 0
     assert total_up_predictions == total_predictions  # 순수 상승추세이므로 하락계열 예측은 0건이어야 함
+
+
+def test_evaluate_market_raises_value_error_when_candle_count_exceeds_max(monkeypatch):
+    closes = [100.0 + i for i in range(regime_service.MAX_CANDLES + 1)]
+    monkeypatch.setattr(regime_service, "get_candles", lambda *a, **k: _make_candle_df(closes))
+
+    with pytest.raises(ValueError, match="너무 많습니다"):
+        evaluate_market(
+            "KRW-BTC", "days",
+            datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )

@@ -24,6 +24,7 @@ from engine.regime_detector import (
 from upbit_data_service import get_candles
 
 N_MULTIPLIER = 2.5
+MAX_CANDLES = 20_000
 
 
 def _to_utc_iso(value: datetime) -> str:
@@ -51,11 +52,19 @@ def evaluate_market(market: str, timeframe: str, start: datetime, end: datetime)
       confusion: {예측카테고리: {실제카테고리: 건수}}
       actual_totals: {실제카테고리: 건수}
       correlation: 확률벡터 기댓값과 정규화된 실현수익률의 상관계수(샘플 2건 미만이면 None)
+
+    캔들 수가 MAX_CANDLES를 초과하면(예: minutes1 × 장기간) ValueError를 던진다 — 온디맨드
+    계산이라 캐싱이 없고 O(n × n_bars) 루프라 저사양 서버에서 OOM/응답지연 위험이 크다.
     """
     half_life_bars = half_life_bars_for_timeframe(timeframe)
     n_bars = round(half_life_bars * N_MULTIPLIER)
 
     df = get_candles(market, timeframe, start, end)
+    if len(df) > MAX_CANDLES:
+        raise ValueError(
+            f"요청한 기간의 캔들 수({len(df)}개)가 너무 많습니다(최대 {MAX_CANDLES:,}개). "
+            "기간을 줄이거나 더 큰 봉타입을 선택하세요."
+        )
     closes = df["close"]
     returns = closes.pct_change(fill_method=None)
     regime_series = compute_regime_probs_series(df, half_life_bars)

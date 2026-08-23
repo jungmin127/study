@@ -603,11 +603,16 @@ def get_regime_backtest_endpoint(
     start: str = Query(...),
     end: str = Query(...),
 ) -> dict:
-    start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    end_dt = datetime.strptime(end, "%Y-%m-%d").replace(
-        hour=23, minute=59, second=59, tzinfo=timezone.utc
-    )
-    return evaluate_market(market, timeframe, start_dt, end_dt)
+    try:
+        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, tzinfo=timezone.utc
+        )
+        return evaluate_market(market, timeframe, start_dt, end_dt)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/v1/indicators/catalog")

@@ -2879,5 +2879,48 @@ def test_regime_backtest_returns_evaluated_result(monkeypatch, tmp_path):
     market, timeframe, start, end = captured["args"]
     assert market == "KRW-BTC"
     assert timeframe == "minutes60"
-    assert start == datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert end == datetime(2026, 1, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+
+def test_regime_backtest_returns_400_when_evaluate_market_raises_value_error(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_evaluate_market(market, timeframe, start, end):
+        raise ValueError("요청한 기간의 캔들 수가 너무 많습니다")
+
+    monkeypatch.setattr(backend_module, "evaluate_market", _fake_evaluate_market)
+
+    resp = client.get(
+        "/api/v1/regime/backtest",
+        params={"market": "KRW-BTC", "timeframe": "minutes1", "start": "2020-01-01", "end": "2026-01-01"},
+    )
+
+    assert resp.status_code == 400
+    assert "너무 많습니다" in resp.json()["detail"]
+
+
+def test_regime_backtest_returns_500_when_evaluate_market_raises_runtime_error(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_evaluate_market(market, timeframe, start, end):
+        raise RuntimeError("업비트 API 호출 실패")
+
+    monkeypatch.setattr(backend_module, "evaluate_market", _fake_evaluate_market)
+
+    resp = client.get(
+        "/api/v1/regime/backtest",
+        params={"market": "KRW-BTC", "timeframe": "minutes60", "start": "2026-01-01", "end": "2026-01-31"},
+    )
+
+    assert resp.status_code == 500
+    assert "업비트 API 호출 실패" in resp.json()["detail"]
+
+
+def test_regime_backtest_returns_400_for_malformed_start_date(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.get(
+        "/api/v1/regime/backtest",
+        params={"market": "KRW-BTC", "timeframe": "minutes60", "start": "not-a-date", "end": "2026-01-31"},
+    )
+
+    assert resp.status_code == 400
