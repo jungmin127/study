@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import BacktestCoinFilter, { type CoinFilterOption } from '@/components/BacktestCoinFilter';
+import { GRID_SEARCH_POOL_CATEGORIES } from '@/lib/indicator-categories';
 import { returnRateColor } from '@/lib/return-rate-color';
 import { formatDateTime, formatFrequency, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
 import { parseGridResultTitle } from '@/lib/grid-result-title';
@@ -100,7 +101,12 @@ function buildJobTree(jobs: GridSearchJob[]): JobTreeNode[] {
   }
 
   const nodes: JobTreeNode[] = [];
+  const visited = new Set<string>(); // DB 손상으로 순환 참조(자기 자신을 베이스로 삼는 등)가
+  // 생겨도 무한루프에 빠지지 않도록 방어한다 — 정상 데이터에서는 base_run_id가 항상 더 이전에
+  // 저장된 결과를 가리키므로 순환이 생길 수 없다.
   function visit(job: GridSearchJob, depth: number, baseResult: GridSearchSavedResult | null) {
+    if (visited.has(job.id)) return;
+    visited.add(job.id);
     nodes.push({ job, depth, baseResult, baseOrphaned: false });
     for (const result of job.result_json ?? []) {
       for (const child of childrenByJobId.get(job.id) ?? []) {
@@ -116,6 +122,8 @@ function buildJobTree(jobs: GridSearchJob[]): JobTreeNode[] {
     // 자식 job은 여전히 존재할 수 있으므로 visit()과 동일하게 자식을 순회해야 한다.
     // (visit()을 그대로 호출하면 이 job 자신이 baseOrphaned:false로 잘못 push되므로
     // 자신은 직접 push하고, 자식 순회 로직만 visit()과 동일하게 인라인으로 반복한다.)
+    if (visited.has(job.id)) continue;
+    visited.add(job.id);
     nodes.push({ job, depth: 0, baseResult: null, baseOrphaned: true });
     for (const result of job.result_json ?? []) {
       for (const child of childrenByJobId.get(job.id) ?? []) {
@@ -129,14 +137,15 @@ function buildJobTree(jobs: GridSearchJob[]): JobTreeNode[] {
   return nodes;
 }
 
-function formatDelta(current: number, base: number, unit: string): string {
+function formatDelta(current: number, base: number, unit: string, decimals = 2): string {
   const diff = current - base;
   const sign = diff >= 0 ? '+' : '';
-  return `(베이스 대비 ${sign}${diff.toFixed(2)}${unit})`;
+  return `(베이스 대비 ${sign}${diff.toFixed(decimals)}${unit})`;
 }
 
 type Expansion =
   | { kind: 'error'; message: string }
+  | { kind: 'empty' }
   | { kind: 'results'; results: GridSearchSavedResult[] }
   | null;
 
@@ -147,6 +156,12 @@ function expansionFor(job: GridSearchJob): Expansion {
   const results = job.result_json ?? [];
   if (results.length > 0) {
     return { kind: 'results', results };
+  }
+  // completed인데 저장된 결과가 0건인 경우 — 전 조합이 거래 0건이었다는 뜻이다(dedup_top_results가
+  // 거래 0건 조합을 제외함, 특히 AND 체이닝으로 조건이 지나치게 좁아진 경우 흔함). 이유 없이 그냥
+  // 안 펼쳐지는 "완료" 행으로만 보이면 사용자가 원인을 알 수 없으므로 펼쳐서 설명해준다.
+  if (job.status === 'completed') {
+    return { kind: 'empty' };
   }
   return null;
 }
@@ -219,7 +234,11 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
   const sorted = useMemo(() => sortJobs(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
 
   const tree = useMemo(() => {
-    const allNodes = buildJobTree(jobs);
+    // buildJobTree는 historyJobs(실행중 job 제외) 기준으로만 만든다 — jobs를 그대로 넘기면
+    // 체이닝된 실행중 job(depth>0)이 자신의 최상위 조상이 완료 상태라 필터를 통과해버려서,
+    // 이 표에도 나오고 위쪽 GridSearchProgress 진행 바에도 동시에 나오는 이중 렌더링이
+    // 생긴다(실행중 job은 base_run_id의 대상이 될 수 없으므로 자식 처리 걱정은 없다).
+    const allNodes = buildJobTree(historyJobs);
     const visibleRootIds = new Set(sorted.map((j) => j.id));
     function isDescendantOfVisibleRoot(node: JobTreeNode): boolean {
       if (node.depth === 0) return visibleRootIds.has(node.job.id);
@@ -236,7 +255,7 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
       return current ? visibleRootIds.has(current.id) : false;
     }
     return allNodes.filter(isDescendantOfVisibleRoot);
-  }, [jobs, sorted]);
+  }, [historyJobs, sorted]);
 
   const jobDeleteJob = useMemo(() => jobs.find((j) => j.id === jobDeleteTarget) ?? null, [jobs, jobDeleteTarget]);
   const jobDeleteResultCount = jobDeleteJob?.result_json?.length ?? 0;
@@ -410,6 +429,14 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                     </TableCell>
                     <TableCell style={{ paddingLeft: `${depth * 20 + 8}px` }}>
                       {job.market.replace('KRW-', '')}
+                      {job.combinator && (
+                        <span
+                          className="ml-1 rounded border px-1 text-[10px] font-medium text-muted-foreground"
+                          title={job.combinator === 'AND' ? '베이스 조건과 AND로 결합' : '베이스 조건과 OR로 결합'}
+                        >
+                          {job.combinator}
+                        </span>
+                      )}
                       {baseOrphaned && (
                         <span className="ml-1 text-xs text-muted-foreground">(베이스 삭제됨)</span>
                       )}
@@ -454,6 +481,14 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                     <TableRow>
                       <TableCell colSpan={9} className="whitespace-normal text-sm text-destructive">
                         {expansion.message}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {isExpanded && expansion?.kind === 'empty' && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="whitespace-normal text-sm text-muted-foreground">
+                        저장된 결과가 없습니다 — 이 조건 풀의 모든 조합이 거래 0건이었습니다.
+                        {job.combinator === 'AND' && ' AND 체이닝으로 조건이 너무 좁아졌을 수 있습니다.'}
                       </TableCell>
                     </TableRow>
                   )}
@@ -523,7 +558,7 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
                                       typeof r.trade_count === 'number' &&
                                       typeof baseResult.trade_count === 'number' && (
                                         <span className="ml-1">
-                                          {formatDelta(r.trade_count, baseResult.trade_count, '건')}
+                                          {formatDelta(r.trade_count, baseResult.trade_count, '건', 0)}
                                         </span>
                                       )}
                                     {baseResult &&
@@ -639,7 +674,7 @@ export default function GridSearchHistory({ jobs, onRefresh, onSubmit }: GridSea
               ))}
             </div>
             <div className="flex flex-wrap gap-3">
-              {['추세', '가격대', '거래량', '거래대금', '시장 심리', '오실레이터'].map((category) => (
+              {GRID_SEARCH_POOL_CATEGORIES.map((category) => (
                 <label key={category} className="flex items-center gap-1.5 text-sm">
                   <Checkbox
                     checked={chainCategories.includes(category)}

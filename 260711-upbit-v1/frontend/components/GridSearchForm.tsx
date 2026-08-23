@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import CoinSelect, { sortMarkets } from '@/components/CoinSelect';
 import { ApiError } from '@/lib/api/client';
 import { getGridSearchEstimate, getGridSearchIndicatorPool, getMarkets } from '@/lib/api/eda';
+import { GRID_SEARCH_POOL_CATEGORIES } from '@/lib/indicator-categories';
 import { SECTION_HEADER_CLASS } from '@/lib/ui-classes';
 import { defaultDate, formatCapital, formatTimeframe, TIMEFRAME_CODES } from '@/lib/format';
 import type { GridSearchEstimate, GridSearchIndicatorPoolCatalog, GridSearchJobRequest } from '@/lib/types/eda';
@@ -18,7 +19,7 @@ const TIMEFRAME_OPTIONS = TIMEFRAME_CODES.map((timeframe) => ({
   timeframe,
 }));
 
-const POOL_CATEGORIES = ['오실레이터', '추세', '가격대', '거래량', '거래대금', '시장 심리'] as const;
+const POOL_CATEGORIES = GRID_SEARCH_POOL_CATEGORIES;
 const DEFAULT_CATEGORIES: string[] = ['오실레이터'];
 
 export interface GridSearchFormInitial {
@@ -65,21 +66,28 @@ export default function GridSearchForm({ initial, disabled, onSubmit }: GridSear
   }, []);
 
   useEffect(() => {
-    getGridSearchIndicatorPool().catch(() => setIndicatorPool(null)).then((data) => {
-      if (data) setIndicatorPool(data);
-    });
+    getGridSearchIndicatorPool()
+      .then((data) => setIndicatorPool(data))
+      .catch(() => setIndicatorPool(null));
   }, []);
 
   useEffect(() => {
+    let ignore = false; // 카테고리/개별지표 체크박스를 빠르게 연달아 토글하면, 늦게 도착한
+    // 이전 요청의 응답이 최신 상태를 덮어쓸 수 있다 — 언마운트/재실행 시 이전 요청 결과를 버린다.
     getGridSearchEstimate({ categories: selectedCategories, excluded_indicators: excludedIndicators }, market)
       .then((data) => {
+        if (ignore) return;
         setEstimate(data);
         setEstimateError(null);
       })
       .catch(() => {
+        if (ignore) return;
         setEstimateError('예상 조합수를 불러오지 못했습니다.');
         setEstimate(null);
       });
+    return () => {
+      ignore = true;
+    };
   }, [selectedCategories, excludedIndicators, market]);
 
   function toggleCategory(category: string, checked: boolean) {
