@@ -37,12 +37,17 @@ from engine.runner import run_backtest
 from engine.sweep import DEFAULT_RISK_CONFIG
 from upbit_data_service import get_candles
 
-# MAX_TASKS_PER_CHILD은 83.57 KB/call(9-오실레이터 그리드, ETH/1시간봉/2026-06~07 기준 실측)을
-# 전제로 계산됐다. 이 세션에서 측정한 leak rate는 상황에 따라 20~177 KB/call까지 편차가 있었으므로,
-# 더 무거운 데이터셋(캔들 수가 많거나 지표 조합이 늘어나는 경우)에서는 워커당 실제 누적 메모리가
-# 이 값이 전제한 예산(약 916MB)을 초과할 수 있다.
+# MAX_TASKS_PER_CHILD은 원래 83.57 KB/call(9-오실레이터 그리드, ETH/1시간봉/2026-06~07 기준
+# 실측)을 전제로 계산됐었다. 2026-08-23, 지표 풀 확장(추세/거래량/거래대금/시장심리/가격대) 후
+# 실제 운영 중이던 KRW-BTC/1시간봉 그리드(33,453개 조합)를 워커 4개 RSS 합산으로 두 구간
+# 재측정한 결과 173.4 KB/call, 154.5 KB/call — 오실레이터 전용 대비 약 2배로 확인됐다(우려했던
+# "더 무거운 데이터셋에서 예산 초과"가 실측으로 재현됨). 같은 워커당 예산(약 916MB)을 유지하는
+# 선에서 175 KB/call(측정 상단, 안전 마진)로 다시 계산해 5359로 낮췄다 — 이전 값(11223)은
+# 워커당 평균 8,363회 정도의 그리드에서는 재시작이 한 번도 안 일어나 안전장치가 사실상
+# 무력화돼 있었다. 카테고리 조합에 따라 leak rate가 더 벌어질 수 있으므로 이후에도 큰 그리드를
+# 새로 돌릴 때는 재측정을 권장한다.
 WORKER_COUNT = 4
-MAX_TASKS_PER_CHILD = 11223
+MAX_TASKS_PER_CHILD = 5359
 WATCHDOG_TIMEOUT_SEC = 300
 PROGRESS_LOG_INTERVAL = 1000
 
@@ -222,14 +227,15 @@ def compute_grid_results_parallel(
     """buy_conditions x sell_conditions 전 조합을 워커 풀로 병렬 계산한다(대규모 실행용).
 
     조합을 processes개 워커로 분산하는 것 자체가 워커 하나가 누적하는 backtrader 메모리를
-    (전체 조합 수 / processes) 만큼으로 이미 제한한다 — 20,700개 조합/워커 4개 기준 워커당
-    약 5,175회 호출로, 이는 max_tasks_per_child(11223)보다 작아 이번 규모에서는 재시작이
-    실제로 일어나지 않는다. max_tasks_per_child는 그래도 필요한 안전장치다: 앞으로 그리드가
-    더 커져서 워커 하나가 처리할 조합 수가 이 값을 넘어서면, 그 시점부터 자동 재시작이
-    실제로 개입해 누적 메모리를 주기적으로 회수한다. 이 임계값 자체가 특정 측정치(83.57 KB/call)를
-    전제로 하므로, 다른 데이터셋에서는 실제 워커당 누적량이 이 전제보다 클 수 있다는 점은 감안해야
-    한다. 마지막 진행 이후 watchdog_timeout초간 응답이 없으면 워커가 죽어서 멈춘 것으로 보고
-    중단한다.
+    (전체 조합 수 / processes) 만큼으로 이미 제한한다 — 오실레이터 전용 20,700개 조합/워커
+    4개 기준 워커당 약 5,175회 호출로, 이는 max_tasks_per_child(5359)보다 작아 이 규모에서는
+    재시작이 거의 일어나지 않는다. 하지만 지표 풀을 확장한 그리드(추세/거래량/거래대금/
+    시장심리/가격대 등)는 워커당 호출 수가 이보다 쉽게 커지므로, max_tasks_per_child가
+    실제로 개입해 누적 메모리를 주기적으로 회수하는 경우가 흔해진다 — 이게 원래 의도한
+    동작이다. 이 임계값 자체가 특정 측정치(175 KB/call, 2026-08-23 지표 풀 확장 그리드 기준)를
+    전제로 하므로, 카테고리 조합에 따라 실제 워커당 누적량이 이 전제보다 클 수 있다는 점은
+    감안해야 한다. 마지막 진행 이후 watchdog_timeout초간 응답이 없으면 워커가 죽어서 멈춘
+    것으로 보고 중단한다.
     """
     combos = [(b, s) for b in buy_conditions for s in sell_conditions]
     total = len(combos)
