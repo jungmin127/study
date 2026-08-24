@@ -20,6 +20,12 @@ import numpy as np
 import pandas as pd
 
 
+# regime_detector.py의 동명 상수와 값이 같아야 한다. regime_detector가 이 모듈을
+# import하므로(반대 방향은 순환참조), backend/regime_service.py의 _to_utc_iso와
+# 같은 이유로 별도 정의한다.
+_MIN_VOLATILITY_FLOOR = 1e-6
+
+
 def volume_confirm(trade_value: pd.Series, period: int = 20) -> pd.Series:
     """거래대금이 자체 이동평균(period봉) 대비 얼마나 실렸는지를 [0.7, 1.3] 배율로
     변환한다. engine/indicators/volume.py:111-124(TradeValueRatio)와 동일한 정의를
@@ -87,3 +93,24 @@ def vpin_score(volume: pd.Series, close: pd.Series, period: int = 20) -> pd.Seri
             result[i] = statistics.mean(bucket_imbalance_ratios)
 
     return pd.Series(result, index=volume.index)
+
+
+def level_proximity(
+    close: pd.Series,
+    raw_score: pd.Series,
+    r1: pd.Series,
+    s1: pd.Series,
+    volatility: pd.Series,
+) -> pd.Series:
+    """추세 방향의 저항/지지선 근접도를 [0, 1]로 나타낸다(1=바로 위/아래에 위치).
+    raw_score > 0(상승 중)이면 저항선(R1)과의 거리만, raw_score < 0(하락 중)이면
+    지지선(S1)과의 거리만 본다 — 추세와 무관한 반대편 레벨 근접까지 반전 신호로 잡으면
+    오탐이 늘어난다(설계 문서 참고). raw_score == 0(횡보)이면 항상 0."""
+    safe_vol = volatility.clip(lower=_MIN_VOLATILITY_FLOOR)
+    dist_to_r1 = (close - r1).abs() / safe_vol
+    dist_to_s1 = (close - s1).abs() / safe_vol
+    nearest_dist = np.where(
+        raw_score > 0, dist_to_r1, np.where(raw_score < 0, dist_to_s1, np.inf)
+    )
+    proximity = 1.0 - np.clip(nearest_dist, 0.0, 1.0)
+    return pd.Series(proximity, index=close.index).fillna(0.0)

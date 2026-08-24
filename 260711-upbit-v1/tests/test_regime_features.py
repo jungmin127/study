@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.regime_features import volume_confirm, pivot_levels, vpin_score
+from engine.regime_features import volume_confirm, pivot_levels, vpin_score, level_proximity
 
 
 def test_volume_confirm_neutral_when_constant():
@@ -83,3 +83,44 @@ def test_vpin_score_bounded_between_zero_and_one():
     valid = result.dropna()
     assert len(valid) > 0
     assert valid.between(0.0, 1.0).all()
+
+
+def test_level_proximity_high_when_uptrend_close_to_resistance():
+    close = pd.Series([100.0])
+    raw_score = pd.Series([1.0])       # 상승 방향
+    r1 = pd.Series([100.4])            # 저항선이 바로 위
+    s1 = pd.Series([90.0])
+    volatility = pd.Series([1.0])
+    result = level_proximity(close, raw_score, r1, s1, volatility)
+    assert result.iloc[0] > 0.5
+
+
+def test_level_proximity_low_when_uptrend_far_from_resistance():
+    close = pd.Series([100.0])
+    raw_score = pd.Series([1.0])
+    r1 = pd.Series([200.0])            # 저항선이 훨씬 위
+    s1 = pd.Series([90.0])
+    volatility = pd.Series([1.0])
+    result = level_proximity(close, raw_score, r1, s1, volatility)
+    assert result.iloc[0] == pytest.approx(0.0)
+
+
+def test_level_proximity_ignores_opposite_direction_level():
+    # 하락 중(raw_score<0)에는 저항선(R1) 근접은 무시하고 지지선(S1)만 본다.
+    close = pd.Series([100.0])
+    raw_score = pd.Series([-1.0])
+    r1 = pd.Series([100.5])            # 저항선이 바로 위지만 하락 중이라 무시돼야 함
+    s1 = pd.Series([200.0])            # 지지선은 훨씬 아래
+    volatility = pd.Series([1.0])
+    result = level_proximity(close, raw_score, r1, s1, volatility)
+    assert result.iloc[0] == pytest.approx(0.0)
+
+
+def test_level_proximity_zero_when_sideways():
+    close = pd.Series([100.0])
+    raw_score = pd.Series([0.0])
+    r1 = pd.Series([100.1])
+    s1 = pd.Series([99.9])
+    volatility = pd.Series([1.0])
+    result = level_proximity(close, raw_score, r1, s1, volatility)
+    assert result.iloc[0] == pytest.approx(0.0)
