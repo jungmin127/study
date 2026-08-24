@@ -74,10 +74,14 @@ z-score → 정규분포 CDF로 매수비율 추정 → `|매수량-매도량|/�
 
 **지지/저항 근접도 (`level_proximity`)**
 직전 봉 고가/저가/종가로 Pivot Point(P, R1, S1) 계산(`engine/indicators/price_levels.py:35-51`
-와 동일 정의). `거리 = |close - 가장_가까운_레벨| / volatility_ewma`,
-`level_proximity = 1 - min(거리, 1)`. **방향 필터**: `raw_score > 0`(상승 중)일 때는 R1
-근접만, `raw_score < 0`(하락 중)일 때는 S1 근접만 카운트 — 추세 방향과 무관한 레벨
-근접까지 반전 신호로 잡으면 오탐이 늘어난다.
+와 동일 정의). `volatility_ewma`는 수익률 기준 소수(예 0.01=1%)인데 `close`/레벨은
+절대가격이라 단위가 다르므로, `volatility_ewma`에 `close`를 곱해 절대가격 스케일로
+변환한 뒤 나눈다: `거리 = |close - 가장_가까운_레벨| / (volatility_ewma × close)`,
+`level_proximity = 1 - min(거리, 1)`. (구현 중 이 곱셈을 빠뜨린 버전은 어떤 실제
+가격 데이터에서도 근접도가 항상 0이 되는 버그가 있었다 — Task 6 사전검증에서 실측
+발견, `engine/regime_features.py` 커밋 `2d1ae40`에서 수정.) **방향 필터**:
+`raw_score > 0`(상승 중)일 때는 R1 근접만, `raw_score < 0`(하락 중)일 때는 S1
+근접만 카운트 — 추세 방향과 무관한 레벨 근접까지 반전 신호로 잡으면 오탐이 늘어난다.
 
 **반전 게이트 (`reversal_gate`)**
 ```python
