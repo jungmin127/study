@@ -105,8 +105,13 @@ def level_proximity(
     """추세 방향의 저항/지지선 근접도를 [0, 1]로 나타낸다(1=바로 위/아래에 위치).
     raw_score > 0(상승 중)이면 저항선(R1)과의 거리만, raw_score < 0(하락 중)이면
     지지선(S1)과의 거리만 본다 — 추세와 무관한 반대편 레벨 근접까지 반전 신호로 잡으면
-    오탐이 늘어난다(설계 문서 참고). raw_score == 0(횡보)이면 항상 0."""
-    safe_vol = volatility.clip(lower=_MIN_VOLATILITY_FLOOR)
+    오탐이 늘어난다(설계 문서 참고). raw_score == 0(횡보)이면 항상 0.
+
+    주의: volatility는 수익률 기준 소수(예: 0.01=1%)인데 close/r1/s1은 절대가격이라 단위가
+    다르다 — volatility에 close를 곱해 절대가격 스케일로 변환한 뒤 나눠야 두 값의
+    단위가 맞는다(곱하지 않으면 어떤 실제 가격 데이터에서도 근접도가 항상 0이 되는
+    버그가 있었다 — 계획 실행 중 Task 6 사전검증에서 실측으로 발견)."""
+    safe_vol = (volatility * close).abs().clip(lower=_MIN_VOLATILITY_FLOOR)
     dist_to_r1 = (close - r1).abs() / safe_vol
     dist_to_s1 = (close - s1).abs() / safe_vol
     nearest_dist = np.where(
