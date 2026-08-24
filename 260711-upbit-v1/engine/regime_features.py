@@ -114,3 +114,12 @@ def level_proximity(
     )
     proximity = 1.0 - np.clip(nearest_dist, 0.0, 1.0)
     return pd.Series(proximity, index=close.index).fillna(0.0)
+
+
+def reversal_gate(vpin: pd.Series, proximity: pd.Series) -> pd.Series:
+    """VPIN 매수/매도 쏠림과 추세방향 저항/지지 근접이 동시에 나타나면 모멘텀 점수를
+    감쇠시키는 배율. 둘 중 하나만 높으면(단독으론 반전 신호로 부족) 감쇠하지 않는다.
+    NaN(워밍업 미달)은 '위험 없음'으로 취급 — 판단불가를 억지로 강한 신호로 포장하지
+    않는다는 기존 정책(regime_detector.py의 워밍업 None 정책)과 같은 방향."""
+    risk = (vpin.fillna(0.0) * proximity.fillna(0.0)).clip(0.0, 1.0)
+    return 1.0 - 0.7 * risk

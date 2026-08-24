@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.regime_features import volume_confirm, pivot_levels, vpin_score, level_proximity
+from engine.regime_features import volume_confirm, pivot_levels, vpin_score, level_proximity, reversal_gate
 
 
 def test_volume_confirm_neutral_when_constant():
@@ -124,3 +124,39 @@ def test_level_proximity_zero_when_sideways():
     volatility = pd.Series([1.0])
     result = level_proximity(close, raw_score, r1, s1, volatility)
     assert result.iloc[0] == pytest.approx(0.0)
+
+
+def test_reversal_gate_neutral_when_no_risk():
+    vpin = pd.Series([0.0])
+    proximity = pd.Series([0.0])
+    result = reversal_gate(vpin, proximity)
+    assert result.iloc[0] == pytest.approx(1.0)
+
+
+def test_reversal_gate_dampens_when_both_high():
+    vpin = pd.Series([1.0])
+    proximity = pd.Series([1.0])
+    result = reversal_gate(vpin, proximity)
+    assert result.iloc[0] == pytest.approx(0.3)
+
+
+def test_reversal_gate_neutral_when_only_one_high():
+    # VPIN만 높고 레벨 근접이 0이면 감쇠하지 않는다(둘 다 성립해야 반전위험으로 인정).
+    vpin = pd.Series([1.0])
+    proximity = pd.Series([0.0])
+    result = reversal_gate(vpin, proximity)
+    assert result.iloc[0] == pytest.approx(1.0)
+
+
+def test_reversal_gate_treats_nan_vpin_as_neutral():
+    vpin = pd.Series([float("nan")])
+    proximity = pd.Series([1.0])
+    result = reversal_gate(vpin, proximity)
+    assert result.iloc[0] == pytest.approx(1.0)
+
+
+def test_reversal_gate_never_below_floor():
+    vpin = pd.Series([1.0, 1.0])
+    proximity = pd.Series([1.0, 1.0])
+    result = reversal_gate(vpin, proximity)
+    assert (result >= 0.3).all()
