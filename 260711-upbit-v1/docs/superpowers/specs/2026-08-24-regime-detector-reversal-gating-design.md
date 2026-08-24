@@ -90,9 +90,15 @@ reversal_gate = 1 - 0.7 * reversal_risk   # [0.3, 1.0], 완전히 0으로 짓누
 
 ### 워밍업
 
-VPIN(period=20봉), 거래대금 SMA(20봉), Pivot(1봉) 중 최댓값과 기존
-`half_life_bars * WARMUP_MULTIPLIER`를 비교해 더 큰 쪽을 워밍업 기준으로 삼는다.
-부족하면 지금과 동일하게 `None`(판단불가) 반환.
+전체 판단불가(`None`) 기준은 지금과 동일하게 `half_life_bars * WARMUP_MULTIPLIER`만
+쓴다(확장하지 않음). 대신 보조 신호(VPIN·거래대금 SMA·Pivot) 각각이 자기 워밍업
+기간(예: VPIN period=20봉) 동안 준비되지 않았으면 해당 신호는 **중립값**(거래량
+확인=1.0, VPIN=NaN→0 취급)으로 자연스럽게 무시된다 — `reversal_gate`/`volume_confirm`이
+`NaN`을 "위험 없음"으로 처리하도록 설계했기 때문이다(구현 세부사항, 계획 문서 Task 5
+참고). 워밍업 기준을 확장해 예측 자체를 더 늦게 시작하는 것보다, 보조 신호가 준비될
+때까지는 조정 없이 기존 raw_score로 예측을 계속 내놓는 쪽이 더 안전하다고 판단했다 —
+불필요하게 예측 가능 구간을 줄이지 않으면서도 "덜 여문 조정값을 쓰지 않는다"는 목적은
+동일하게 달성한다.
 
 ## 테스트 (`tests/test_regime_features.py` 신설)
 
