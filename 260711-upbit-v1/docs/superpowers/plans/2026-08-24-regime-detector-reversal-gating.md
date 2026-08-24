@@ -443,8 +443,13 @@ def level_proximity(
     """추세 방향의 저항/지지선 근접도를 [0, 1]로 나타낸다(1=바로 위/아래에 위치).
     raw_score > 0(상승 중)이면 저항선(R1)과의 거리만, raw_score < 0(하락 중)이면
     지지선(S1)과의 거리만 본다 — 추세와 무관한 반대편 레벨 근접까지 반전 신호로 잡으면
-    오탐이 늘어난다(설계 문서 참고). raw_score == 0(횡보)이면 항상 0."""
-    safe_vol = volatility.clip(lower=_MIN_VOLATILITY_FLOOR)
+    오탐이 늘어난다(설계 문서 참고). raw_score == 0(횡보)이면 항상 0.
+
+    volatility는 수익률 기준 소수(예: 0.01=1%)인데 close/r1/s1은 절대가격이라 단위가
+    다르다 — volatility에 close를 곱해 절대가격 스케일로 변환한 뒤 나눠야 두 값의
+    단위가 맞는다(곱하지 않으면 어떤 실제 가격 데이터에서도 근접도가 항상 0이 되는
+    버그가 있었다 — 계획 실행 중 Task 6 사전검증에서 실측으로 발견)."""
+    safe_vol = (volatility * close).abs().clip(lower=_MIN_VOLATILITY_FLOOR)
     dist_to_r1 = (close - r1).abs() / safe_vol
     dist_to_s1 = (close - s1).abs() / safe_vol
     nearest_dist = np.where(
@@ -607,20 +612,25 @@ def test_compute_regime_probs_series_reversal_gate_lowers_confidence_near_resist
     adjusted_score 기준 확신도(최댓값 확률)가 조정 없는(raw_score만 쓰는, volume/trade_value
     컬럼을 뺀) 경우보다 낮아야 한다 — 극값 근처 정반대 오분류를 줄이는 이번 스펙의 핵심
     목표를 코드로 고정한다."""
-    rng = np.random.default_rng(seed=11)
-    n = 60
-    # 완만한 등락 20봉(지지/저항 구조를 만들기 위한 베이스) + 거래량 실린 강한 랠리 20봉
-    base_returns = rng.normal(0.0, 0.01, size=20)
-    rally_returns = np.full(20, 0.03) + rng.normal(0.0, 0.003, size=20)
-    tail_returns = rng.normal(0.0, 0.01, size=20)
+    rng = np.random.default_rng(seed=7)
+    n_base, n_rally, n_tail = 20, 20, 20
+    # 노이즈 섞인 베이스 20봉(지지/저항 구조 형성) + 거래량 실린 완만한 랠리 20봉 + 꼬리 20봉.
+    # 파라미터는 실행 전 컨트롤러가 실측 검증(raw_conf=0.852 -> adj_conf=0.586, 여유 있는
+    # 마진)한 값 그대로다 — raw_score 자체가 카테고리 대표값(±0.35) 근처에 있어야 게이팅이
+    # softmax 확신도에 실제로 드러난다(더 큰 추세/작은 노이즈를 쓰면 score가 수 단위로
+    # 커져 _softmax_categorize가 이미 포화(max=0.8524로 고정)돼 게이팅 여부와 무관하게
+    # 확신도가 안 바뀐다 — regime_detector.py의 포화 관련 docstring 참고).
+    base_returns = rng.normal(0.0, 0.012, size=n_base)
+    rally_returns = np.full(n_rally, 0.004) + rng.normal(0.0, 0.005, size=n_rally)
+    tail_returns = rng.normal(0.0, 0.012, size=n_tail)
     returns = np.concatenate([base_returns, rally_returns, tail_returns])
     closes = [100.0]
     for r in returns:
         closes.append(closes[-1] * (1.0 + r))
     closes = closes[1:]
-    highs = [c * 1.01 for c in closes]
-    lows = [c * 0.99 for c in closes]
-    volumes = [10.0] * 20 + [50.0] * 20 + [10.0] * 20   # 랠리 구간 거래량 급증
+    highs = [c * 1.003 for c in closes]
+    lows = [c * 0.997 for c in closes]
+    volumes = [10.0] * n_base + [30.0] * n_rally + [10.0] * n_tail   # 랠리 구간 거래량 3배
     trade_values = volumes
 
     df_full = _make_full_price_df(closes, highs, lows, volumes, trade_values)
@@ -628,8 +638,8 @@ def test_compute_regime_probs_series_reversal_gate_lowers_confidence_near_resist
 
     peak_idx = 39  # 랠리 마지막 봉
 
-    series_adjusted = compute_regime_probs_series(df_full, half_life_bars=3.0)
-    series_raw = compute_regime_probs_series(df_raw_only, half_life_bars=3.0)
+    series_adjusted = compute_regime_probs_series(df_full, half_life_bars=5.0)
+    series_raw = compute_regime_probs_series(df_raw_only, half_life_bars=5.0)
 
     probs_adjusted = series_adjusted[peak_idx]
     probs_raw = series_raw[peak_idx]
@@ -714,7 +724,7 @@ def compute_regime_probs_series(
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run: `cd C:\Users\jungm\personal\study\260711-upbit-v1 && PYTHONPATH=. python -m pytest tests/test_regime_detector.py -v`
-Expected: PASS (전체, 새로 추가한 2개 포함). `test_compute_regime_probs_series_reversal_gate_lowers_confidence_near_resistance`가 여전히 실패하면 `rally_returns`의 크기(0.03)나 `volumes`의 배율(50.0)을 키워 VPIN·근접도가 실제로 유의미하게 커지도록 조정한다 — 목표는 정성적 부등식이지 정확한 수치가 아니다.
+Expected: PASS (전체, 새로 추가한 2개 포함). 이 파라미터는 컨트롤러가 실행 전 `engine/regime_features.py`(Task1~5 완료본)로 직접 검증한 값이라(`peak_idx=39`에서 raw_conf≈0.852 → adj_conf≈0.586, 여유 있는 마진) 그대로 통과해야 한다. 혹시 실패하면 Step 3 구현이 브리프 코드와 정확히 일치하는지 먼저 의심할 것 — `_ADJUSTMENT_COLUMNS`에 실제로 `raw_score_series`(조정 전 값)를 넘겼는지, `level_proximity` 호출 인자 순서가 맞는지부터 확인한다.
 
 - [ ] **Step 5: 전체 회귀 스위트 실행**
 
