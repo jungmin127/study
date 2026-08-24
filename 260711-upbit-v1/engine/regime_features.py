@@ -16,11 +16,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-# regime_detector.py의 동명 상수와 값이 같아야 한다. regime_detector가 이 모듈을
-# import하므로(반대 방향은 순환참조), backend/regime_service.py의 _to_utc_iso와
-# 같은 이유로 별도 정의한다.
-_MIN_VOLATILITY_FLOOR = 1e-6
-
 
 def volume_confirm(trade_value: pd.Series, period: int = 20) -> pd.Series:
     """거래대금이 자체 이동평균(period봉) 대비 얼마나 실렸는지를 [0.7, 1.3] 배율로
