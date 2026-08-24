@@ -26,3 +26,16 @@ def volume_confirm(trade_value: pd.Series, period: int = 20) -> pd.Series:
     ratio = (trade_value - sma) / sma.replace(0.0, np.nan)
     ratio = ratio.fillna(0.0)
     return 1.0 + ratio.clip(-0.3, 0.3)
+
+
+def pivot_levels(high: pd.Series, low: pd.Series, close: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """직전 봉 고가/저가/종가로 계산하는 Pivot Point 저항선(R1)/지지선(S1).
+    engine/indicators/price_levels.py:35-51(PivotPoints)와 동일한 정의를 shift(1)로
+    벡터화한다."""
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+    prev_close = close.shift(1)
+    pivot = (prev_high + prev_low + prev_close) / 3.0
+    r1 = pivot * 2 - prev_low
+    s1 = pivot * 2 - prev_high
+    return r1, s1

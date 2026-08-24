@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.regime_features import volume_confirm
+from engine.regime_features import volume_confirm, pivot_levels
 
 
 def test_volume_confirm_neutral_when_constant():
@@ -36,3 +36,23 @@ def test_volume_confirm_neutral_during_warmup():
     result = volume_confirm(trade_value, period=20)
     assert result.iloc[0] == pytest.approx(1.0)
     assert result.iloc[-1] == pytest.approx(1.0)
+
+
+def test_pivot_levels_first_row_is_nan():
+    high = pd.Series([110.0, 112.0, 111.0])
+    low = pd.Series([90.0, 95.0, 94.0])
+    close = pd.Series([100.0, 105.0, 103.0])
+    r1, s1 = pivot_levels(high, low, close)
+    assert pd.isna(r1.iloc[0])
+    assert pd.isna(s1.iloc[0])
+
+
+def test_pivot_levels_uses_previous_bar_only():
+    # 2번째 행(index=1)의 R1/S1은 index=0의 high/low/close로만 계산돼야 한다.
+    high = pd.Series([110.0, 999.0])
+    low = pd.Series([90.0, 999.0])
+    close = pd.Series([100.0, 999.0])
+    r1, s1 = pivot_levels(high, low, close)
+    pivot = (110.0 + 90.0 + 100.0) / 3.0
+    assert r1.iloc[1] == pytest.approx(pivot * 2 - 90.0)
+    assert s1.iloc[1] == pytest.approx(pivot * 2 - 110.0)
