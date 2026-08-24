@@ -419,7 +419,18 @@ Expected: FAIL — `ImportError: cannot import name 'level_proximity'`
 
 - [ ] **Step 3: 구현 추가**
 
-`engine/regime_features.py`에 추가:
+`engine/regime_features.py` 파일 상단(마지막 import 문 다음, `def volume_confirm` 이전)에
+`_MIN_VOLATILITY_FLOOR` 상수를 추가한다(Task 1에서는 이 상수가 쓰이지 않아 제외됐고,
+`level_proximity`가 이를 쓰는 첫 함수이므로 여기서 정의한다):
+
+```python
+# regime_detector.py의 동명 상수와 값이 같아야 한다. regime_detector가 이 모듈을
+# import하므로(반대 방향은 순환참조), backend/regime_service.py의 _to_utc_iso와
+# 같은 이유로 별도 정의한다.
+_MIN_VOLATILITY_FLOOR = 1e-6
+```
+
+그리고 `engine/regime_features.py`에 추가:
 
 ```python
 def level_proximity(
