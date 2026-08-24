@@ -11,6 +11,13 @@ import math
 
 import pandas as pd
 
+from engine.regime_features import (
+    level_proximity,
+    pivot_levels,
+    reversal_gate,
+    vpin_score,
+    volume_confirm,
+)
 from upbit_data_service import timeframe_duration
 
 HALF_LIFE_DAYS = 1.0
@@ -82,13 +89,21 @@ def ewm_volatility(returns: pd.Series, half_life_bars: float) -> float:
     return float(_ewm_std_series(returns, half_life_bars).iloc[-1])
 
 
+_ADJUSTMENT_COLUMNS = {"volume", "trade_value", "high", "low"}
+
+
 def compute_regime_probs_series(
     df: pd.DataFrame, half_life_bars: float
 ) -> list[dict[str, float] | None]:
     """df 전체에 대해 매 봉마다의 regime_probs를 O(n)에 한 번에 계산한다(검증스크립트용
     벡터화 버전 — compute_regime_probs(df.iloc[:t+1], ...)를 매 t마다 반복호출하면
     O(n^2)라 느림). 두 방식이 동일한 결과를 내는지는
-    test_compute_regime_probs_series_matches_pointwise_calls로 고정한다."""
+    test_compute_regime_probs_series_matches_pointwise_calls로 고정한다.
+
+    df에 volume/trade_value/high/low 컬럼이 전부 있으면 거래량 확인·VPIN 불균형·
+    지지저항 근접도로 raw_score를 조정한 adjusted_score를 쓴다(설계 문서:
+    docs/superpowers/specs/2026-08-24-regime-detector-reversal-gating-design.md).
+    컬럼이 없으면(기존 호출자 하위호환) 조정 없이 raw_score를 그대로 쓴다."""
     if df.empty or "close" not in df.columns:
         return []
     min_bars = int(half_life_bars * WARMUP_MULTIPLIER)
@@ -96,6 +111,19 @@ def compute_regime_probs_series(
     valid_counts = returns.notna().cumsum()
     momentum_series = _ewm_series(returns, half_life_bars)
     volatility_series = _ewm_std_series(returns, half_life_bars)
+    raw_score_series = momentum_series / volatility_series.clip(lower=_MIN_VOLATILITY_FLOOR)
+
+    if _ADJUSTMENT_COLUMNS.issubset(df.columns):
+        confirm_series = volume_confirm(df["trade_value"])
+        r1_series, s1_series = pivot_levels(df["high"], df["low"], df["close"])
+        vpin_series_values = vpin_score(df["volume"], df["close"])
+        proximity_series = level_proximity(
+            df["close"], raw_score_series, r1_series, s1_series, volatility_series
+        )
+        gate_series = reversal_gate(vpin_series_values, proximity_series)
+        adjusted_score_series = raw_score_series * confirm_series * gate_series
+    else:
+        adjusted_score_series = raw_score_series
 
     results: list[dict[str, float] | None] = []
     for i in range(len(df)):
@@ -107,8 +135,7 @@ def compute_regime_probs_series(
         if pd.isna(momentum) or pd.isna(volatility):
             results.append(None)
             continue
-        score = momentum / max(volatility, _MIN_VOLATILITY_FLOOR)
-        results.append(_softmax_categorize(score))
+        results.append(_softmax_categorize(adjusted_score_series.iloc[i]))
     return results
 
 

@@ -279,3 +279,75 @@ def test_classify_score_to_category_boundaries():
 def test_classify_score_to_category_at_exact_midpoint_goes_to_higher_bucket():
     # 완만하락(-0.15)과 횡보(0.0) 사이 중간점 = -0.075
     assert classify_score_to_category(-0.075) == "횡보"
+
+
+def _make_full_price_df(
+    closes: list[float], highs: list[float], lows: list[float],
+    volumes: list[float], trade_values: list[float],
+) -> pd.DataFrame:
+    dates = pd.date_range("2026-01-01", periods=len(closes), freq="D")
+    return pd.DataFrame({
+        "candle_time": dates, "close": closes, "high": highs, "low": lows,
+        "volume": volumes, "trade_value": trade_values,
+    })
+
+
+def test_compute_regime_probs_series_falls_back_to_raw_score_without_volume_columns():
+    """volume/trade_value/high/low 컬럼이 없으면(기존 호출자·close만 있는 df) adjusted_score는
+    raw_score와 완전히 동일해야 한다 — 하위호환 요구사항을 고정한다."""
+    closes = [100.0 * (1.01 ** i) for i in range(60)]
+    df_close_only = _make_price_df(closes)
+    df_full = _make_full_price_df(
+        closes,
+        highs=closes, lows=closes,
+        volumes=[1.0] * 60, trade_values=[1.0] * 60,
+    )
+
+    probs_close_only = compute_regime_probs(df_close_only, half_life_bars=3.0)
+    probs_full_neutral = compute_regime_probs(df_full, half_life_bars=3.0)
+
+    assert probs_close_only is not None and probs_full_neutral is not None
+    # high=low=close, volume/trade_value 상수 조건에서는 조정 배율이 전부 중립(1.0)이어야
+    # 두 결과가 사실상 동일해야 한다.
+    for label in probs_close_only:
+        assert probs_close_only[label] == pytest.approx(probs_full_neutral[label], abs=1e-6)
+
+
+def test_compute_regime_probs_series_reversal_gate_lowers_confidence_near_resistance():
+    """거래량이 실린 급등 랠리가 저항선 근처까지 이어질 때, VPIN+지지저항 조정을 반영한
+    adjusted_score 기준 확신도(최댓값 확률)가 조정 없는(raw_score만 쓰는, volume/trade_value
+    컬럼을 뺀) 경우보다 낮아야 한다 — 극값 근처 정반대 오분류를 줄이는 이번 스펙의 핵심
+    목표를 코드로 고정한다."""
+    rng = np.random.default_rng(seed=7)
+    n_base, n_rally, n_tail = 20, 20, 20
+    # 노이즈 섞인 베이스 20봉(지지/저항 구조 형성) + 거래량 실린 완만한 랠리 20봉 + 꼬리 20봉.
+    # 파라미터는 실행 전 컨트롤러가 실측 검증(raw_conf=0.852 -> adj_conf=0.586, 여유 있는
+    # 마진)한 값 그대로다 — raw_score 자체가 카테고리 대표값(±0.35) 근처에 있어야 게이팅이
+    # softmax 확신도에 실제로 드러난다(더 큰 추세/작은 노이즈를 쓰면 score가 수 단위로
+    # 커져 _softmax_categorize가 이미 포화(max=0.8524로 고정)돼 게이팅 여부와 무관하게
+    # 확신도가 안 바뀐다 — regime_detector.py의 포화 관련 docstring 참고).
+    base_returns = rng.normal(0.0, 0.012, size=n_base)
+    rally_returns = np.full(n_rally, 0.004) + rng.normal(0.0, 0.005, size=n_rally)
+    tail_returns = rng.normal(0.0, 0.012, size=n_tail)
+    returns = np.concatenate([base_returns, rally_returns, tail_returns])
+    closes = [100.0]
+    for r in returns:
+        closes.append(closes[-1] * (1.0 + r))
+    closes = closes[1:]
+    highs = [c * 1.003 for c in closes]
+    lows = [c * 0.997 for c in closes]
+    volumes = [10.0] * n_base + [30.0] * n_rally + [10.0] * n_tail   # 랠리 구간 거래량 3배
+    trade_values = volumes
+
+    df_full = _make_full_price_df(closes, highs, lows, volumes, trade_values)
+    df_raw_only = df_full.drop(columns=["volume", "trade_value"])
+
+    peak_idx = 39  # 랠리 마지막 봉
+
+    series_adjusted = compute_regime_probs_series(df_full, half_life_bars=5.0)
+    series_raw = compute_regime_probs_series(df_raw_only, half_life_bars=5.0)
+
+    probs_adjusted = series_adjusted[peak_idx]
+    probs_raw = series_raw[peak_idx]
+    assert probs_adjusted is not None and probs_raw is not None
+    assert max(probs_adjusted.values()) < max(probs_raw.values())
