@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.regime_features import volume_confirm, pivot_levels
+from engine.regime_features import volume_confirm, pivot_levels, vpin_score
 
 
 def test_volume_confirm_neutral_when_constant():
@@ -56,3 +56,30 @@ def test_pivot_levels_uses_previous_bar_only():
     pivot = (110.0 + 90.0 + 100.0) / 3.0
     assert r1.iloc[1] == pytest.approx(pivot * 2 - 90.0)
     assert s1.iloc[1] == pytest.approx(pivot * 2 - 110.0)
+
+
+def test_vpin_score_nan_during_warmup():
+    volume = pd.Series([10.0] * 5)
+    close = pd.Series([100.0, 101.0, 99.0, 102.0, 98.0])
+    result = vpin_score(volume, close, period=20)
+    assert pd.isna(result.iloc[-1])
+
+
+def test_vpin_score_high_when_one_sided_trend():
+    # 거래량 일정, 종가가 매 봉 꾸준히 상승 — 매수 쏠림이 강해야 한다.
+    n = 60
+    volume = pd.Series([10.0] * n)
+    close = pd.Series([100.0 * (1.01 ** i) for i in range(n)])
+    result = vpin_score(volume, close, period=10)
+    assert result.iloc[-1] > 0.5
+
+
+def test_vpin_score_bounded_between_zero_and_one():
+    n = 60
+    rng = np.random.default_rng(seed=1)
+    volume = pd.Series(rng.uniform(5.0, 15.0, size=n))
+    close = pd.Series(100.0 + np.cumsum(rng.normal(0.0, 1.0, size=n)))
+    result = vpin_score(volume, close, period=10)
+    valid = result.dropna()
+    assert len(valid) > 0
+    assert valid.between(0.0, 1.0).all()

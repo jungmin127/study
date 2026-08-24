@@ -13,6 +13,9 @@ Cerebro 없이 순수 DataFrame만으로 호출돼야 하므로 기존 지표 �
 """
 from __future__ import annotations
 
+import statistics
+from collections import deque
+
 import numpy as np
 import pandas as pd
 
@@ -39,3 +42,48 @@ def pivot_levels(high: pd.Series, low: pd.Series, close: pd.Series) -> tuple[pd.
     r1 = pivot * 2 - prev_low
     s1 = pivot * 2 - prev_high
     return r1, s1
+
+
+def vpin_score(volume: pd.Series, close: pd.Series, period: int = 20) -> pd.Series:
+    """거래량 버킷(volume bar) 기반 VPIN(매수/매도 불균형 비율). Bulk Volume
+    Classification(Easley/López de Prado/O'Hara, 2012). engine/indicators/volume.py:131-199
+    (VolumeBarVPIN)과 동일한 알고리즘을 backtrader Cerebro 없이 순수 파이썬 루프로
+    재구현한다 — 버킷 경계가 봉 수가 아니라 누적거래량 기준이라 고정폭 rolling으로는
+    벡터화할 수 없다(버킷 하나가 몇 봉으로 구성될지 데이터에 따라 달라짐).
+
+    반환값: [0, 1], 매수/매도 쏠림이 클수록 1에 가까움. 버킷이 period개 쌓이기 전(워밍업
+    구간)은 NaN."""
+    n = len(volume)
+    result = [float("nan")] * n
+    recent_volumes: deque[float] = deque(maxlen=period)
+    bucket_cum_volume = 0.0
+    last_bucket_close: float | None = None
+    bucket_deltas: deque[float] = deque(maxlen=period)
+    bucket_imbalance_ratios: deque[float] = deque(maxlen=period)
+
+    for i in range(n):
+        v = float(volume.iloc[i])
+        recent_volumes.append(v)
+        bucket_cum_volume += v
+
+        target = statistics.mean(recent_volumes) if len(recent_volumes) == period else None
+        if target is not None and bucket_cum_volume >= target:
+            bucket_close = float(close.iloc[i])
+            bucket_volume = bucket_cum_volume
+            if last_bucket_close is not None:
+                delta = bucket_close - last_bucket_close
+                bucket_deltas.append(delta)
+                sigma = statistics.stdev(bucket_deltas) if len(bucket_deltas) >= 2 else 0.0
+                z = delta / sigma if sigma > 0 else 0.0
+                buy_ratio = statistics.NormalDist().cdf(z)
+                buy_volume = bucket_volume * buy_ratio
+                sell_volume = bucket_volume - buy_volume
+                imbalance_ratio = abs(buy_volume - sell_volume) / bucket_volume if bucket_volume else 0.0
+                bucket_imbalance_ratios.append(imbalance_ratio)
+            last_bucket_close = bucket_close
+            bucket_cum_volume = 0.0
+
+        if len(bucket_imbalance_ratios) == period:
+            result[i] = statistics.mean(bucket_imbalance_ratios)
+
+    return pd.Series(result, index=volume.index)
