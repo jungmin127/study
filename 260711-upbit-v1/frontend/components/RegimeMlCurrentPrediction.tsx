@@ -9,6 +9,14 @@ import { formatDateTime, formatTimeframe } from '@/lib/format';
 const CATEGORY_ORDER: RegimeCategory[] = ['급상승', '완만상승', '횡보', '완만하락', '급하락'];
 const TRAINED_MARKETS = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'];
 
+function formatPct(value: number | null): string {
+  return value === null ? '-' : `${(value * 100).toFixed(1)}%`;
+}
+
+function formatCorrelation(value: number | null): string {
+  return value === null ? '-' : value.toFixed(3);
+}
+
 function categoryVarName(label: RegimeCategory): string {
   switch (label) {
     case '급상승':
@@ -100,6 +108,48 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
           <p className="text-xs text-muted-foreground">
             {market} {formatTimeframe(timeframe)} 기준, {formatDateTime(data.bar_time)} 봉 데이터. (모델: {formatDateTime(data.model_trained_at)} 학습, fold {data.model_fold_index})
           </p>
+          <div className="mt-4 border-t pt-3">
+            <h3 className="mb-2 text-xs font-semibold text-muted-foreground">모델 성능</h3>
+            {data.model_performance ? (
+              <>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-muted-foreground">
+                      <th className="text-left font-medium">fold</th>
+                      <th className="text-right font-medium">train</th>
+                      <th className="text-right font-medium">test</th>
+                      <th className="text-right font-medium">상관계수</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.model_performance.folds.map((fold) => (
+                      <tr
+                        key={fold.fold_index}
+                        className={fold.fold_index === data.model_fold_index ? 'font-semibold' : ''}
+                      >
+                        <td className="text-left">{fold.fold_index}</td>
+                        <td className="text-right tabular-nums">{fold.n_train.toLocaleString()}</td>
+                        <td className="text-right tabular-nums">{fold.n_test.toLocaleString()}</td>
+                        <td className="text-right tabular-nums">{formatCorrelation(fold.correlation)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  풀링 상관계수: {formatCorrelation(data.model_performance.pooled_correlation)}
+                </p>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  {CATEGORY_ORDER.map((label) => (
+                    <span key={label}>
+                      {label} {formatPct(data.model_performance!.pooled_hit_rate[label])}
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">성능 지표 없음(모델을 재학습하면 표시됩니다)</p>
+            )}
+          </div>
         </>
       ) : null}
     </div>

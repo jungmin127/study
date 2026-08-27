@@ -117,12 +117,26 @@ export interface TrendSegmentAnalysis {
 
 export type RegimeCategory = '급상승' | '완만상승' | '횡보' | '완만하락' | '급하락';
 
+export interface MlFoldPerformance {
+  fold_index: number;
+  n_train: number;
+  n_test: number;
+  correlation: number | null;
+}
+
+export interface MlModelPerformance {
+  folds: MlFoldPerformance[];
+  pooled_correlation: number | null;
+  pooled_hit_rate: Record<RegimeCategory, number | null>;
+}
+
 export interface MlCurrentPrediction {
   predicted_category: RegimeCategory;
   probs: Record<RegimeCategory, number>;
   bar_time: string;
   model_trained_at: string;
   model_fold_index: number;
+  model_performance: MlModelPerformance | null;
 }
 
 export interface RegimeCandle {
