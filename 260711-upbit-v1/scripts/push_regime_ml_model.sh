@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # 로컬에서 scripts/train_regime_ml.py로 학습한 ML 장세판별 모델(가장 최신
-# .txt+.json 페어)을 AWS 서버로 복사한다. 모델은 병합이 필요 없다 — 항상
-# find_latest_model()이 파일명 타임스탬프 기준 가장 최신 것을 고르므로, 그냥
-# 최신 파일 두 개를 서버 같은 경로에 올려두면 된다. 설정 방법은
-# deploy/UPDATE.md 참고.
+# .txt+.json 페어, 또는 인자로 특정 모델을 지정할 수도 있다)을 AWS 서버로 복사한다.
+# 모델은 병합이 필요 없다 — 항상 find_latest_model()이 파일명 타임스탐프 기준
+# 가장 최신 것을 고르므로, 그냥 최신 파일 두 개를 서버 같은 경로에 올려두면 된다.
+# 설정 방법은 deploy/UPDATE.md 참고.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -14,16 +14,27 @@ REMOTE_APP_DIR="/opt/study/260711-upbit-v1"
 LOCAL_MODEL_DIR="$REPO_ROOT/data/regime_ml_models"
 REMOTE_MODEL_DIR="$REMOTE_APP_DIR/data/regime_ml_models"
 
-if [ -d "$LOCAL_MODEL_DIR" ]; then
-    LOCAL_TXT="$(find "$LOCAL_MODEL_DIR" -maxdepth 1 -name 'regime_ml_*.txt' | sort | tail -n 1)"
+# 첫 번째 인자로 특정 모델 베이스네임(예: regime_ml_20260827T223633Z)을 지정하면
+# 그 모델을 배포한다(재학습 셀프서비스 UI가 과거 학습 이력 중 골라 배포할 때 사용).
+# 인자가 없으면 기존과 동일하게 가장 최신 모델을 찾는다.
+if [ -n "${1:-}" ]; then
+    LOCAL_TXT="$LOCAL_MODEL_DIR/$1.txt"
+    if [ ! -f "$LOCAL_TXT" ]; then
+        echo "지정한 모델을 찾을 수 없습니다: $LOCAL_TXT" >&2
+        exit 1
+    fi
 else
-    LOCAL_TXT=""
-fi
+    if [ -d "$LOCAL_MODEL_DIR" ]; then
+        LOCAL_TXT="$(find "$LOCAL_MODEL_DIR" -maxdepth 1 -name 'regime_ml_*.txt' | sort | tail -n 1)"
+    else
+        LOCAL_TXT=""
+    fi
 
-if [ -z "$LOCAL_TXT" ]; then
-    echo "옮길 ML 모델이 없습니다: $LOCAL_MODEL_DIR" >&2
-    echo "먼저 scripts/train_regime_ml.py를 실행해 모델을 학습하세요." >&2
-    exit 1
+    if [ -z "$LOCAL_TXT" ]; then
+        echo "옮길 ML 모델이 없습니다: $LOCAL_MODEL_DIR" >&2
+        echo "먼저 scripts/train_regime_ml.py를 실행해 모델을 학습하세요." >&2
+        exit 1
+    fi
 fi
 
 LOCAL_JSON="${LOCAL_TXT%.txt}.json"
