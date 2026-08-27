@@ -1,7 +1,7 @@
 """
 tests/test_regime_ml_data.py
 
-scripts.regime_ml_data.load_market_training_data()를 검증한다. backend/main.py의
+engine.regime_ml_data.load_market_training_data()를 검증한다. backend/main.py의
 _fetch_backtest_dataframe() 병합 패턴(get_candles + aux market close + 외부데이터
 merge)을 조건트리 없이 항상 전체 재사용하되, 외부데이터 결측은 (그 컬럼이 완전히
 비어있어도) 에러 없이 NaN으로 남긴다 — ML 피처는 LightGBM이 결측을 네이티브로
@@ -14,9 +14,9 @@ from datetime import datetime, timezone
 import pandas as pd
 import pytest
 
-import scripts.regime_ml_data as regime_ml_data
+import engine.regime_ml_data as regime_ml_data
 from binance_data_service import BinanceSymbolNotFoundError
-from scripts.regime_ml_data import load_market_training_data
+from engine.regime_ml_data import load_market_training_data
 
 START = datetime(2024, 1, 1, tzinfo=timezone.utc)
 END = datetime(2024, 1, 3, tzinfo=timezone.utc)

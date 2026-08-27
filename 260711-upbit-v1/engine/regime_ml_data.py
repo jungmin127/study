@@ -1,5 +1,5 @@
 """
-scripts/regime_ml_data.py
+engine/regime_ml_data.py
 
 ML 장세 판별기 학습용 마켓별 데이터 로더. backend/main.py:_fetch_backtest_dataframe()의
 병합 패턴(get_candles + aux market close + 외부데이터 merge)을 재사용하되, 그 함수는

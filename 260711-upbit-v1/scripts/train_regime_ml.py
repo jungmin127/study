@@ -29,7 +29,7 @@ from engine.regime_ml_labels import (
     compute_quantile_boundaries,
 )
 from engine.regime_ml_splits import generate_walk_forward_folds
-from scripts.regime_ml_data import load_market_training_data
+from engine.regime_ml_data import load_market_training_data
 from upbit_data_service import timeframe_duration
 
 MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
