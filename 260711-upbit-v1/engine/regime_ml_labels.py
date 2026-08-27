@@ -46,8 +46,8 @@ def compute_quantile_boundaries(
 
 def bucket_to_category(value: float, boundaries: list[float]) -> str:
     """boundaries(오름차순 4개)를 기준으로 value를 5개 카테고리 중 하나로 분류한다.
-    engine.regime_detector.classify_score_to_category와 같은 "미만이면 그 카테고리"
-    규칙을 쓴다."""
+    과거 규칙기반 판별기(E 작업으로 2026-08-28 삭제됨)가 쓰던 것과 같은 "미만이면
+    그 카테고리" 규칙이다."""
     for label, boundary in zip(CATEGORY_LABELS[:-1], boundaries):
         if value < boundary:
             return label
