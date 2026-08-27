@@ -3023,10 +3023,22 @@ def test_list_regime_ml_train_jobs_returns_saved_jobs(monkeypatch, tmp_path):
 
 def test_startup_fails_orphaned_running_regime_ml_jobs(monkeypatch, tmp_path):
     monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+
+    class _FakeThread:
+        def __init__(self, target=None, daemon=None):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(backend_module.threading, "Thread", _FakeThread)
+
     from engine.cache import create_regime_ml_job, get_regime_ml_job
     create_regime_ml_job("orphan-1")
 
-    backend_module._fail_orphaned_regime_ml_jobs()
+    with TestClient(app):
+        pass
 
     job = get_regime_ml_job("orphan-1")
     assert job["status"] == "failed"
+    assert "재시작" in job["error_message"]
