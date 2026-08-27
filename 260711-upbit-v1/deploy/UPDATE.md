@@ -122,3 +122,38 @@ bash scripts/push_backtest_results.sh
 삭제하는 방식을 기본으로 쓴다 — `push_backtest_results.sh`는 로컬 DB 전체를
 보내고 서버가 새로 있는 것만 반영하는 구조라, 특정 결과만 골라 보내는 기능은
 없다.
+
+## 6. 로컬에서 학습한 ML 장세판별 모델을 서버로 가져오기
+
+`/regime` 대시보드의 ML 예측 카드는 `scripts/train_regime_ml.py`가
+`data/regime_ml_models/`에 저장한 LightGBM 모델(`regime_ml_<타임스탬프>.txt` +
+같은 이름의 `.json` 사이드카)을 읽어서 예측한다. 학습은 무거운 작업이라 5절의
+grid search와 마찬가지로 로컬 PC에서 돌리고, 결과 모델 파일만 서버로 보낸다.
+모델은 병합이 필요 없다 — 서버 쪽 조회 함수(`find_latest_model()`)가 항상
+파일명 타임스탬프 기준 가장 최신 페어를 고르므로, 최신 모델 파일을 그냥 같은
+경로에 올려두기만 하면 된다.
+
+### 최초 1회 설정
+
+5절과 같은 `.env` 변수(`DEPLOY_SSH_KEY_PATH`, `DEPLOY_SERVER_HOST`)를 그대로
+쓴다 — 5절에서 이미 설정해뒀다면 이 절을 위해 추가로 설정할 것은 없다.
+
+### 실행
+
+로컬 PC(Git Bash)에서 저장소 루트로 이동한 뒤:
+
+```bash
+bash scripts/push_regime_ml_model.sh
+```
+
+이 한 줄이 로컬 `data/regime_ml_models/`에서 가장 최신 모델(.txt + .json)을
+찾아 서버의 같은 경로로 복사한다(경로가 없으면 먼저 만든다). 실행이 끝나면
+어떤 모델(파일명/타임스탬프)이 전송됐는지 출력된다.
+
+실행 후 서버의 `/regime` 대시보드 ML 카드가 방금 올린 모델로 예측을
+보여주기 시작한다 — 별도 서비스 재시작은 필요 없다(요청이 올 때마다
+`find_latest_model()`이 디렉터리를 다시 스캔한다).
+
+**주의**: 이 스크립트는 자동으로 반복 실행되지 않는다. 로컬에서
+`scripts/train_regime_ml.py`로 새 모델을 학습할 때마다, 그 결과를 배포된
+대시보드에 반영하려면 이 스크립트를 매번 직접 다시 실행해야 한다.
