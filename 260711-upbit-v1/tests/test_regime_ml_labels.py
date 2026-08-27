@@ -10,6 +10,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from engine.regime_detector import ewm_volatility
 from engine.regime_ml_labels import (
     CATEGORY_LABELS,
     bucket_to_category,
@@ -38,6 +39,14 @@ def test_compute_normalized_realized_series_matches_evaluate_market_formula():
     # 워밍업 이후 앞부분은 값이 존재
     assert series.iloc[0:len(df) - n_bars].notna().all()
 
+    # 수치 검증: 특정 인덱스 t에서 독립적으로 계산한 예상값과 비교
+    t = 10
+    returns = df["close"].pct_change(fill_method=None)
+    future_returns = returns.iloc[t + 1 : t + 1 + n_bars]
+    realized_volatility = ewm_volatility(future_returns, half_life_bars)
+    expected = future_returns.mean() / realized_volatility
+    assert series.iloc[t] == pytest.approx(expected)
+
 
 def test_compute_normalized_realized_series_returns_all_nan_when_too_short():
     df = _make_close_df([100.0, 101.0, 102.0])
@@ -58,8 +67,17 @@ def test_compute_quantile_boundaries_are_ascending_and_within_range():
 
 def test_compute_quantile_boundaries_ignores_nan():
     values = pd.Series([1.0, 2.0, float("nan"), 3.0, 4.0, float("nan"), 5.0])
-    boundaries = compute_quantile_boundaries(values, quantiles=(0.25, 0.4, 0.6, 0.75))
-    assert all(b == b for b in boundaries)  # NaN이 섞이지 않음
+    quantiles_tuple = (0.25, 0.4, 0.6, 0.75)
+    boundaries = compute_quantile_boundaries(values, quantiles=quantiles_tuple)
+
+    # NaN이 섞이지 않음
+    assert all(b == b for b in boundaries)
+
+    # NaN을 제외한 값으로 예상값을 직접 계산하여 검증
+    clean = values.dropna()
+    expected = [float(clean.quantile(q)) for q in quantiles_tuple]
+    for actual, exp in zip(boundaries, expected):
+        assert actual == pytest.approx(exp)
 
 
 def test_compute_quantile_boundaries_raises_when_all_nan():
