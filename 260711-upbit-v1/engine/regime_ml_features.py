@@ -5,7 +5,7 @@ engine/regime_ml_features.py
 (이미 백트레이더 대비 골든테스트로 검증된 순수 pandas 지표)를 재구현 없이 그대로
 순회하고, engine.regime_features.py의 반전게이팅 실험용 5개 함수 + momentum/volatility
 EWMA(raw_score)를 더한다. I/O 없는 순수 함수 — 입력 df는
-scripts/regime_ml_data.py가 준비한다. 설계 문서:
+engine/regime_ml_data.py가 준비한다. 설계 문서:
 docs/superpowers/specs/2026-08-27-regime-detector-ml-classifier-design.md
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ _MIN_VOLATILITY_FLOOR = 1e-6
 def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -> pd.DataFrame:
     """df: close/high/low/volume/trade_value + btc_close/usdt_close/binance_close/
     fear_greed_value/funding_rate_value/korea_premium_value를 전부 포함해야 한다
-    (scripts.regime_ml_data.load_market_training_data()가 반환하는 형태). 반환
+    (engine.regime_ml_data.load_market_training_data()가 반환하는 형태). 반환
     DataFrame은 df와 같은 행 수/인덱스를 유지하며(워밍업 구간은 NaN), 원본 OHLCV
     컬럼은 포함하지 않는다(피처 전용) — market 범주형 컬럼만 추가한다."""
     features: dict[str, pd.Series] = {

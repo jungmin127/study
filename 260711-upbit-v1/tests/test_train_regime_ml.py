@@ -2,7 +2,7 @@
 tests/test_train_regime_ml.py
 
 scripts.train_regime_ml.run_training()의 end-to-end 스모크 테스트. 실제 네트워크
-호출 없이(scripts.regime_ml_data.load_market_training_data를 monkeypatch) 합성
+호출 없이(engine.regime_ml_data.load_market_training_data를 monkeypatch) 합성
 데이터로 전체 파이프라인(데이터 로드 -> 피처 -> fold 루프 -> LightGBM 학습 -> 리포트
 -> 모델 저장)이 에러 없이 완주하는지만 검증한다. 개별 단계(레이블/분할/피처/로더)의
 세부 동작은 각자의 유닛테스트(test_regime_ml_labels.py 등)가 이미 검증한다.
