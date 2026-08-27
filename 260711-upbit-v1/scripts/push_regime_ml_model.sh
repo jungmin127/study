@@ -14,7 +14,11 @@ REMOTE_APP_DIR="/opt/study/260711-upbit-v1"
 LOCAL_MODEL_DIR="$REPO_ROOT/data/regime_ml_models"
 REMOTE_MODEL_DIR="$REMOTE_APP_DIR/data/regime_ml_models"
 
-LOCAL_TXT="$(find "$LOCAL_MODEL_DIR" -maxdepth 1 -name 'regime_ml_*.txt' 2>/dev/null | sort | tail -n 1)"
+if [ -d "$LOCAL_MODEL_DIR" ]; then
+    LOCAL_TXT="$(find "$LOCAL_MODEL_DIR" -maxdepth 1 -name 'regime_ml_*.txt' | sort | tail -n 1)"
+else
+    LOCAL_TXT=""
+fi
 
 if [ -z "$LOCAL_TXT" ]; then
     echo "옮길 ML 모델이 없습니다: $LOCAL_MODEL_DIR" >&2
