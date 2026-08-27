@@ -27,9 +27,11 @@ _MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
 _LABELS = ["급하락", "완만하락", "횡보", "완만상승", "급상승"]
 
 
-def _train_and_save_tiny_model(model_dir, timestamp: str, fold_index: int = 3):
+def _train_and_save_tiny_model(model_dir, timestamp: str, fold_index: int = 3, performance: dict | None = None):
     """scripts/train_regime_ml.py의 실제 흐름(3마켓 풀링 -> market astype category
-    -> LightGBM 학습 -> booster_.save_model)을 축소 재현해 .txt+.json 페어를 저장한다."""
+    -> LightGBM 학습 -> booster_.save_model)을 축소 재현해 .txt+.json 페어를 저장한다.
+    performance를 None으로 두면(기본값) performance 키 자체가 없는 구형 사이드카를
+    재현한다 — 명시하면 그 값을 그대로 담는다."""
     rng = np.random.default_rng(0)
     rows = []
     for market in _MARKETS:
@@ -46,12 +48,15 @@ def _train_and_save_tiny_model(model_dir, timestamp: str, fold_index: int = 3):
     txt_path = model_dir / f"regime_ml_{timestamp}.txt"
     json_path = model_dir / f"regime_ml_{timestamp}.json"
     model.booster_.save_model(str(txt_path))
-    json_path.write_text(json.dumps({
+    sidecar = {
         "boundaries": [-0.2, -0.1, 0.1, 0.2],
         "ref_scores": {label: 0.0 for label in _LABELS},
         "classes": [str(c) for c in model.classes_],
         "fold_index": fold_index,
-    }), encoding="utf-8")
+    }
+    if performance is not None:
+        sidecar["performance"] = performance
+    json_path.write_text(json.dumps(sidecar), encoding="utf-8")
     return txt_path, json_path, model
 
 
@@ -130,6 +135,62 @@ def test_predict_current_ml_regime_returns_valid_response(tmp_path, monkeypatch)
     assert result["model_fold_index"] == 5
     assert result["model_trained_at"] == datetime(2026, 8, 27, 5, 20, 47, tzinfo=timezone.utc).isoformat()
     assert result["bar_time"] == datetime(2026, 8, 27, 5, 0, 0, tzinfo=timezone.utc).isoformat()
+    assert result["model_performance"] is None
+
+
+def test_predict_current_ml_regime_includes_performance_when_present(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    performance = {
+        "folds": [{"fold_index": 5, "n_train": 100, "n_test": 20, "correlation": 0.12}],
+        "pooled_correlation": 0.12,
+        "pooled_hit_rate": {label: 0.2 for label in _LABELS},
+    }
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5, performance=performance)
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    result = predict_current_ml_regime("KRW-ETH", "minutes60")
+
+    assert result["model_performance"] == performance
+
+
+def test_predict_current_ml_regime_performance_is_none_for_legacy_sidecar(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)  # performance 없음(기본값)
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    result = predict_current_ml_regime("KRW-ETH", "minutes60")
+
+    assert result["model_performance"] is None
 
 
 def test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row(tmp_path, monkeypatch):

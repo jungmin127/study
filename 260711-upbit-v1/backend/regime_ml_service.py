@@ -106,4 +106,5 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
         "model_trained_at": _parse_trained_at(model_path),
         "model_fold_index": sidecar["fold_index"],
         "bar_time": bar_time,
+        "model_performance": sidecar.get("performance"),
     }
