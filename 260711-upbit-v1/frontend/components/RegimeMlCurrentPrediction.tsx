@@ -39,15 +39,23 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
       setError(null);
       return;
     }
+    let ignore = false;
     setLoading(true);
     setError(null);
+    setData(null);
     getRegimeMlCurrentPrediction({ market, timeframe })
-      .then(setData)
-      .catch((err) => {
-        setError(err instanceof ApiError ? err.message : 'ML 예측을 불러오지 못했습니다.');
-        setData(null);
+      .then((d) => {
+        if (!ignore) setData(d);
       })
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!ignore) setError(err instanceof ApiError ? err.message : 'ML 예측을 불러오지 못했습니다.');
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
   }, [market, timeframe]);
 
   return (
