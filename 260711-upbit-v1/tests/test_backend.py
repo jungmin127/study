@@ -2954,3 +2954,79 @@ def test_regime_ml_current_prediction_returns_404_when_no_model(monkeypatch, tmp
 
     assert resp.status_code == 404
     assert "학습된 ML 모델이 없습니다" in resp.json()["detail"]
+
+
+def test_ml_train_enabled_defaults_to_false(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.delenv("ENABLE_ML_TRAINING_UI", raising=False)
+
+    resp = client.get("/api/v1/regime/ml-train-enabled")
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": False}
+
+
+def test_ml_train_enabled_true_when_env_set(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENABLE_ML_TRAINING_UI", "true")
+
+    resp = client.get("/api/v1/regime/ml-train-enabled")
+    assert resp.json() == {"enabled": True}
+
+
+def test_start_regime_ml_train_job_rejects_when_flag_disabled(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.delenv("ENABLE_ML_TRAINING_UI", raising=False)
+
+    resp = client.post("/api/v1/regime/ml-train")
+    assert resp.status_code == 403
+
+
+def test_start_regime_ml_train_job_returns_running_job(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENABLE_ML_TRAINING_UI", "true")
+    monkeypatch.setattr(backend_module, "start_regime_ml_training_job", lambda: "job-1")
+
+    from engine.cache import create_regime_ml_job
+    create_regime_ml_job("job-1")
+
+    resp = client.post("/api/v1/regime/ml-train")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == "job-1"
+    assert body["status"] == "running"
+
+
+def test_start_regime_ml_train_job_returns_409_when_already_running(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENABLE_ML_TRAINING_UI", "true")
+
+    def _raise():
+        raise backend_module.RegimeMlJobAlreadyRunningError("job-existing")
+
+    monkeypatch.setattr(backend_module, "start_regime_ml_training_job", _raise)
+
+    resp = client.post("/api/v1/regime/ml-train")
+    assert resp.status_code == 409
+
+
+def test_list_regime_ml_train_jobs_returns_saved_jobs(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from engine.cache import create_regime_ml_job
+    create_regime_ml_job("job-1")
+
+    resp = client.get("/api/v1/regime/ml-train/jobs")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["id"] == "job-1"
+
+
+def test_startup_fails_orphaned_running_regime_ml_jobs(monkeypatch, tmp_path):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    from engine.cache import create_regime_ml_job, get_regime_ml_job
+    create_regime_ml_job("orphan-1")
+
+    backend_module._fail_orphaned_regime_ml_jobs()
+
+    job = get_regime_ml_job("orphan-1")
+    assert job["status"] == "failed"

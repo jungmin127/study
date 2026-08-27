@@ -19,16 +19,20 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from engine.cache import (
+    create_regime_ml_job,
     delete_backtest_run,
     delete_grid_search_job,
     finish_grid_search_job,
+    finish_regime_ml_job,
     get_grid_search_job,
+    get_regime_ml_job,
     get_run_config,
     list_backtest_runs,
     list_combined_ranking,
     list_distinct_combos,
     list_grid_search_jobs,
     list_latest_sweep_results,
+    list_regime_ml_jobs,
     list_segment_classification,
     list_sweep_history,
     load_result,
@@ -70,6 +74,10 @@ from backend.grid_search_service import (
     start_job,
 )
 from backend.regime_ml_service import predict_current_ml_regime
+from backend.regime_ml_training_service import (
+    JobAlreadyRunningError as RegimeMlJobAlreadyRunningError,
+    start_job as start_regime_ml_training_job,
+)
 from engine.grid_search_pool import INDICATOR_POOL_SPECS, build_condition_grid
 import httpx
 
@@ -156,6 +164,38 @@ def _fail_orphaned_grid_search_jobs() -> None:
 @app.on_event("startup")
 def _cleanup_orphaned_grid_search_jobs() -> None:
     _fail_orphaned_grid_search_jobs()
+
+
+def _ml_training_ui_enabled() -> bool:
+    """ENABLE_ML_TRAINING_UI가 로컬 .env에만 true로 설정되어 있어야 한다 — AWS에
+    실수로 재학습이 실행되는 사고(과거 grid search가 실제로 겪은 OOM 사고와 같은
+    유형)를 막기 위한 게이트. _resolve_allowed_origin()과 같은 이유로 빈 문자열도
+    미설정과 동일하게 취급한다."""
+    return (os.environ.get("ENABLE_ML_TRAINING_UI") or "").strip().lower() == "true"
+
+
+def _fail_orphaned_regime_ml_jobs() -> None:
+    """백엔드가 재시작되면 서브프로세스 stdout 리더 스레드도 함께 사라진다 —
+    재기동 시 남아 있는 running 행은 추적 불가능한 고아이므로 실패로 정리한다."""
+    for job in list_regime_ml_jobs():
+        if job["status"] == "running":
+            finish_regime_ml_job(
+                job["id"], status="failed",
+                error_message="백엔드가 재시작되어 진행률 추적이 끊겼습니다. 모델 목록에서 결과를 확인하세요.",
+            )
+
+
+@app.on_event("startup")
+def _cleanup_orphaned_regime_ml_jobs() -> None:
+    _fail_orphaned_regime_ml_jobs()
+
+
+def _regime_ml_job_response(job: dict) -> dict:
+    return {
+        **job,
+        "started_at": _to_utc_iso(job["started_at"]),
+        "finished_at": _to_utc_iso(job["finished_at"]) if job["finished_at"] else None,
+    }
 
 INDICATOR_CATALOG: list[dict] = [
     {
@@ -609,6 +649,30 @@ def get_regime_ml_current_prediction_endpoint(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/regime/ml-train-enabled")
+def get_regime_ml_train_enabled_endpoint() -> dict:
+    return {"enabled": _ml_training_ui_enabled()}
+
+
+@app.post("/api/v1/regime/ml-train")
+def start_regime_ml_train_job_endpoint() -> dict:
+    if not _ml_training_ui_enabled():
+        raise HTTPException(status_code=403, detail="이 환경에서는 ML 재학습이 비활성화되어 있습니다.")
+    try:
+        job_id = start_regime_ml_training_job()
+    except RegimeMlJobAlreadyRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    job = get_regime_ml_job(job_id)
+    assert job is not None
+    return _regime_ml_job_response(job)
+
+
+@app.get("/api/v1/regime/ml-train/jobs")
+def list_regime_ml_train_jobs_endpoint() -> list[dict]:
+    return [_regime_ml_job_response(j) for j in list_regime_ml_jobs()]
 
 
 @app.get("/api/v1/indicators/catalog")
