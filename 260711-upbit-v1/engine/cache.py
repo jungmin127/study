@@ -113,6 +113,16 @@ CREATE TABLE IF NOT EXISTS trend_segments (
 CREATE INDEX IF NOT EXISTS idx_trend_segments_market ON trend_segments(market);
 """
 
+_SCHEMA += """
+CREATE TABLE IF NOT EXISTS regime_ml_jobs (
+    id            TEXT PRIMARY KEY,
+    status        TEXT NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    error_message TEXT
+);
+"""
+
 
 _JSON_PRIMITIVES = (str, int, float, bool, type(None))
 
@@ -847,3 +857,66 @@ def list_grid_search_jobs() -> list[dict]:
     finally:
         conn.close()
     return [_row_to_grid_search_job_dict(r) for r in rows]
+
+
+def create_regime_ml_job(job_id: str) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO regime_ml_jobs (id, status, started_at) "
+            "VALUES (?, 'running', datetime('now'))",
+            (job_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def finish_regime_ml_job(job_id: str, status: str, error_message: str | None = None) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE regime_ml_jobs "
+            "SET status = ?, finished_at = datetime('now'), error_message = ? "
+            "WHERE id = ?",
+            (status, error_message, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _row_to_regime_ml_job_dict(row: tuple) -> dict:
+    job_id, status, started_at, finished_at, error_message = row
+    return {
+        "id": job_id,
+        "status": status,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "error_message": error_message,
+    }
+
+
+def get_regime_ml_job(job_id: str) -> dict | None:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT id, status, started_at, finished_at, error_message "
+            "FROM regime_ml_jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return _row_to_regime_ml_job_dict(row) if row else None
+
+
+def list_regime_ml_jobs() -> list[dict]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT id, status, started_at, finished_at, error_message "
+            "FROM regime_ml_jobs ORDER BY started_at DESC, rowid DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_regime_ml_job_dict(r) for r in rows]

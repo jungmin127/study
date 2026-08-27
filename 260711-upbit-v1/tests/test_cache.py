@@ -1038,3 +1038,47 @@ def test_set_candle_count_updates_existing_row(monkeypatch, tmp_path):
 
     assert load_result("r1")["candle_count"] == 365
     assert list_runs_missing_candle_count() == []
+
+
+def test_create_and_get_regime_ml_job(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    from engine.cache import create_regime_ml_job, get_regime_ml_job
+
+    create_regime_ml_job("job-1")
+    job = get_regime_ml_job("job-1")
+
+    assert job["id"] == "job-1"
+    assert job["status"] == "running"
+    assert job["finished_at"] is None
+    assert job["error_message"] is None
+
+
+def test_finish_regime_ml_job_updates_status_and_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    from engine.cache import create_regime_ml_job, finish_regime_ml_job, get_regime_ml_job
+
+    create_regime_ml_job("job-1")
+    finish_regime_ml_job("job-1", status="failed", error_message="boom")
+
+    job = get_regime_ml_job("job-1")
+    assert job["status"] == "failed"
+    assert job["error_message"] == "boom"
+    assert job["finished_at"] is not None
+
+
+def test_get_regime_ml_job_returns_none_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    from engine.cache import get_regime_ml_job
+
+    assert get_regime_ml_job("does-not-exist") is None
+
+
+def test_list_regime_ml_jobs_orders_newest_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
+    from engine.cache import create_regime_ml_job, list_regime_ml_jobs
+
+    create_regime_ml_job("job-1")
+    create_regime_ml_job("job-2")
+
+    jobs = list_regime_ml_jobs()
+    assert [j["id"] for j in jobs] == ["job-2", "job-1"]
