@@ -28,17 +28,17 @@ from engine.regime_ml_labels import (
     compute_normalized_realized_series,
     compute_quantile_boundaries,
 )
+from engine.regime_ml_constants import TRAINING_MARKETS
 from engine.regime_ml_splits import generate_walk_forward_folds
 from engine.regime_ml_data import load_market_training_data
 from upbit_data_service import timeframe_duration
 
-MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
 TIMEFRAME = "minutes60"
 TRAIN_START = datetime(2024, 1, 1, tzinfo=timezone.utc)
 TRAIN_END = datetime.now(timezone.utc)
 N_FOLDS = 5
 MIN_TRAIN_SAMPLES = 500
-MODEL_OUTPUT_DIR = Path("data/regime_ml_models")
+MODEL_OUTPUT_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
 
 
 def run_training(
@@ -287,7 +287,7 @@ def _print_aggregate_summary(
 
 def main() -> None:
     reports = run_training(
-        markets=MARKETS,
+        markets=TRAINING_MARKETS,
         timeframe=TIMEFRAME,
         start=TRAIN_START,
         end=TRAIN_END,

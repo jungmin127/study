@@ -17,6 +17,7 @@ import lightgbm as lgb
 import pandas as pd
 
 from engine.regime_detector import half_life_bars_for_timeframe
+from engine.regime_ml_constants import TRAINING_MARKETS
 from engine.regime_ml_data import load_market_training_data
 from engine.regime_ml_features import build_feature_matrix
 
@@ -28,13 +29,11 @@ MODEL_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
 WARMUP_DAYS = 30
 _TIMESTAMP_PATTERN = re.compile(r"regime_ml_(\d{8}T\d{6}Z)")
 
-# scripts/train_regime_ml.py의 MARKETS와 반드시 같은 집합이어야 한다. 학습 시
-# train_X["market"].astype("category")가 이 3개 마켓의 알파벳순으로 카테고리
-# 코드(0/1/2)를 배정했고, 저장된 부스터는 그 정수 코드만 기억한다 — 추론 시 이
-# 전체 목록을 categories=로 명시하지 않으면(예: 1행짜리 프레임에 그냥
+# 학습 시 train_X["market"].astype("category")가 TRAINING_MARKETS의 알파벳순으로
+# 카테고리 코드(0/1/2)를 배정했고, 저장된 부스터는 그 정수 코드만 기억한다 — 추론 시
+# 이 전체 목록을 categories=로 명시하지 않으면(예: 1행짜리 프레임에 그냥
 # astype("category")를 부르면) 카테고리가 1개뿐이라 코드가 다시 0으로 배정돼
 # 학습 때와 다른 마켓을 가리키는 것처럼 조용히 오작동한다.
-_TRAINING_MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
 
 
 def find_latest_model() -> tuple[Path, dict] | None:
@@ -72,9 +71,9 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
     """market의 가장 최근 봉 하나에 대한 ML 예측을 반환한다."""
     if timeframe != "minutes60":
         raise ValueError("ML 모델은 1시간봉(minutes60)으로만 학습되어 있습니다")
-    if market not in _TRAINING_MARKETS:
+    if market not in TRAINING_MARKETS:
         raise ValueError(
-            f"이 모델은 {', '.join(_TRAINING_MARKETS)}로만 학습되어 있습니다"
+            f"이 모델은 {', '.join(TRAINING_MARKETS)}로만 학습되어 있습니다"
         )
 
     found = find_latest_model()
@@ -92,7 +91,7 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
     half_life_bars = half_life_bars_for_timeframe(timeframe)
     features_df = build_feature_matrix(df, market, half_life_bars)
     features_df = features_df.assign(
-        market=pd.Categorical(features_df["market"], categories=sorted(_TRAINING_MARKETS))
+        market=pd.Categorical(features_df["market"], categories=sorted(TRAINING_MARKETS))
     )
     last_row = features_df.iloc[[-1]]
 
