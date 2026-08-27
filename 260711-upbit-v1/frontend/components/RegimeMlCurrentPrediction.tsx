@@ -65,7 +65,7 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
       {timeframe !== 'minutes60' ? (
         <p className="text-sm text-muted-foreground">ML은 1시간봉 전용입니다.</p>
       ) : !TRAINED_MARKETS.includes(market) ? (
-        <p className="text-sm text-muted-foreground">이 모델은 KRW-BTC/KRW-ETH/KRW-XRP로만 학습되어 있습니다.</p>
+        <p className="text-sm text-muted-foreground">이 모델은 {TRAINED_MARKETS.join('/')}로만 학습되어 있습니다.</p>
       ) : loading ? (
         <p className="text-sm text-muted-foreground">불러오는 중...</p>
       ) : error ? (

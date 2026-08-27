@@ -19,7 +19,7 @@ _FRONTEND_FILE = (
     / "frontend" / "components" / "RegimeMlCurrentPrediction.tsx"
 )
 _ARRAY_PATTERN = re.compile(r"TRAINED_MARKETS\s*=\s*\[([^\]]*)\]")
-_QUOTED_STRING_PATTERN = re.compile(r"'([^']*)'")
+_QUOTED_STRING_PATTERN = re.compile(r"['\"]([^'\"]*)['\"]")
 
 
 def _extract_frontend_markets() -> list[str]:
