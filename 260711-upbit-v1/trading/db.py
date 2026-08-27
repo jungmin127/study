@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS live_strategies (
     approved_at         TEXT,
     started_at          TEXT,
     stopped_at          TEXT,
-    baseline_qty        REAL
+    baseline_qty        REAL,
+    deleted_at          TEXT
 );
 
 CREATE TABLE IF NOT EXISTS positions (
@@ -209,6 +210,23 @@ def _ensure_positions_entry_fee_column(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_live_strategies_deleted_at_column(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 live_strategies 테이블에 새 컬럼
+    deleted_at을 추가하지 못한다. entry_fee와 동일한 이유로(AWS에서 실거래 중인
+    프로덕션 DB라 파일을 지울 수 없음) ALTER TABLE로 직접 추가한다 — 기존 행은
+    NULL로 채워지며, 이는 "아직 소프트 삭제되지 않음"이라는 올바른 기본값이다."""
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='live_strategies'"
+    ).fetchone() is not None
+    if not table_exists:
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('live_strategies')")}
+    if "deleted_at" in columns:
+        return
+    conn.execute("ALTER TABLE live_strategies ADD COLUMN deleted_at TEXT")
+    conn.commit()
+
+
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -219,6 +237,7 @@ def _connect() -> sqlite3.Connection:
         _assert_signals_unique_constraint_present(conn)
         _assert_live_strategies_manual_pause_column_present(conn)
         _ensure_positions_entry_fee_column(conn)
+        _ensure_live_strategies_deleted_at_column(conn)
         _initialized_paths.add(DB_PATH)
     return conn
 
@@ -947,6 +966,27 @@ def delete_live_strategy(live_strategy_id: str) -> bool:
         conn.execute("DELETE FROM capital_adjustments WHERE live_strategy_id = ?", (live_strategy_id,))
         cursor = conn.execute(
             "DELETE FROM live_strategies WHERE id = ? AND status = 'stopped'",
+            (live_strategy_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def soft_delete_live_strategy(live_strategy_id: str) -> bool:
+    """live_strategies 행과 positions/orders 등 자식 테이블은 그대로 두고 deleted_at만
+    채운다 — "라이브 전략 관리" 목록(list_live_strategies_endpoint)에서는 사라지지만
+    매매일지 집계(get_market_journal/get_journal_summary, approved_at IS NOT NULL만
+    봄)에는 계속 잡히게 하기 위해서다. status가 'stopped'가 아니거나 이미 삭제된
+    경우(또는 id가 없으면) 아무것도 바꾸지 않고 False를 반환한다 — delete_live_strategy와
+    동일한 가드 시맨틱(WHERE 절에 deleted_at IS NULL을 추가해 이중 삭제 시 False가
+    나오게 한다)."""
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE live_strategies SET deleted_at = datetime('now') "
+            "WHERE id = ? AND status = 'stopped' AND deleted_at IS NULL",
             (live_strategy_id,),
         )
         conn.commit()

@@ -129,7 +129,7 @@ def test_live_strategies_columns(monkeypatch, tmp_path):
         "id", "source_run_id", "market", "timeframe", "buy_conditions_json",
         "sell_conditions_json", "risk_config_json", "current_capital", "status",
         "manual_pause", "last_processed_candle_time", "created_at", "approved_at",
-        "started_at", "stopped_at", "baseline_qty",
+        "started_at", "stopped_at", "baseline_qty", "deleted_at",
     }
 
 
@@ -1014,6 +1014,50 @@ def test_delete_live_strategy_returns_false_for_missing_id(monkeypatch, tmp_path
     db = _fresh_db(monkeypatch, tmp_path)
 
     assert db.delete_live_strategy("does-not-exist") is False
+
+
+def test_soft_delete_live_strategy_marks_deleted_at_and_keeps_child_rows(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="stopped")
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    order_id = db.insert_order(
+        strategy_id, position_id, "KRW-BTC", "buy", "market", None, None, 50_000_000.0,
+    )
+
+    deleted = db.soft_delete_live_strategy(strategy_id)
+
+    assert deleted is True
+    strategy = db.get_live_strategy(strategy_id)
+    assert strategy is not None
+    assert strategy["deleted_at"] is not None
+    assert db.get_position(position_id) is not None
+    assert db.get_order_by_id(order_id) is not None
+
+
+def test_soft_delete_live_strategy_rejects_non_stopped_status(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    deleted = db.soft_delete_live_strategy(strategy_id)
+
+    assert deleted is False
+    assert db.get_live_strategy(strategy_id)["deleted_at"] is None
+
+
+def test_soft_delete_live_strategy_returns_false_for_missing_id(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+
+    assert db.soft_delete_live_strategy("does-not-exist") is False
+
+
+def test_soft_delete_live_strategy_returns_false_when_already_deleted(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="stopped")
+    assert db.soft_delete_live_strategy(strategy_id) is True
+
+    deleted_again = db.soft_delete_live_strategy(strategy_id)
+
+    assert deleted_again is False
 
 
 def test_insert_capital_adjustment_persists_fields(monkeypatch, tmp_path):
