@@ -215,10 +215,9 @@ def test_aggregate_confusion_and_totals_sum_across_folds():
         assert summed_totals[actual] == expected
 
 
-def test_run_training_prints_caveat_and_aggregate_summary_after_folds(tmp_path, monkeypatch, capsys):
-    """Finding 1: hit-rate/confusion이 regime_backtest.py와 직접 비교 불가하다는
-    안내가 콘솔 상단에 찍히는지. Finding 2b: 모든 fold 리포트 이후에 "전체 fold 합산"
-    블록이 한 번 더 찍히는지(순서까지) 확인한다."""
+def test_run_training_prints_aggregate_summary_after_folds(tmp_path, monkeypatch, capsys):
+    """Finding 2b: 모든 fold 리포트 이후에 "전체 fold 합산" 블록이 한 번 더
+    찍히는지(순서까지) 확인한다."""
     seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
     monkeypatch.setattr(
         train_regime_ml, "load_market_training_data",
@@ -237,7 +236,6 @@ def test_run_training_prints_caveat_and_aggregate_summary_after_folds(tmp_path, 
     assert len(reports) >= 1
 
     captured = capsys.readouterr().out
-    assert "비교하지 마세요" in captured
     assert "상관계수" in captured
     assert "전체 fold 합산" in captured
 

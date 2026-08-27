@@ -16,7 +16,7 @@ from pathlib import Path
 import lightgbm as lgb
 import pandas as pd
 
-from engine.regime_detector import half_life_bars_for_timeframe
+from engine.regime_math import half_life_bars_for_timeframe
 from engine.regime_ml_constants import TRAINING_MARKETS
 from engine.regime_ml_data import load_market_training_data
 from engine.regime_ml_features import build_feature_matrix

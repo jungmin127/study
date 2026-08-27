@@ -1,9 +1,8 @@
 """
 scripts/train_regime_ml.py
 
-장세 판별기 ML 전환 — LightGBM 학습+워크포워드 검증 파이프라인. scripts/regime_backtest.py
-(규칙기반 검증 CLI)와 나란히 비교할 수 있도록 같은 콘솔 리포트 형식(카테고리별 hit-rate/
-confusion matrix/상관계수)을 쓴다. 설계 문서:
+장세 판별기 ML 전환 — LightGBM 학습+워크포워드 검증 파이프라인. 카테고리별
+hit-rate/confusion matrix/상관계수를 콘솔에 리포트한다. 설계 문서:
 docs/superpowers/specs/2026-08-27-regime-detector-ml-classifier-design.md
 
 Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/train_regime_ml.py
@@ -18,8 +17,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from backend.regime_service import N_MULTIPLIER
-from engine.regime_detector import half_life_bars_for_timeframe
+from engine.regime_math import N_MULTIPLIER, half_life_bars_for_timeframe
 from engine.regime_ml_features import build_feature_matrix
 from engine.regime_ml_labels import (
     CATEGORY_LABELS,
@@ -59,13 +57,6 @@ def run_training(
     embargo = timeframe_duration(timeframe) * n_bars
 
     print(f"half_life_bars={half_life_bars:.1f}, n_bars={n_bars}, timeframe={timeframe}")
-    print(
-        "  [주의] 이 스크립트의 hit-rate/confusion matrix는 fold별 학습구간 분위수"
-        "(2%/16%/84%/98%)로 카테고리 경계를 정합니다. scripts/regime_backtest.py는"
-        " 고정 임계값(CATEGORY_REFERENCE_SCORES 중간값)을 씁니다 — 두 스크립트의"
-        " hit-rate/confusion 숫자는 직접 비교하지 마세요. 상관계수(correlation)는"
-        " 두 스크립트가 동일한 방식으로 계산하므로, 이것이 비교에 쓸 지표입니다."
-    )
 
     market_frames: dict[str, tuple[pd.Series, pd.DataFrame, pd.Series]] = {}
     for market in markets:
@@ -238,8 +229,7 @@ def _print_correlation_block(correlation: float | None) -> None:
 
 
 def _print_confusion_grid(confusion: dict[str, dict[str, int]]) -> None:
-    """scripts/regime_backtest.py의 confusion matrix 출력 형식(행=예측, 열=실제)을
-    그대로 따른다 — 두 스크립트를 나란히 읽을 때 레이아웃이 동일해야 한다."""
+    """confusion matrix를 행=예측, 열=실제 형식으로 출력한다."""
     print("  [confusion matrix] 행=예측, 열=실제")
     header = "    " + "예측\\실제".ljust(10) + "".join(label.ljust(10) for label in CATEGORY_LABELS)
     print(header)

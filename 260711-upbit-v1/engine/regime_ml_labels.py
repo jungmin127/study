@@ -1,17 +1,17 @@
 """
 engine/regime_ml_labels.py
 
-장세 판별 ML 분류기의 레이블(정답 카테고리)을 만든다. 정규화 실현수익률 정의는
-backend/regime_service.py:evaluate_market()의 100~119행 루프와 동일하다(같은 잣대로
-규칙기반과 ML을 비교하기 위함) — 카테고리 경계만 고정값이 아니라 fold별 훈련구간
-분위수로 계산한다는 점이 다르다. 설계 문서:
+장세 판별 ML 분류기의 레이블(정답 카테고리)을 만든다. 정규화 실현수익률(다음 n_bars
+평균수익률을 이후 EWM변동성으로 정규화한 값)은 과거 규칙기반 판별기(E 작업으로
+2026-08-28 삭제됨)가 쓰던 것과 같은 정규화 방식이다 — 카테고리 경계만 고정값이 아니라
+fold별 훈련구간 분위수로 계산한다는 점이 다르다. 설계 문서:
 docs/superpowers/specs/2026-08-27-regime-detector-ml-classifier-design.md
 """
 from __future__ import annotations
 
 import pandas as pd
 
-from engine.regime_detector import ewm_volatility
+from engine.regime_math import ewm_volatility
 
 CATEGORY_LABELS: list[str] = ["급하락", "완만하락", "횡보", "완만상승", "급상승"]
 

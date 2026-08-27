@@ -20,9 +20,7 @@ import numpy as np
 import pandas as pd
 
 
-# regime_detector.py의 동명 상수와 값이 같아야 한다. regime_detector가 이 모듈을
-# import하므로(반대 방향은 순환참조), backend/regime_service.py의 _to_utc_iso와
-# 같은 이유로 별도 정의한다.
+# 이 모듈이 자체적으로 갖는 최소 변동성 하한값(level_proximity의 0-나눗셈 방지용).
 _MIN_VOLATILITY_FLOOR = 1e-6
 
 

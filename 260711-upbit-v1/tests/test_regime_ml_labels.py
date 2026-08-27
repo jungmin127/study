@@ -2,15 +2,15 @@
 tests/test_regime_ml_labels.py
 
 engine.regime_ml_labels의 레이블 생성 함수를 검증한다. compute_normalized_realized_series는
-backend/regime_service.py:evaluate_market()의 정규화 실현수익률 루프(100~119행)와 동일한
-값을 내야 한다(같은 잣대로 규칙기반과 비교하기 위함).
+과거 규칙기반 판별기(E 작업으로 2026-08-28 삭제됨)가 쓰던 것과 같은 정규화 실현수익률
+공식(다음 n_bars 평균수익률 / 이후 EWM변동성)을 그대로 따른다.
 """
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 
-from engine.regime_detector import ewm_volatility
+from engine.regime_math import ewm_volatility
 from engine.regime_ml_labels import (
     CATEGORY_LABELS,
     bucket_to_category,
