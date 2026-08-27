@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import RegimeBacktestForm, { type RegimeBacktestParams } from '@/components/RegimeBacktestForm';
 import RegimeCurrentPrediction from '@/components/RegimeCurrentPrediction';
+import RegimeMlCurrentPrediction from '@/components/RegimeMlCurrentPrediction';
 import RegimeChart from '@/components/RegimeChart';
 import RegimeAccuracyReport from '@/components/RegimeAccuracyReport';
 import { ApiError } from '@/lib/api/client';
@@ -41,7 +42,10 @@ export default function RegimeDashboard() {
       )}
       {result && result.candles.length > 0 && (
         <>
-          <RegimeCurrentPrediction result={result} market={market} timeframe={timeframe} />
+          <div className="grid gap-4 md:grid-cols-2">
+            <RegimeCurrentPrediction result={result} market={market} timeframe={timeframe} />
+            <RegimeMlCurrentPrediction market={market} timeframe={timeframe} />
+          </div>
           <RegimeChart candles={result.candles} timeframe={timeframe} />
           <RegimeAccuracyReport report={result} />
         </>
