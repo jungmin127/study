@@ -39,8 +39,8 @@ def _patch_common(monkeypatch, *, symbol_found: bool = True):
         regime_ml_data, "merge_fear_greed",
         lambda df, fng_df: df.assign(fear_greed_value=float("nan")),
     )
+    monkeypatch.setattr(regime_ml_data, "binance_symbol", lambda market: "BTCUSDT")  # Always return a string
     if symbol_found:
-        monkeypatch.setattr(regime_ml_data, "binance_symbol", lambda market: "BTCUSDT")
         monkeypatch.setattr(regime_ml_data, "get_binance_close", lambda *a, **k: pd.DataFrame(columns=["candle_time", "close"]))
         monkeypatch.setattr(regime_ml_data, "get_binance_funding_rate", lambda *a, **k: pd.DataFrame(columns=["funding_time", "funding_rate_value"]))
         monkeypatch.setattr(
@@ -48,9 +48,10 @@ def _patch_common(monkeypatch, *, symbol_found: bool = True):
             lambda df, funding_df: df.assign(funding_rate_value=float("nan")),
         )
     else:
-        def _raise_not_found(market):
-            raise BinanceSymbolNotFoundError(market)
-        monkeypatch.setattr(regime_ml_data, "binance_symbol", _raise_not_found)
+        # Patch get_binance_close to raise the exception (the actual failure mode in production)
+        def _raise_symbol_not_found(*args, **kwargs):
+            raise BinanceSymbolNotFoundError("BTCUSDT")
+        monkeypatch.setattr(regime_ml_data, "get_binance_close", _raise_symbol_not_found)
     monkeypatch.setattr(regime_ml_data, "compute_korea_premium_value", lambda df: pd.Series([float("nan")] * len(df), index=df.index))
 
 

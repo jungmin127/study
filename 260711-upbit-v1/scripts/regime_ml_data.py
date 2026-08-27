@@ -62,12 +62,12 @@ def load_market_training_data(
     fng_df = get_fear_greed_cmc(start, end)
     df = merge_fear_greed(df, fng_df)
 
+    symbol = binance_symbol(market)  # Pure string transform, can't raise
     try:
-        symbol = binance_symbol(market)
+        binance_df = get_binance_close(symbol, timeframe, start, end)
     except BinanceSymbolNotFoundError:
         df = df.assign(binance_close=float("nan"), funding_rate_value=float("nan"))
     else:
-        binance_df = get_binance_close(symbol, timeframe, start, end)
         if binance_df.empty:
             df = df.assign(binance_close=float("nan"))
         else:
