@@ -273,7 +273,7 @@ def test_run_training_covers_all_requested_folds(tmp_path, monkeypatch):
 
 def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
     """Finding 4: 저장된 booster(.txt) 옆에 같은 base filename의 .json sidecar가
-    boundaries/ref_scores/classes/fold_index를 담아 저장돼야 한다."""
+    boundaries/ref_scores/classes/fold_index/performance를 담아 저장돼야 한다."""
     seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
     monkeypatch.setattr(
         train_regime_ml, "load_market_training_data",
@@ -300,10 +300,96 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
     with open(json_files[0], encoding="utf-8") as f:
         sidecar = json.load(f)
 
-    assert set(sidecar.keys()) == {"boundaries", "ref_scores", "classes", "fold_index"}
+    assert set(sidecar.keys()) == {"boundaries", "ref_scores", "classes", "fold_index", "performance"}
     assert isinstance(sidecar["boundaries"], list) and len(sidecar["boundaries"]) == 4
     assert isinstance(sidecar["ref_scores"], dict)
     assert set(sidecar["ref_scores"].keys()) == set(train_regime_ml.CATEGORY_LABELS)
     assert isinstance(sidecar["classes"], list) and len(sidecar["classes"]) >= 1
     assert isinstance(sidecar["fold_index"], int)
     assert sidecar["fold_index"] == reports[-1]["fold_index"]
+
+    performance = sidecar["performance"]
+    assert len(performance["folds"]) == len(reports)
+    for fold_perf, report in zip(performance["folds"], reports):
+        assert fold_perf["fold_index"] == report["fold_index"]
+        assert fold_perf["n_train"] == report["n_train"]
+        assert fold_perf["n_test"] == report["n_test"]
+        assert fold_perf["correlation"] == report["correlation"]
+
+    pooled_confusion = train_regime_ml._sum_confusion_matrices(reports)
+    expected_pooled_hit_rate = train_regime_ml._compute_hit_rate(pooled_confusion)
+    assert performance["pooled_hit_rate"] == expected_pooled_hit_rate
+    assert set(performance["pooled_hit_rate"].keys()) == set(train_regime_ml.CATEGORY_LABELS)
+
+    # pooled_correlation은 run_training() 내부에서만 접근 가능한
+    # all_expected_scores/all_actual_values로 계산되고 reports는 그 원본 페어를
+    # 반환하지 않으므로, reports만으로 값을 독립 재계산해 정확히 비교할 수는 없다.
+    # 대신 타입/범위로 타당성만 확인한다 — 정확한 계산 자체는
+    # test_correlation_from_pairs_computes_pearson_correlation()이 이미 단위
+    # 검증했고, 여기서는 그 함수가 실제로 호출·저장됐는지만 보면 된다.
+    pooled_correlation = performance["pooled_correlation"]
+    assert pooled_correlation is None or -1.0 <= pooled_correlation <= 1.0
+
+
+def test_run_training_performance_folds_excludes_skipped_folds(tmp_path, monkeypatch):
+    """fold 하나가 표본 부족으로 스킵됐을 때, 사이드카 performance.folds가 실제로
+    평가된 fold만 담고(reports와 정확히 같은 fold_index 집합) 스킵된 fold는 포함하지
+    않는지 확인한다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    reports = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=3,
+        min_train_samples=600,
+        model_output_dir=tmp_path,
+    )
+
+    assert [r["fold_index"] for r in reports] == [2, 3]
+
+    json_files = list(tmp_path.glob("*.json"))
+    with open(json_files[0], encoding="utf-8") as f:
+        sidecar = json.load(f)
+
+    assert [f["fold_index"] for f in sidecar["performance"]["folds"]] == [2, 3]
+
+
+def test_correlation_from_pairs_returns_none_when_insufficient_samples():
+    assert train_regime_ml._correlation_from_pairs([], []) is None
+    assert train_regime_ml._correlation_from_pairs([0.1], [0.2]) is None
+
+
+def test_correlation_from_pairs_computes_pearson_correlation():
+    expected_scores = [1.0, 2.0, 3.0, 4.0]
+    actual_values = [1.1, 1.9, 3.2, 3.8]
+    result = train_regime_ml._correlation_from_pairs(expected_scores, actual_values)
+    assert result == pytest.approx(
+        float(np.corrcoef(expected_scores, actual_values)[0, 1]), abs=1e-9
+    )
+
+
+def test_correlation_from_pairs_returns_none_for_zero_variance_series():
+    result = train_regime_ml._correlation_from_pairs([1.0, 1.0, 1.0], [0.1, 0.2, 0.3])
+    assert result is None
+
+
+def test_compute_hit_rate_divides_correct_by_predicted_total():
+    confusion = {
+        "급하락": {"급하락": 3, "완만하락": 1, "횡보": 0, "완만상승": 0, "급상승": 0},
+        "완만하락": {"급하락": 0, "완만하락": 0, "횡보": 0, "완만상승": 0, "급상승": 0},
+        "횡보": {"급하락": 0, "완만하락": 0, "횡보": 5, "완만상승": 0, "급상승": 0},
+        "완만상승": {"급하락": 0, "완만하락": 0, "횡보": 0, "완만상승": 2, "급상승": 2},
+        "급상승": {"급하락": 0, "완만하락": 0, "횡보": 0, "완만상승": 0, "급상승": 0},
+    }
+    hit_rate = train_regime_ml._compute_hit_rate(confusion)
+    assert hit_rate["급하락"] == pytest.approx(3 / 4)
+    assert hit_rate["완만하락"] is None
+    assert hit_rate["횡보"] == pytest.approx(1.0)
+    assert hit_rate["완만상승"] == pytest.approx(2 / 4)
+    assert hit_rate["급상승"] is None

@@ -147,11 +147,7 @@ def run_training(
             expected_scores.append(expected_score)
             actual_values.append(actual_value)
 
-        correlation: float | None = None
-        if len(expected_scores) >= 2:
-            computed = float(np.corrcoef(expected_scores, actual_values)[0, 1])
-            if not np.isnan(computed):
-                correlation = computed
+        correlation = _correlation_from_pairs(expected_scores, actual_values)
 
         report = {
             "fold_index": fold.fold_index,
@@ -176,11 +172,28 @@ def run_training(
         base_name = f"regime_ml_{timestamp}"
         last_model.booster_.save_model(str(model_output_dir / f"{base_name}.txt"))
 
+        pooled_confusion = _sum_confusion_matrices(reports)
+        pooled_correlation = _correlation_from_pairs(all_expected_scores, all_actual_values)
+        pooled_hit_rate = _compute_hit_rate(pooled_confusion)
+
         sidecar = {
             "boundaries": last_boundaries,
             "ref_scores": last_ref_scores,
             "classes": last_class_order,
             "fold_index": last_fold_index,
+            "performance": {
+                "folds": [
+                    {
+                        "fold_index": r["fold_index"],
+                        "n_train": r["n_train"],
+                        "n_test": r["n_test"],
+                        "correlation": r["correlation"],
+                    }
+                    for r in reports
+                ],
+                "pooled_correlation": pooled_correlation,
+                "pooled_hit_rate": pooled_hit_rate,
+            },
         }
         with open(model_output_dir / f"{base_name}.json", "w", encoding="utf-8") as f:
             json.dump(sidecar, f, ensure_ascii=False, indent=2)
@@ -188,16 +201,35 @@ def run_training(
     return reports
 
 
-def _print_hit_rate_block(confusion: dict[str, dict[str, int]]) -> None:
-    print("  [예측 카테고리별 hit-rate]")
+def _correlation_from_pairs(expected_scores: list[float], actual_values: list[float]) -> float | None:
+    """(expected_score, actual_value) 쌍에서 피어슨 상관계수를 계산한다. fold 하나의
+    쌍이든, 여러 fold를 풀링한 쌍이든 계산 방식은 동일하므로 양쪽에서 공유한다."""
+    if len(expected_scores) < 2:
+        return None
+    computed = float(np.corrcoef(expected_scores, actual_values)[0, 1])
+    return None if np.isnan(computed) else computed
+
+
+def _compute_hit_rate(confusion: dict[str, dict[str, int]]) -> dict[str, float | None]:
+    hit_rate: dict[str, float | None] = {}
     for label in CATEGORY_LABELS:
         row = confusion[label]
         total = sum(row.values())
-        if total == 0:
+        hit_rate[label] = (row[label] / total) if total else None
+    return hit_rate
+
+
+def _print_hit_rate_block(confusion: dict[str, dict[str, int]]) -> None:
+    print("  [예측 카테고리별 hit-rate]")
+    hit_rate = _compute_hit_rate(confusion)
+    for label in CATEGORY_LABELS:
+        row = confusion[label]
+        total = sum(row.values())
+        rate = hit_rate[label]
+        if rate is None:
             print(f"    {label}: 샘플 없음")
             continue
-        hit_rate = row[label] / total * 100
-        print(f"    {label}: {row[label]}/{total} 적중 ({hit_rate:.1f}%)")
+        print(f"    {label}: {row[label]}/{total} 적중 ({rate * 100:.1f}%)")
 
 
 def _print_correlation_block(correlation: float | None) -> None:
@@ -272,11 +304,7 @@ def _print_aggregate_summary(
     confusion = _sum_confusion_matrices(reports)
     actual_totals = _sum_actual_totals(reports)
 
-    correlation: float | None = None
-    if len(all_expected_scores) >= 2:
-        computed = float(np.corrcoef(all_expected_scores, all_actual_values)[0, 1])
-        if not np.isnan(computed):
-            correlation = computed
+    correlation = _correlation_from_pairs(all_expected_scores, all_actual_values)
 
     print(f"\n=== 전체 fold 합산 (fold {len(reports)}개) ===")
     _print_hit_rate_block(confusion)
