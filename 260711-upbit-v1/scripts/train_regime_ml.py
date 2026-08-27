@@ -164,7 +164,7 @@ def run_training(
         all_expected_scores.extend(expected_scores)
         all_actual_values.extend(actual_values)
 
-    _print_aggregate_summary(reports, all_expected_scores, all_actual_values)
+    pooled_confusion, pooled_correlation = _print_aggregate_summary(reports, all_expected_scores, all_actual_values)
 
     if last_model is not None:
         model_output_dir.mkdir(parents=True, exist_ok=True)
@@ -172,8 +172,6 @@ def run_training(
         base_name = f"regime_ml_{timestamp}"
         last_model.booster_.save_model(str(model_output_dir / f"{base_name}.txt"))
 
-        pooled_confusion = _sum_confusion_matrices(reports)
-        pooled_correlation = _correlation_from_pairs(all_expected_scores, all_actual_values)
         pooled_hit_rate = _compute_hit_rate(pooled_confusion)
 
         sidecar = {
@@ -293,13 +291,14 @@ def _sum_actual_totals(reports: list[dict]) -> dict[str, int]:
 
 def _print_aggregate_summary(
     reports: list[dict], all_expected_scores: list[float], all_actual_values: list[float]
-) -> None:
+) -> tuple[dict[str, dict[str, int]], float | None]:
     """모든 fold의 confusion/actual_totals를 합산하고, (expected_score, actual_value)
     쌍을 fold 경계 없이 풀링해 상관계수를 한 번만 계산해 출력한다. per-fold 상관계수를
     평균내는 것은 피어슨 r에 대해 통계적으로 타당하지 않으므로 반드시 풀링한 원본
-    쌍에서 다시 계산한다."""
+    쌍에서 다시 계산한다. (합산 confusion matrix, 풀링 상관계수)를 반환해, run_training()이
+    사이드카 저장 시 같은 값을 다시 계산하지 않고 재사용할 수 있게 한다."""
     if not reports:
-        return
+        return {p: {a: 0 for a in CATEGORY_LABELS} for p in CATEGORY_LABELS}, None
 
     confusion = _sum_confusion_matrices(reports)
     actual_totals = _sum_actual_totals(reports)
@@ -311,6 +310,8 @@ def _print_aggregate_summary(
     _print_correlation_block(correlation)
     _print_confusion_grid(confusion)
     _print_distribution_block(actual_totals)
+
+    return confusion, correlation
 
 
 def main() -> None:

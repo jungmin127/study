@@ -353,7 +353,11 @@ def test_run_training_performance_folds_excludes_skipped_folds(tmp_path, monkeyp
 
     assert [r["fold_index"] for r in reports] == [2, 3]
 
+    # 이 합성 데이터(seed 1/2/3, _N=24*40시간)에서 n_folds=3일 때 실측 n_train은
+    # fold 1=543, fold 2=1263, fold 3=1983 — min_train_samples=600이면 fold 1만
+    # 표본 부족으로 스킵되고 fold 2·3은 평가된다.
     json_files = list(tmp_path.glob("*.json"))
+    assert len(json_files) == 1
     with open(json_files[0], encoding="utf-8") as f:
         sidecar = json.load(f)
 
