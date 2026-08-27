@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import type { MlCurrentPrediction, RegimeCategory } from '@/lib/types/eda';
 import { ApiError } from '@/lib/api/client';
 import { getRegimeMlCurrentPrediction } from '@/lib/api/eda';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatTimeframe } from '@/lib/format';
 
 const CATEGORY_ORDER: RegimeCategory[] = ['급상승', '완만상승', '횡보', '완만하락', '급하락'];
+const TRAINED_MARKETS = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'];
 
 function categoryVarName(label: RegimeCategory): string {
   switch (label) {
@@ -34,7 +35,7 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (timeframe !== 'minutes60' || !market) {
+    if (timeframe !== 'minutes60' || !market || !TRAINED_MARKETS.includes(market)) {
       setData(null);
       setError(null);
       return;
@@ -63,6 +64,8 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
       <h2 className="mb-3 text-sm font-semibold">ML 현재예측</h2>
       {timeframe !== 'minutes60' ? (
         <p className="text-sm text-muted-foreground">ML은 1시간봉 전용입니다.</p>
+      ) : !TRAINED_MARKETS.includes(market) ? (
+        <p className="text-sm text-muted-foreground">이 모델은 KRW-BTC/KRW-ETH/KRW-XRP로만 학습되어 있습니다.</p>
       ) : loading ? (
         <p className="text-sm text-muted-foreground">불러오는 중...</p>
       ) : error ? (
@@ -95,7 +98,7 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            {formatDateTime(data.model_trained_at)} 학습, fold {data.model_fold_index} 모델 기준.
+            {market} {formatTimeframe(timeframe)} 기준, {formatDateTime(data.bar_time)} 봉 데이터. (모델: {formatDateTime(data.model_trained_at)} 학습, fold {data.model_fold_index})
           </p>
         </>
       ) : null}
