@@ -10,6 +10,7 @@ import type {
   IndicatorCatalogItem,
   IndicatorPool,
   Market,
+  MlCurrentPrediction,
   RegimeBacktestResult,
   RunBacktestRequest,
   RunBacktestResponse,
@@ -160,4 +161,12 @@ export function getRegimeBacktest(params: {
 }): Promise<RegimeBacktestResult> {
   const query = new URLSearchParams(params);
   return apiFetch<RegimeBacktestResult>(`/api/v1/regime/backtest?${query.toString()}`);
+}
+
+export function getRegimeMlCurrentPrediction(params: {
+  market: string;
+  timeframe: string;
+}): Promise<MlCurrentPrediction> {
+  const query = new URLSearchParams(params);
+  return apiFetch<MlCurrentPrediction>(`/api/v1/regime/ml-current-prediction?${query.toString()}`);
 }

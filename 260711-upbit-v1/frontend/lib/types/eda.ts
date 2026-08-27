@@ -117,6 +117,13 @@ export interface TrendSegmentAnalysis {
 
 export type RegimeCategory = '급상승' | '완만상승' | '횡보' | '완만하락' | '급하락';
 
+export interface MlCurrentPrediction {
+  predicted_category: RegimeCategory;
+  probs: Record<RegimeCategory, number>;
+  model_trained_at: string;
+  model_fold_index: number;
+}
+
 export interface RegimeCandle {
   time: string;
   open: number;
