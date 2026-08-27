@@ -255,6 +255,35 @@ def test_market_journal_merges_stopped_and_restarted_strategies_for_same_market(
     assert round(detail["daily"][1]["pnl_pct"], 4) == -1.0592
 
 
+def test_market_journal_includes_soft_deleted_strategy(monkeypatch, tmp_path):
+    """소프트 삭제(deleted_at)는 "라이브 전략 관리" 목록에서만 숨기기 위한 것이다 —
+    매매일지 집계는 status/deleted_at을 보지 않고 approved_at만 보므로, 삭제된
+    전략의 거래도 계속 잡혀야 한다. 재발 방지 대상: 2026-08-24 KRW-DOGE 전략을
+    하드 삭제해서 매매일지 이력(거래 10건, 실현손익 -66,598원)이 통째로 사라졌던
+    사고 — 업비트 자체 주문 이력을 대조해 수동으로 복구했다."""
+    db = _fresh(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        db, status="draft", market="KRW-DOGE", timeframe="minutes60",
+    )
+    _approve(db, strategy_id, 100_000.0)
+    position_id = db.insert_position(strategy_id, "KRW-DOGE", 300.0, 300.0)
+    db.close_position_row(position_id, 303.51, 300.0, 1053.0, 1.17, "sell_signal")
+    db.stop_live_strategy_if_no_open_position(strategy_id)
+
+    deleted = db.soft_delete_live_strategy(strategy_id)
+    assert deleted is True
+
+    detail = svc.get_market_journal("KRW-DOGE")
+
+    assert detail is not None
+    assert detail["trade_count"] == 1
+    assert detail["cumulative_pnl"] == 1053.0
+
+    summary = svc.get_journal_summary()
+    assert summary["cumulative_pnl"] == 1053.0
+    assert [s["market"] for s in summary["strategies"]] == ["KRW-DOGE"]
+
+
 def test_market_journal_backtest_comparison_present_with_source_run(monkeypatch, tmp_path):
     db = _fresh(monkeypatch, tmp_path)
     from engine.cache import save_result
