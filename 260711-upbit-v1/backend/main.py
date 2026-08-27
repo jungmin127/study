@@ -70,6 +70,7 @@ from backend.grid_search_service import (
     start_job,
 )
 from backend.regime_service import evaluate_market
+from backend.regime_ml_service import predict_current_ml_regime
 from engine.grid_search_pool import INDICATOR_POOL_SPECS, build_condition_grid
 import httpx
 
@@ -611,6 +612,21 @@ def get_regime_backtest_endpoint(
         return evaluate_market(market, timeframe, start_dt, end_dt)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/regime/ml-current-prediction")
+def get_regime_ml_current_prediction_endpoint(
+    market: str = Query(...),
+    timeframe: str = Query(...),
+) -> dict:
+    try:
+        return predict_current_ml_regime(market, timeframe)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

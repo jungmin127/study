@@ -2953,3 +2953,62 @@ def test_regime_backtest_returns_400_for_malformed_start_date(monkeypatch, tmp_p
     )
 
     assert resp.status_code == 400
+
+
+def test_regime_ml_current_prediction_returns_result(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    captured = {}
+
+    def _fake_predict(market, timeframe):
+        captured["args"] = (market, timeframe)
+        return {
+            "predicted_category": "횡보",
+            "probs": {"급하락": 0.1, "완만하락": 0.2, "횡보": 0.3, "완만상승": 0.25, "급상승": 0.15},
+            "model_trained_at": "2026-08-27T05:20:47+00:00",
+            "model_fold_index": 5,
+        }
+
+    monkeypatch.setattr(backend_module, "predict_current_ml_regime", _fake_predict)
+
+    resp = client.get(
+        "/api/v1/regime/ml-current-prediction",
+        params={"market": "KRW-ETH", "timeframe": "minutes60"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["predicted_category"] == "횡보"
+    assert captured["args"] == ("KRW-ETH", "minutes60")
+
+
+def test_regime_ml_current_prediction_returns_400_for_wrong_timeframe(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_predict(market, timeframe):
+        raise ValueError("ML 모델은 1시간봉(minutes60)으로만 학습되어 있습니다")
+
+    monkeypatch.setattr(backend_module, "predict_current_ml_regime", _fake_predict)
+
+    resp = client.get(
+        "/api/v1/regime/ml-current-prediction",
+        params={"market": "KRW-ETH", "timeframe": "days"},
+    )
+
+    assert resp.status_code == 400
+    assert "1시간봉" in resp.json()["detail"]
+
+
+def test_regime_ml_current_prediction_returns_404_when_no_model(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_predict(market, timeframe):
+        raise FileNotFoundError("학습된 ML 모델이 없습니다. scripts/train_regime_ml.py를 먼저 실행하세요")
+
+    monkeypatch.setattr(backend_module, "predict_current_ml_regime", _fake_predict)
+
+    resp = client.get(
+        "/api/v1/regime/ml-current-prediction",
+        params={"market": "KRW-ETH", "timeframe": "minutes60"},
+    )
+
+    assert resp.status_code == 404
+    assert "학습된 ML 모델이 없습니다" in resp.json()["detail"]
