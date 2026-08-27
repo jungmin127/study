@@ -1434,7 +1434,7 @@ def create_live_strategy_endpoint(req: CreateLiveStrategyRequest) -> dict:
 
 @app.get("/api/v1/live-strategies")
 def list_live_strategies_endpoint() -> list[dict]:
-    strategies = trading_db.list_live_strategies()
+    strategies = [s for s in trading_db.list_live_strategies() if s["deleted_at"] is None]
     positions = {s["id"]: trading_db.get_open_position(s["id"]) for s in strategies}
     open_markets = {s["market"] for s in strategies if positions[s["id"]] is not None}
     try:
@@ -1582,7 +1582,7 @@ def delete_live_strategy_endpoint(strategy_id: str) -> dict:
         raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
     if strategy["status"] != "stopped":
         raise HTTPException(status_code=409, detail="중지된 전략만 삭제할 수 있습니다")
-    trading_db.delete_live_strategy(strategy_id)
+    trading_db.soft_delete_live_strategy(strategy_id)
     return {"deleted": True}
 
 
