@@ -11,7 +11,6 @@ import type {
   IndicatorPool,
   Market,
   MlCurrentPrediction,
-  RegimeBacktestResult,
   RunBacktestRequest,
   RunBacktestResponse,
   SegmentSizeEntry,
@@ -151,16 +150,6 @@ export function deleteGridSearchJob(jobId: string): Promise<{ deleted: boolean }
   return apiFetch<{ deleted: boolean }>(`/api/v1/grid-search/jobs/${jobId}`, {
     method: 'DELETE',
   });
-}
-
-export function getRegimeBacktest(params: {
-  market: string;
-  timeframe: string;
-  start: string;
-  end: string;
-}): Promise<RegimeBacktestResult> {
-  const query = new URLSearchParams(params);
-  return apiFetch<RegimeBacktestResult>(`/api/v1/regime/backtest?${query.toString()}`);
 }
 
 export function getRegimeMlCurrentPrediction(params: {

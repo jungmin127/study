@@ -139,31 +139,6 @@ export interface MlCurrentPrediction {
   model_performance: MlModelPerformance | null;
 }
 
-export interface RegimeCandle {
-  time: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  predicted_category: RegimeCategory | null;
-}
-
-export interface CurrentPrediction {
-  time: string;
-  predicted_category: RegimeCategory | null;
-  probs: Record<RegimeCategory, number> | null;
-}
-
-export interface RegimeBacktestResult {
-  half_life_bars: number;
-  n_bars: number;
-  candles: RegimeCandle[];
-  current_prediction: CurrentPrediction | null;
-  confusion: Record<RegimeCategory, Record<RegimeCategory, number>>;
-  actual_totals: Record<RegimeCategory, number>;
-  correlation: number | null;
-}
-
 export interface IndicatorParamDef {
   key: string;
   label: string;
