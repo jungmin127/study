@@ -1582,7 +1582,8 @@ def delete_live_strategy_endpoint(strategy_id: str) -> dict:
         raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
     if strategy["status"] != "stopped":
         raise HTTPException(status_code=409, detail="중지된 전략만 삭제할 수 있습니다")
-    trading_db.soft_delete_live_strategy(strategy_id)
+    if not trading_db.soft_delete_live_strategy(strategy_id):
+        raise HTTPException(status_code=409, detail="이미 삭제되었거나 상태가 변경된 전략입니다")
     return {"deleted": True}
 
 

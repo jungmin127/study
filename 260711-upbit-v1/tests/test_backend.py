@@ -1074,6 +1074,18 @@ def test_delete_live_strategy_soft_deletes_stopped_strategy(monkeypatch, tmp_pat
     assert strategy["deleted_at"] is not None
 
 
+def test_delete_live_strategy_returns_409_when_already_deleted(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    client.delete(f"/api/v1/live-strategies/{strategy_id}")
+
+    resp = client.delete(f"/api/v1/live-strategies/{strategy_id}")
+
+    assert resp.status_code == 409
+
+
 def test_delete_live_strategy_returns_409_when_not_stopped(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])

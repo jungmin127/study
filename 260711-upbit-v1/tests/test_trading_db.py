@@ -1148,6 +1148,56 @@ def test_connect_adds_entry_fee_column_to_existing_positions_table(monkeypatch, 
     assert row[0] == 0
 
 
+def test_connect_adds_deleted_at_column_to_existing_live_strategies_table(monkeypatch, tmp_path):
+    """deleted_at도 entry_fee와 동일하게 실거래 중인 프로덕션 DB에 ALTER TABLE로
+    적용해야 하는 무마이그레이션 정책의 예외다."""
+    db = _fresh_db(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db.DB_PATH)
+    conn.execute("""
+        CREATE TABLE live_strategies (
+            id                  TEXT PRIMARY KEY,
+            source_run_id       TEXT,
+            market              TEXT NOT NULL,
+            timeframe           TEXT NOT NULL,
+            buy_conditions_json TEXT NOT NULL,
+            sell_conditions_json TEXT NOT NULL,
+            risk_config_json    TEXT NOT NULL,
+            current_capital     REAL,
+            status              TEXT NOT NULL DEFAULT 'draft',
+            manual_pause        INTEGER NOT NULL DEFAULT 0,
+            last_processed_candle_time TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            approved_at         TEXT,
+            started_at          TEXT,
+            stopped_at          TEXT,
+            baseline_qty        REAL
+        )
+    """)
+    conn.execute("""
+        INSERT INTO live_strategies
+            (id, market, timeframe, buy_conditions_json, sell_conditions_json, risk_config_json, status)
+        VALUES ('legacy-1', 'KRW-BTC', 'minutes60', '{}', '{}', '{}', 'stopped')
+    """)
+    conn.commit()
+    conn.close()
+
+    db._connect()
+
+    conn = sqlite3.connect(db.DB_PATH)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(live_strategies)")}
+        row = conn.execute(
+            "SELECT deleted_at FROM live_strategies WHERE id = 'legacy-1'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert "deleted_at" in columns
+    assert row[0] is None
+
+    assert db.soft_delete_live_strategy("legacy-1") is True
+    assert db.get_live_strategy("legacy-1")["deleted_at"] is not None
+
+
 def test_insert_position_stores_entry_fee(monkeypatch, tmp_path):
     db = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(db)
