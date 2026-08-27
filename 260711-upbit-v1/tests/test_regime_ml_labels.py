@@ -24,7 +24,7 @@ def _make_close_df(closes: list[float]) -> pd.DataFrame:
     return pd.DataFrame({"close": closes})
 
 
-def test_compute_normalized_realized_series_matches_evaluate_market_formula():
+def test_compute_normalized_realized_series_matches_rule_based_normalization_formula():
     # 상승폭이 점점 커지는 시계열 — 뒤로 갈수록 정규화 실현수익률이 커져야 함
     closes = [100.0 * (1.001**i) for i in range(80)]
     df = _make_close_df(closes)

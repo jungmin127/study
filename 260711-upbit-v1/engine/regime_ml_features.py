@@ -21,8 +21,8 @@ from engine.regime_features import (
 )
 from trading.live_indicators import LIVE_INDICATOR_FACTORY
 
-# engine.regime_detector._MIN_VOLATILITY_FLOOR와 값이 같아야 한다. 순환참조를 피하려고
-# 별도 정의한다(engine/regime_features.py가 같은 이유로 이미 이렇게 하고 있음).
+# engine/regime_features.py:_MIN_VOLATILITY_FLOOR와 값이 같아야 한다(raw_score
+# 0-나눗셈 방지) — 순환참조를 피하려 별도 정의.
 _MIN_VOLATILITY_FLOOR = 1e-6
 
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import RegimeMlCurrentPrediction from '@/components/RegimeMlCurrentPrediction';
+import RegimeMlCurrentPrediction, { TRAINED_MARKETS } from '@/components/RegimeMlCurrentPrediction';
 import CoinSelect, { sortMarkets } from '@/components/CoinSelect';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/client';
@@ -26,7 +26,8 @@ export default function RegimeDashboard() {
       .then((data) => {
         setMarkets(data);
         const sorted = sortMarkets(data, 'change_rate', 'desc');
-        if (sorted.length > 0) setMarket((prev) => prev || sorted[0].market);
+        const preferred = sorted.find((m) => TRAINED_MARKETS.includes(m.market)) ?? sorted[0];
+        if (preferred) setMarket((prev) => prev || preferred.market);
       })
       .catch((err) => setMarketsError(err instanceof ApiError ? err.message : '코인 목록을 불러오지 못했습니다.'));
   }, []);

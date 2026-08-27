@@ -1,13 +1,14 @@
 """
 engine/regime_features.py
 
-장세 판별기(engine/regime_detector.py)가 쓰는 보조 신호 — 거래량 확인, VPIN 매수/매도
-불균형, 지지/저항 근접도. 전부 순수 pandas 함수(backtrader 의존 없음, I/O 없음)라
-백테스트/그리드서치/라이브 데몬 어디서든 재사용 가능하다. 설계 문서:
+장세 판별용 보조 신호 — 거래량 확인, VPIN 매수/매도 불균형, 지지/저항 근접도.
+전부 순수 pandas 함수(backtrader 의존 없음, I/O 없음)라 백테스트/그리드서치/라이브
+데몬 어디서든 재사용 가능하다. 지금은 engine/regime_ml_features.py가 이 5개 함수를
+ML 피처로 그대로 가져다 쓴다. 설계 문서:
 docs/superpowers/specs/2026-08-24-regime-detector-reversal-gating-design.md
 
 engine/indicators/volume.py, price_levels.py의 backtrader 지표(Cerebro 전략 객체 모델
-안에서만 동작)와 동일한 계산 로직을 pandas Series 기반으로 재구현한다 — regime_detector가
+안에서만 동작)와 동일한 계산 로직을 pandas Series 기반으로 재구현한다 — 이 모듈은
 Cerebro 없이 순수 DataFrame만으로 호출돼야 하므로 기존 지표 클래스를 그대로 재사용할 수
 없다.
 """
@@ -123,6 +124,6 @@ def reversal_gate(vpin: pd.Series, proximity: pd.Series) -> pd.Series:
     """VPIN 매수/매도 쏠림과 추세방향 저항/지지 근접이 동시에 나타나면 모멘텀 점수를
     감쇠시키는 배율. 둘 중 하나만 높으면(단독으론 반전 신호로 부족) 감쇠하지 않는다.
     NaN(워밍업 미달)은 '위험 없음'으로 취급 — 판단불가를 억지로 강한 신호로 포장하지
-    않는다는 기존 정책(regime_detector.py의 워밍업 None 정책)과 같은 방향."""
+    않는다는 방향."""
     risk = (vpin.fillna(0.0) * proximity.fillna(0.0)).clip(0.0, 1.0)
     return 1.0 - 0.7 * risk

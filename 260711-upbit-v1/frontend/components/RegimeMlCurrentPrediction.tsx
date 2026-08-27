@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { InfoPopover } from '@/components/ui/info-popover';
 
 const CATEGORY_ORDER: RegimeCategory[] = ['급상승', '완만상승', '횡보', '완만하락', '급하락'];
-const TRAINED_MARKETS = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'];
+export const TRAINED_MARKETS = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'];
 
 function formatPct(value: number | null): string {
   return value === null ? '-' : `${(value * 100).toFixed(1)}%`;
