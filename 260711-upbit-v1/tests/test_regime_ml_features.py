@@ -2,8 +2,9 @@
 tests/test_regime_ml_features.py
 
 engine.regime_ml_features.build_feature_matrix()를 검증한다. LIVE_INDICATOR_FACTORY를
-그대로 순회하므로, 반환 컬럼 집합이 그 레지스트리 키 전체 + regime 전용 5개 + market과
-정확히 일치해야 한다.
+그대로 순회하되 OBV(스케일 불일치로 제외, docs/superpowers/specs/2026-08-27-regime-ml-
+backlog-cleanup-design.md 참고)만 뺀다 — 반환 컬럼 집합이 그 레지스트리 키 전체(OBV
+제외) + regime 전용 5개 + market과 정확히 일치해야 한다.
 """
 from __future__ import annotations
 
@@ -35,16 +36,25 @@ def _make_full_df() -> pd.DataFrame:
     })
 
 
-def test_build_feature_matrix_has_one_column_per_registered_indicator_plus_regime_features():
+def test_build_feature_matrix_has_one_column_per_registered_indicator_except_obv_plus_regime_features():
     df = _make_full_df()
 
     result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
 
     expected_columns = (
-        set(LIVE_INDICATOR_FACTORY.keys())
+        (set(LIVE_INDICATOR_FACTORY.keys()) - {"OBV"})
         | {"RAW_SCORE", "VOLUME_CONFIRM", "VPIN_SCORE", "LEVEL_PROXIMITY", "REVERSAL_GATE", "market"}
     )
     assert set(result.columns) == expected_columns
+
+
+def test_build_feature_matrix_excludes_obv_but_keeps_obv_roc():
+    df = _make_full_df()
+
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    assert "OBV" not in result.columns
+    assert "OBV_ROC" in result.columns
 
 
 def test_build_feature_matrix_preserves_row_count_and_index():

@@ -22,17 +22,9 @@ from engine.regime_ml_features import build_feature_matrix
 
 MODEL_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
 
-# WARMUP_DAYS=30로 얻은 데이터로 OBV(trading/live_indicators.py:create_obv)를 계산하면
-# 학습 때와 스케일이 어긋난다 — OBV는 윈도우 없이 fetch된 구간 전체를 누적하는
-# cumsum()이라, 학습 시에는 ~2.5년치가 누적되지만(scripts/train_regime_ml.py) 여기서는
-# 30일치만 누적돼 절대값 자릿수 자체가 다르다. OBV는 모델의 gain 기준 2번째로 중요한
-# 피처(~11.4%)라 트리 분기 임계값이 학습 때의 큰 스케일을 기준으로 잡혀 있어, 이 작은
-# 스케일 입력이 예측을 체계적으로 왜곡시킬 수 있다. 크래시하지는 않으므로 알려진 한계로
-# 남겨두고 지금은 고치지 않는다(2026-08-27 사용자 결정 — 캐싱/재학습/피처 제거 전부
-# 이번 세션 범위 밖). 나중에 고치려면 (a) 워밍업을 훨씬 길게 늘리고 결과를 캐싱하거나
-# (VPVR의 O(n) 삼중루프 때문에 720행에 ~1.1초 실측 — 캐싱 없이 전체 히스토리를 매
-# 요청마다 계산하는 건 비현실적), (b) OBV를 윈도우형으로 바꾸거나 피처에서 빼고
-# 재학습해야 한다.
+# OBV 스케일 불일치는 engine/regime_ml_features.py:build_feature_matrix()가 OBV를
+# 피처에서 제외해 해결했다(OBV_ROC로 대체) — WARMUP_DAYS=30이 짧아도 더 이상
+# 학습/추론 간 스케일이 어긋나지 않는다.
 WARMUP_DAYS = 30
 _TIMESTAMP_PATTERN = re.compile(r"regime_ml_(\d{8}T\d{6}Z)")
 
