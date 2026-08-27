@@ -2997,6 +2997,23 @@ def test_regime_ml_current_prediction_returns_400_for_wrong_timeframe(monkeypatc
     assert "1시간봉" in resp.json()["detail"]
 
 
+def test_regime_ml_current_prediction_returns_400_for_unsupported_market(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    def _fake_predict(market, timeframe):
+        raise ValueError("이 모델은 KRW-BTC, KRW-ETH, KRW-XRP로만 학습되어 있습니다")
+
+    monkeypatch.setattr(backend_module, "predict_current_ml_regime", _fake_predict)
+
+    resp = client.get(
+        "/api/v1/regime/ml-current-prediction",
+        params={"market": "KRW-DOGE", "timeframe": "minutes60"},
+    )
+
+    assert resp.status_code == 400
+    assert "만 학습되어" in resp.json()["detail"]
+
+
 def test_regime_ml_current_prediction_returns_404_when_no_model(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
 

@@ -2,10 +2,13 @@
 tests/test_regime_ml_service.py
 
 backend.regime_ml_service의 find_latest_model()/predict_current_ml_regime()을
-검증한다. 특히 predict_current_ml_regime()이 저장된 부스터의 market 범주형 코드
-인코딩(scripts/train_regime_ml.py가 pd.concat 후 astype("category")로 만드는
-알파벳순 KRW-BTC=0/KRW-ETH=1/KRW-XRP=2)을 추론 시에도 정확히 재현하는지가
-핵심이다 — 어긋나면 크래시 없이 조용히 틀린 예측이 나온다.
+검증한다. predict_current_ml_regime()은 market 범주형 컬럼에 명시적으로
+categories=sorted(_TRAINING_MARKETS)를 지정해 저장된 부스터의 카테고리 코드
+(scripts/train_regime_ml.py가 알파벳순으로 배정: KRW-BTC=0/KRW-ETH=1/KRW-XRP=2)와
+어긋나지 않게 방어한다 — 다만 아래
+test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row의 docstring에
+적었듯, LightGBM이 자체 pandas_categorical 메타데이터로 값 기준 재매핑을 해주기
+때문에 이 스위트의 테스트들이 그 방어 코드의 필요성 자체를 증명하지는 못한다.
 """
 from __future__ import annotations
 
@@ -88,6 +91,11 @@ def test_predict_current_ml_regime_rejects_non_hourly_timeframe():
         predict_current_ml_regime("KRW-BTC", "days")
 
 
+def test_predict_current_ml_regime_rejects_untrained_market():
+    with pytest.raises(ValueError, match="만 학습되어"):
+        predict_current_ml_regime("KRW-DOGE", "minutes60")
+
+
 def test_predict_current_ml_regime_raises_when_no_model(tmp_path, monkeypatch):
     monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
     with pytest.raises(FileNotFoundError, match="학습된 ML 모델이 없습니다"):
@@ -98,7 +106,10 @@ def test_predict_current_ml_regime_returns_valid_response(tmp_path, monkeypatch)
     monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
     _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)
 
-    fake_raw_df = pd.DataFrame({"close": [1.0] * 5})
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
     monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
 
     def _fake_build_feature_matrix(df, market, half_life_bars):
@@ -118,13 +129,24 @@ def test_predict_current_ml_regime_returns_valid_response(tmp_path, monkeypatch)
     assert sum(result["probs"].values()) == pytest.approx(1.0, abs=1e-6)
     assert result["model_fold_index"] == 5
     assert result["model_trained_at"] == datetime(2026, 8, 27, 5, 20, 47, tzinfo=timezone.utc).isoformat()
+    assert result["bar_time"] == datetime(2026, 8, 27, 5, 0, 0, tzinfo=timezone.utc).isoformat()
 
 
 def test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row(tmp_path, monkeypatch):
-    """가장 중요한 회귀 테스트: 운영 코드가 쓰는 저수준 lgb.Booster.predict() 경로가,
-    학습 스크립트가 검증에 쓰는 고수준 LGBMClassifier.predict_proba() 경로와 동일한
-    입력에 대해 동일한 결과를 내야 한다. market 범주형 코드 인코딩이 어긋나면 두
-    결과가 달라진다."""
+    """운영 코드가 쓰는 저수준 lgb.Booster.predict() 경로가, 학습 스크립트가 검증에 쓰는
+    고수준 LGBMClassifier.predict_proba() 경로와 동일한 입력에 대해 동일한 결과를 내야
+    한다는 일반적인 sanity check다 — "우리 추론 코드가 라이브러리 자체의 참조 구현과
+    일치하는가"를 검증한다.
+
+    주의: 이 테스트는 market 범주형 코드 인코딩(_TRAINING_MARKETS 정렬 순서로
+    categories=를 명시하는 부분)의 정확성을 증명하지 않는다 — 실측 확인 결과, LightGBM의
+    Booster.predict()는 호출자가 넘긴 Categorical 객체의 코드가 아니라, 부스터 자신이
+    저장해둔 pandas_categorical 메타데이터를 기준으로 각 카테고리 "값"을 다시 매핑한다.
+    즉 categories=sorted(_TRAINING_MARKETS)로 명시하든, 카테고리가 1개뿐인 naive한
+    Categorical을 넘기든 예측 결과가 동일해서, 이 테스트는 그 차이를 구분하지 못한다.
+    그래도 predict_current_ml_regime()의 명시적 categories= 코드는 계속 유지한다 — 이
+    LightGBM 내부 자동 재매핑 동작이 버전 간에도 계속 유지된다고 의존하지 않는 방어적
+    코딩이기 때문이다."""
     monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
     _, _, model = _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)
 
@@ -135,7 +157,10 @@ def test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row(tmp_path
     })
     sklearn_probs = dict(zip(model.classes_, model.predict_proba(query_row)[0]))
 
-    fake_raw_df = pd.DataFrame({"close": [1.0]})
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0],
+        "candle_time": [pd.Timestamp("2026-08-27T05:00:00")],
+    })
     monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
     monkeypatch.setattr(
         regime_ml_service, "build_feature_matrix",
