@@ -3,7 +3,7 @@ set -euo pipefail
 
 # 로컬에서 scripts/train_regime_ml.py로 학습한 ML 장세판별 모델(가장 최신
 # .txt+.json 페어, 또는 인자로 특정 모델을 지정할 수도 있다)을 AWS 서버로 복사한다.
-# 모델은 병합이 필요 없다 — 항상 find_latest_model()이 파일명 타임스탐프 기준
+# 모델은 병합이 필요 없다 — 항상 find_latest_model()이 파일명 타임스탬프 기준
 # 가장 최신 것을 고르므로, 그냥 최신 파일 두 개를 서버 같은 경로에 올려두면 된다.
 # 설정 방법은 deploy/UPDATE.md 참고.
 
