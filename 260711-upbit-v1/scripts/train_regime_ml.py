@@ -10,6 +10,7 @@ Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/train_regime_ml.py
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -57,6 +58,15 @@ def run_training(
     n_bars = round(half_life_bars * N_MULTIPLIER)
     embargo = timeframe_duration(timeframe) * n_bars
 
+    print(f"half_life_bars={half_life_bars:.1f}, n_bars={n_bars}, timeframe={timeframe}")
+    print(
+        "  [주의] 이 스크립트의 hit-rate/confusion matrix는 fold별 학습구간 분위수"
+        "(2%/16%/84%/98%)로 카테고리 경계를 정합니다. scripts/regime_backtest.py는"
+        " 고정 임계값(CATEGORY_REFERENCE_SCORES 중간값)을 씁니다 — 두 스크립트의"
+        " hit-rate/confusion 숫자는 직접 비교하지 마세요. 상관계수(correlation)는"
+        " 두 스크립트가 동일한 방식으로 계산하므로, 이것이 비교에 쓸 지표입니다."
+    )
+
     market_frames: dict[str, tuple[pd.Series, pd.DataFrame, pd.Series]] = {}
     for market in markets:
         raw_df = load_market_training_data(market, timeframe, start, end)
@@ -64,10 +74,20 @@ def run_training(
         labels = compute_normalized_realized_series(raw_df, half_life_bars, n_bars)
         market_frames[market] = (raw_df["candle_time"], features_df, labels)
 
-    folds = generate_walk_forward_folds(start, end, n_folds, embargo)
+    # fold 0은 test_start == start라 train_end(=test_start - embargo)가 항상 start
+    # 이전이 되어 훈련 표본이 구조적으로 0이다(아래 min_train_samples 가드로 항상
+    # 건너뜀). n_folds보다 하나 더 요청해 그 "항상 비는" fold를 인덱스 0으로 흡수시키고,
+    # 실제로 평가되는 나머지 n_folds개 fold가 [start, end] 거의 전체를 덮게 한다.
+    folds = generate_walk_forward_folds(start, end, n_folds + 1, embargo)
 
     reports: list[dict] = []
     last_model: lgb.LGBMClassifier | None = None
+    last_boundaries: list[float] | None = None
+    last_ref_scores: dict[str, float] | None = None
+    last_class_order: list | None = None
+    last_fold_index: int | None = None
+    all_expected_scores: list[float] = []
+    all_actual_values: list[float] = []
 
     for fold in folds:
         train_X_parts, train_y_parts, test_X_parts, test_y_parts = [], [], [], []
@@ -101,6 +121,10 @@ def run_training(
         )
         model.fit(train_X_fit, train_labels)
         last_model = model
+        last_boundaries = boundaries
+        last_ref_scores = ref_scores
+        last_class_order = [str(c) for c in model.classes_]
+        last_fold_index = fold.fold_index
 
         importances = dict(zip(train_X_fit.columns, model.feature_importances_))
         top_features = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:15]
@@ -141,19 +165,30 @@ def run_training(
         reports.append(report)
         _print_fold_report(report)
 
+        all_expected_scores.extend(expected_scores)
+        all_actual_values.extend(actual_values)
+
+    _print_aggregate_summary(reports, all_expected_scores, all_actual_values)
+
     if last_model is not None:
         model_output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        last_model.booster_.save_model(str(model_output_dir / f"regime_ml_{timestamp}.txt"))
+        base_name = f"regime_ml_{timestamp}"
+        last_model.booster_.save_model(str(model_output_dir / f"{base_name}.txt"))
+
+        sidecar = {
+            "boundaries": last_boundaries,
+            "ref_scores": last_ref_scores,
+            "classes": last_class_order,
+            "fold_index": last_fold_index,
+        }
+        with open(model_output_dir / f"{base_name}.json", "w", encoding="utf-8") as f:
+            json.dump(sidecar, f, ensure_ascii=False, indent=2)
 
     return reports
 
 
-def _print_fold_report(report: dict) -> None:
-    print(f"\n=== fold {report['fold_index']} (train={report['n_train']}, test={report['n_test']}) ===")
-    confusion = report["confusion"]
-    actual_totals = report["actual_totals"]
-
+def _print_hit_rate_block(confusion: dict[str, dict[str, int]]) -> None:
     print("  [예측 카테고리별 hit-rate]")
     for label in CATEGORY_LABELS:
         row = confusion[label]
@@ -164,12 +199,29 @@ def _print_fold_report(report: dict) -> None:
         hit_rate = row[label] / total * 100
         print(f"    {label}: {row[label]}/{total} 적중 ({hit_rate:.1f}%)")
 
-    correlation = report["correlation"]
+
+def _print_correlation_block(correlation: float | None) -> None:
     if correlation is None:
         print("  [확률벡터-실현수익률 상관계수] 계산 불가(샘플 부족)")
     else:
         print(f"  [확률벡터-실현수익률 상관계수] {correlation:.3f}")
 
+
+def _print_confusion_grid(confusion: dict[str, dict[str, int]]) -> None:
+    """scripts/regime_backtest.py의 confusion matrix 출력 형식(행=예측, 열=실제)을
+    그대로 따른다 — 두 스크립트를 나란히 읽을 때 레이아웃이 동일해야 한다."""
+    print("  [confusion matrix] 행=예측, 열=실제")
+    header = "    " + "예측\\실제".ljust(10) + "".join(label.ljust(10) for label in CATEGORY_LABELS)
+    print(header)
+    for predicted_label in CATEGORY_LABELS:
+        row = confusion[predicted_label]
+        row_str = "    " + predicted_label.ljust(10) + "".join(
+            str(row[actual_label]).ljust(10) for actual_label in CATEGORY_LABELS
+        )
+        print(row_str)
+
+
+def _print_distribution_block(actual_totals: dict[str, int]) -> None:
     total_samples = sum(actual_totals.values())
     print(f"  [실제 카테고리 분포(전체 샘플 {total_samples}건 기준)]")
     for label in CATEGORY_LABELS:
@@ -177,13 +229,64 @@ def _print_fold_report(report: dict) -> None:
         pct = n / total_samples * 100 if total_samples else 0.0
         print(f"    {label}: {n} ({pct:.1f}%)")
 
+
+def _print_fold_report(report: dict) -> None:
+    print(f"\n=== fold {report['fold_index']} (train={report['n_train']}, test={report['n_test']}) ===")
+    _print_hit_rate_block(report["confusion"])
+    _print_correlation_block(report["correlation"])
+    _print_confusion_grid(report["confusion"])
+    _print_distribution_block(report["actual_totals"])
+
     print("  [피처 중요도(gain) 상위 15개]")
     for name, importance in report["top_features"]:
         print(f"    {name}: {importance:.1f}")
 
 
+def _sum_confusion_matrices(reports: list[dict]) -> dict[str, dict[str, int]]:
+    total = {p: {a: 0 for a in CATEGORY_LABELS} for p in CATEGORY_LABELS}
+    for report in reports:
+        for predicted in CATEGORY_LABELS:
+            for actual in CATEGORY_LABELS:
+                total[predicted][actual] += report["confusion"][predicted][actual]
+    return total
+
+
+def _sum_actual_totals(reports: list[dict]) -> dict[str, int]:
+    total = {a: 0 for a in CATEGORY_LABELS}
+    for report in reports:
+        for actual in CATEGORY_LABELS:
+            total[actual] += report["actual_totals"][actual]
+    return total
+
+
+def _print_aggregate_summary(
+    reports: list[dict], all_expected_scores: list[float], all_actual_values: list[float]
+) -> None:
+    """모든 fold의 confusion/actual_totals를 합산하고, (expected_score, actual_value)
+    쌍을 fold 경계 없이 풀링해 상관계수를 한 번만 계산해 출력한다. per-fold 상관계수를
+    평균내는 것은 피어슨 r에 대해 통계적으로 타당하지 않으므로 반드시 풀링한 원본
+    쌍에서 다시 계산한다."""
+    if not reports:
+        return
+
+    confusion = _sum_confusion_matrices(reports)
+    actual_totals = _sum_actual_totals(reports)
+
+    correlation: float | None = None
+    if len(all_expected_scores) >= 2:
+        computed = float(np.corrcoef(all_expected_scores, all_actual_values)[0, 1])
+        if not np.isnan(computed):
+            correlation = computed
+
+    print(f"\n=== 전체 fold 합산 (fold {len(reports)}개) ===")
+    _print_hit_rate_block(confusion)
+    _print_correlation_block(correlation)
+    _print_confusion_grid(confusion)
+    _print_distribution_block(actual_totals)
+
+
 def main() -> None:
-    run_training(
+    reports = run_training(
         markets=MARKETS,
         timeframe=TIMEFRAME,
         start=TRAIN_START,
@@ -192,6 +295,7 @@ def main() -> None:
         min_train_samples=MIN_TRAIN_SAMPLES,
         model_output_dir=MODEL_OUTPUT_DIR,
     )
+    print(f"\n총 {len(reports)}개 fold 평가 완료(요청 n_folds={N_FOLDS})")
 
 
 if __name__ == "__main__":

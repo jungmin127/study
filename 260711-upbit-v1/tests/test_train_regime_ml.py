@@ -9,6 +9,7 @@ scripts.train_regime_ml.run_training()의 end-to-end 스모크 테스트. 실제
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import numpy as np
@@ -138,7 +139,9 @@ def test_quantile_boundaries_computed_from_train_window_only(tmp_path, monkeypat
     half_life_bars = train_regime_ml.half_life_bars_for_timeframe(timeframe)
     n_bars = round(half_life_bars * train_regime_ml.N_MULTIPLIER)
     embargo = train_regime_ml.timeframe_duration(timeframe) * n_bars
-    folds = train_regime_ml.generate_walk_forward_folds(START, end, n_folds, embargo)
+    # run_training은 내부적으로 n_folds+1개 fold를 요청한다(fold 0이 항상 훈련표본이
+    # 비는 문제의 수정 — Finding 3). 독립 재계산도 동일하게 맞춰야 fold 경계가 일치한다.
+    folds = train_regime_ml.generate_walk_forward_folds(START, end, n_folds + 1, embargo)
     folds_by_index = {fold.fold_index: fold for fold in folds}
 
     for call_idx, report in enumerate(reports):
@@ -171,3 +174,136 @@ def test_quantile_boundaries_computed_from_train_window_only(tmp_path, monkeypat
         # 회귀 방지 net: train+test를 합친 표본 수보다는 반드시 적어야 한다.
         # (fold 루프가 실수로 combined 데이터를 넘기면 여기서 걸린다.)
         assert len(recorded) < expected_combined_len
+
+
+def test_aggregate_confusion_and_totals_sum_across_folds():
+    """Finding 2b: cross-fold 합산이 fold별 confusion/actual_totals를 elementwise로
+    정확히 더하는지 확인한다(가짜 report 딕셔너리로 run_training 없이 직접 검증)."""
+    reports = [
+        {
+            "confusion": {
+                "급하락": {"급하락": 2, "완만하락": 0, "횡보": 0, "완만상승": 0, "급상승": 0},
+                "완만하락": {"급하락": 0, "완만하락": 3, "횡보": 1, "완만상승": 0, "급상승": 0},
+                "횡보": {"급하락": 0, "완만하락": 0, "횡보": 5, "완만상승": 0, "급상승": 0},
+                "완만상승": {"급하락": 0, "완만하락": 0, "횡보": 0, "완만상승": 4, "급상승": 0},
+                "급상승": {"급하락": 0, "완만하락": 0, "횡보": 0, "완만상승": 0, "급상승": 1},
+            },
+            "actual_totals": {"급하락": 2, "완만하락": 3, "횡보": 6, "완만상승": 4, "급상승": 1},
+        },
+        {
+            "confusion": {
+                "급하락": {"급하락": 1, "완만하락": 0, "횡보": 0, "완만상승": 0, "급상승": 0},
+                "완만하락": {"급하락": 0, "완만하락": 2, "횡보": 0, "완만상승": 0, "급상승": 0},
+                "횡보": {"급하락": 0, "완만하락": 1, "횡보": 3, "완만상승": 0, "급상승": 0},
+                "완만상승": {"급하락": 0, "완만하락": 0, "횡보": 0, "완만상승": 2, "급상승": 0},
+                "급상승": {"급하락": 0, "완만하락": 0, "횡보": 0, "완만상승": 0, "급상승": 2},
+            },
+            "actual_totals": {"급하락": 1, "완만하락": 3, "횡보": 3, "완만상승": 2, "급상승": 2},
+        },
+    ]
+
+    summed_confusion = train_regime_ml._sum_confusion_matrices(reports)
+    summed_totals = train_regime_ml._sum_actual_totals(reports)
+
+    for predicted in train_regime_ml.CATEGORY_LABELS:
+        for actual in train_regime_ml.CATEGORY_LABELS:
+            expected = sum(r["confusion"][predicted][actual] for r in reports)
+            assert summed_confusion[predicted][actual] == expected
+
+    for actual in train_regime_ml.CATEGORY_LABELS:
+        expected = sum(r["actual_totals"][actual] for r in reports)
+        assert summed_totals[actual] == expected
+
+
+def test_run_training_prints_caveat_and_aggregate_summary_after_folds(tmp_path, monkeypatch, capsys):
+    """Finding 1: hit-rate/confusion이 regime_backtest.py와 직접 비교 불가하다는
+    안내가 콘솔 상단에 찍히는지. Finding 2b: 모든 fold 리포트 이후에 "전체 fold 합산"
+    블록이 한 번 더 찍히는지(순서까지) 확인한다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    reports = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        model_output_dir=tmp_path,
+    )
+    assert len(reports) >= 1
+
+    captured = capsys.readouterr().out
+    assert "비교하지 마세요" in captured
+    assert "상관계수" in captured
+    assert "전체 fold 합산" in captured
+
+    last_fold_marker = f"=== fold {reports[-1]['fold_index']}"
+    assert captured.index(last_fold_marker) < captured.index("전체 fold 합산")
+
+
+def test_run_training_covers_all_requested_folds(tmp_path, monkeypatch):
+    """Finding 3: fold 0은 train_end가 항상 start 이전이라 훈련 표본이 구조적으로
+    비어 있어 언제나 스킵된다. 수정 전에는 이 때문에 요청한 n_folds 중 하나가 통째로
+    누락됐다. 수정 후에는 내부적으로 n_folds+1개를 만들어 fold 0만 스킵되고, fold
+    1..n_folds는 모두 평가돼 반환된 report 개수가 n_folds와 같아야 한다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    n_folds = 3
+    reports = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=n_folds,
+        min_train_samples=50,
+        model_output_dir=tmp_path,
+    )
+
+    assert len(reports) == n_folds
+    assert sorted(r["fold_index"] for r in reports) == list(range(1, n_folds + 1))
+
+
+def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
+    """Finding 4: 저장된 booster(.txt) 옆에 같은 base filename의 .json sidecar가
+    boundaries/ref_scores/classes/fold_index를 담아 저장돼야 한다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    reports = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        model_output_dir=tmp_path,
+    )
+    assert len(reports) >= 1
+
+    txt_files = list(tmp_path.glob("*.txt"))
+    json_files = list(tmp_path.glob("*.json"))
+    assert len(txt_files) == 1
+    assert len(json_files) == 1
+    assert txt_files[0].stem == json_files[0].stem
+
+    with open(json_files[0], encoding="utf-8") as f:
+        sidecar = json.load(f)
+
+    assert set(sidecar.keys()) == {"boundaries", "ref_scores", "classes", "fold_index"}
+    assert isinstance(sidecar["boundaries"], list) and len(sidecar["boundaries"]) == 4
+    assert isinstance(sidecar["ref_scores"], dict)
+    assert set(sidecar["ref_scores"].keys()) == set(train_regime_ml.CATEGORY_LABELS)
+    assert isinstance(sidecar["classes"], list) and len(sidecar["classes"]) >= 1
+    assert isinstance(sidecar["fold_index"], int)
+    assert sidecar["fold_index"] == reports[-1]["fold_index"]
