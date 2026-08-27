@@ -578,7 +578,8 @@ export default function LiveStrategiesPage() {
                       <AlertDialogHeader>
                         <AlertDialogTitle>이 전략을 삭제하시겠습니까?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          이 전략의 거래·주문 내역과 매매일지 기록도 함께 삭제되며, 되돌릴 수 없습니다.
+                          이 전략을 목록에서 삭제합니다. 매매일지에 남은 거래 기록은
+                          계속 보존되며, 이 목록에서는 다시 볼 수 없습니다.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
