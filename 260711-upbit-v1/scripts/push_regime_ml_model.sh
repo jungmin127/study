@@ -3,9 +3,10 @@ set -euo pipefail
 
 # 로컬에서 scripts/train_regime_ml.py로 학습한 ML 장세판별 모델(가장 최신
 # .txt+.json 페어, 또는 인자로 특정 모델을 지정할 수도 있다)을 AWS 서버로 복사한다.
-# 모델은 병합이 필요 없다 — 항상 find_latest_model()이 파일명 타임스탬프 기준
-# 가장 최신 것을 고르므로, 그냥 최신 파일 두 개를 서버 같은 경로에 올려두면 된다.
-# 설정 방법은 deploy/UPDATE.md 참고.
+# 모델 파일 자체는 여러 개가 원격 디렉터리에 쌓여도 상관없다 — backend가 실제로
+# 서빙할 모델은 이 스크립트가 마지막에 원격에 남기는 .last_deployed.json 마커로
+# 결정되고(_find_serving_model()), 파일명 타임스탬프가 가장 최신인지는 더 이상
+# 기준이 아니다(마커가 없을 때만 파일명 최신순 폴백). 설정 방법은 deploy/UPDATE.md 참고.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -58,11 +59,17 @@ if [ -z "${DEPLOY_SSH_KEY_PATH:-}" ] || [ -z "${DEPLOY_SERVER_HOST:-}" ]; then
 fi
 
 MODEL_NAME="$(basename "$LOCAL_TXT")"
+MODEL_TIMESTAMP="$(basename "$LOCAL_TXT" .txt)"
+DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-echo "=== 1/2: 원격 모델 디렉터리 준비 ==="
+echo "=== 1/3: 원격 모델 디렉터리 준비 ==="
 ssh -i "$DEPLOY_SSH_KEY_PATH" "$DEPLOY_SERVER_HOST" "mkdir -p $REMOTE_MODEL_DIR"
 
-echo "=== 2/2: 모델 파일 전송 ==="
+echo "=== 2/3: 모델 파일 전송 ==="
 scp -i "$DEPLOY_SSH_KEY_PATH" "$LOCAL_TXT" "$LOCAL_JSON" "$DEPLOY_SERVER_HOST:$REMOTE_MODEL_DIR/"
 
-echo "모델 전송 완료: $MODEL_NAME (.txt + .json)"
+echo "=== 3/3: 원격 배포 마커 갱신 ==="
+printf '{"model_timestamp": "%s", "deployed_at": "%s"}' "$MODEL_TIMESTAMP" "$DEPLOYED_AT" \
+    | ssh -i "$DEPLOY_SSH_KEY_PATH" "$DEPLOY_SERVER_HOST" "cat > $REMOTE_MODEL_DIR/.last_deployed.json"
+
+echo "모델 전송 완료: $MODEL_NAME (.txt + .json + 배포 마커)"

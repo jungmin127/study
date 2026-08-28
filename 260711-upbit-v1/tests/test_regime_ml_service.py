@@ -194,6 +194,64 @@ def test_predict_current_ml_regime_performance_is_none_for_legacy_sidecar(tmp_pa
     assert result["model_performance"] is None
 
 
+def test_predict_current_ml_regime_uses_deployed_marker_over_latest_file(tmp_path, monkeypatch):
+    """배포 마커가 있으면, 그 이후 새로 학습된(더 최신 파일명의) 모델이 있어도
+    마커가 가리키는 모델을 써야 한다 — "배포" 버튼이 실제 서빙 모델을 결정해야
+    하고, 파일명 타임스탬프가 그걸 무시하고 이겨서는 안 된다."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260101T000000Z", fold_index=1)
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)  # 더 최근에 학습됨
+    regime_ml_service.set_last_deployed_marker("regime_ml_20260101T000000Z")  # 하지만 이게 배포됨
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    result = predict_current_ml_regime("KRW-ETH", "minutes60")
+
+    assert result["model_fold_index"] == 1
+
+
+def test_predict_current_ml_regime_falls_back_to_latest_when_marker_model_missing(tmp_path, monkeypatch):
+    """배포 마커가 가리키는 모델 파일이 실제로는 없으면(지워졌거나 손상됐거나),
+    조용히 실패하지 않고 최신 학습 파일로 폴백해야 한다."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)
+    regime_ml_service.set_last_deployed_marker("regime_ml_20260101T000000Z")  # 존재하지 않는 모델
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    result = predict_current_ml_regime("KRW-ETH", "minutes60")
+
+    assert result["model_fold_index"] == 5
+
+
 def test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row(tmp_path, monkeypatch):
     """운영 코드가 쓰는 저수준 lgb.Booster.predict() 경로가, 학습 스크립트가 검증에 쓰는
     고수준 LGBMClassifier.predict_proba() 경로와 동일한 입력에 대해 동일한 결과를 내야

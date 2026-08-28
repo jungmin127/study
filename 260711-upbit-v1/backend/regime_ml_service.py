@@ -47,6 +47,21 @@ def find_latest_model() -> tuple[Path, dict] | None:
     return None
 
 
+def _find_serving_model() -> tuple[Path, dict] | None:
+    """예측에 실제로 쓸 모델을 고른다. 배포 마커(.last_deployed.json)가 가리키는
+    모델이 있으면 그걸 최우선으로 쓴다 — "배포" 버튼이 실제 서빙 모델을 결정해야
+    하고, 그 뒤에 로컬에서 새로 학습한(파일명이 더 최신인) 모델이 조용히 그걸
+    이겨서는 안 된다. 마커가 없거나(최초 설치 등) 마커가 가리키는 파일이 없으면
+    find_latest_model()로 폴백한다."""
+    marker = get_last_deployed_marker()
+    if marker is not None:
+        txt_path = MODEL_DIR / f"{marker['model_timestamp']}.txt"
+        json_path = MODEL_DIR / f"{marker['model_timestamp']}.json"
+        if txt_path.exists() and json_path.exists():
+            return txt_path, json.loads(json_path.read_text(encoding="utf-8"))
+    return find_latest_model()
+
+
 def _parse_trained_at(txt_path: Path) -> str:
     match = _TIMESTAMP_PATTERN.search(txt_path.stem)
     if not match:
@@ -73,7 +88,7 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
             f"이 모델은 {', '.join(TRAINING_MARKETS)}로만 학습되어 있습니다"
         )
 
-    found = find_latest_model()
+    found = _find_serving_model()
     if found is None:
         raise FileNotFoundError(
             "학습된 ML 모델이 없습니다. scripts/train_regime_ml.py를 먼저 실행하세요"
