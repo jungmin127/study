@@ -13,6 +13,7 @@ test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row의 docstring
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, timezone
 
 import lightgbm as lgb
@@ -335,3 +336,16 @@ def test_deploy_model_raises_runtime_error_when_script_fails(tmp_path, monkeypat
         regime_ml_service.deploy_model("regime_ml_20260101T000000Z")
 
     assert regime_ml_service.get_last_deployed_marker() is None
+
+
+def test_deploy_model_raises_runtime_error_on_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260101T000000Z")
+
+    def _fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 120))
+
+    monkeypatch.setattr(regime_ml_service.subprocess, "run", _fake_run)
+
+    with pytest.raises(RuntimeError, match="120초"):
+        regime_ml_service.deploy_model("regime_ml_20260101T000000Z")

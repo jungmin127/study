@@ -72,6 +72,7 @@ export default function RegimeMlAdminPanel() {
   }, [enabled, refreshJobs, refreshModels]);
 
   const runningJob = jobs.find((j) => j.status === 'running') ?? null;
+  const latestJob = jobs[0] ?? null;
   useVisiblePolling(refreshJobs, POLL_INTERVAL_MS, enabled && runningJob !== null);
 
   const wasRunningRef = useRef(false);
@@ -117,6 +118,9 @@ export default function RegimeMlAdminPanel() {
           {runningJob ? '학습 중...' : '학습 시작'}
         </Button>
         {startError && <p className="text-xs text-destructive">{startError}</p>}
+        {latestJob !== null && latestJob.status === 'failed' && (
+          <p className="text-xs text-destructive">마지막 학습 실패: {latestJob.error_message}</p>
+        )}
       </div>
       {models.length === 0 ? (
         <p className="text-sm text-muted-foreground">학습된 모델이 없습니다.</p>
@@ -147,7 +151,6 @@ export default function RegimeMlAdminPanel() {
                       size="sm"
                       variant="outline"
                       onClick={() => setDeployTarget(model.model_timestamp)}
-                      disabled={model.is_deployed}
                     >
                       배포
                     </Button>

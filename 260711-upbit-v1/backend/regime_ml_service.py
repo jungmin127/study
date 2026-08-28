@@ -169,13 +169,18 @@ def deploy_model(model_timestamp: str) -> None:
         raise FileNotFoundError(f"모델을 찾을 수 없습니다: {model_timestamp}")
 
     script_path = REPO_ROOT / "scripts" / "push_regime_ml_model.sh"
-    result = subprocess.run(
-        ["bash", str(script_path), model_timestamp],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    try:
+        result = subprocess.run(
+            ["bash", str(script_path), model_timestamp],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("배포 스크립트가 120초 내에 끝나지 않아 중단되었습니다") from exc
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "배포 스크립트 실행 실패")
 

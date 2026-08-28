@@ -3061,7 +3061,7 @@ def test_deploy_regime_ml_model_rejects_when_flag_disabled(monkeypatch, tmp_path
     client = _client(monkeypatch, tmp_path)
     monkeypatch.delenv("ENABLE_ML_TRAINING_UI", raising=False)
 
-    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_1"})
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_20260827T223633Z"})
     assert resp.status_code == 403
 
 
@@ -3074,7 +3074,7 @@ def test_deploy_regime_ml_model_returns_404_when_model_missing(monkeypatch, tmp_
 
     monkeypatch.setattr(backend_module, "deploy_model", _raise)
 
-    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_missing"})
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_20260827T223633Z"})
     assert resp.status_code == 404
 
 
@@ -3087,7 +3087,7 @@ def test_deploy_regime_ml_model_returns_500_when_script_fails(monkeypatch, tmp_p
 
     monkeypatch.setattr(backend_module, "deploy_model", _raise)
 
-    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_1"})
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_20260827T223633Z"})
     assert resp.status_code == 500
     assert "scp 실패" in resp.json()["detail"]
 
@@ -3097,6 +3097,14 @@ def test_deploy_regime_ml_model_succeeds(monkeypatch, tmp_path):
     monkeypatch.setenv("ENABLE_ML_TRAINING_UI", "true")
     monkeypatch.setattr(backend_module, "deploy_model", lambda model_timestamp: None)
 
-    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_1"})
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_20260827T223633Z"})
     assert resp.status_code == 200
-    assert resp.json() == {"deployed": True, "model_timestamp": "regime_ml_1"}
+    assert resp.json() == {"deployed": True, "model_timestamp": "regime_ml_20260827T223633Z"}
+
+
+def test_deploy_regime_ml_model_rejects_malformed_timestamp(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENABLE_ML_TRAINING_UI", "true")
+
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "../../etc/passwd"})
+    assert resp.status_code == 422
