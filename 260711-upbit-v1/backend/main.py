@@ -16,7 +16,7 @@ from typing import Literal, Union
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from engine.cache import (
     create_regime_ml_job,
@@ -685,6 +685,7 @@ def list_regime_ml_models_endpoint() -> list[dict]:
 
 
 class DeployRegimeMlModelRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     model_timestamp: str
 
 
