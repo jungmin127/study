@@ -139,6 +139,21 @@ export interface MlCurrentPrediction {
   model_performance: MlModelPerformance | null;
 }
 
+export interface RegimeMlJob {
+  id: string;
+  status: 'running' | 'completed' | 'failed';
+  started_at: string;
+  finished_at: string | null;
+  error_message: string | null;
+}
+
+export interface RegimeMlModelSummary {
+  model_timestamp: string;
+  trained_at: string;
+  performance: MlModelPerformance | null;
+  is_deployed: boolean;
+}
+
 export interface IndicatorParamDef {
   key: string;
   label: string;
