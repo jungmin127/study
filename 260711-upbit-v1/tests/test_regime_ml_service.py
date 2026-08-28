@@ -99,7 +99,16 @@ def test_predict_current_ml_regime_rejects_non_hourly_timeframe():
 
 def test_predict_current_ml_regime_rejects_untrained_market():
     with pytest.raises(ValueError, match="만 학습되어"):
-        predict_current_ml_regime("KRW-DOGE", "minutes60")
+        predict_current_ml_regime("KRW-ETC", "minutes60")
+
+
+def test_predict_current_ml_regime_accepts_newly_expanded_market(tmp_path, monkeypatch):
+    """KRW-SOL은 이번에 TRAINING_MARKETS에 새로 추가되는 마켓이다 — "학습 안 된
+    마켓" ValueError가 아니라, 모델 파일이 없다는 FileNotFoundError가 나야 한다
+    (마켓 검증은 통과했다는 뜻)."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    with pytest.raises(FileNotFoundError, match="학습된 ML 모델이 없습니다"):
+        predict_current_ml_regime("KRW-SOL", "minutes60")
 
 
 def test_predict_current_ml_regime_raises_when_no_model(tmp_path, monkeypatch):
