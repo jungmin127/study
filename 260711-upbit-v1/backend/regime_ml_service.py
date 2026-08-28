@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from engine.regime_ml_data import load_market_training_data
 from engine.regime_ml_features import build_feature_matrix
 
 MODEL_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # OBV 스케일 불일치는 engine/regime_ml_features.py:build_feature_matrix()가 OBV를
 # 피처에서 제외해 해결했다(OBV_ROC로 대체) — WARMUP_DAYS=30이 짧아도 더 이상
@@ -108,3 +110,73 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
         "bar_time": bar_time,
         "model_performance": sidecar.get("performance"),
     }
+
+
+def get_last_deployed_marker() -> dict | None:
+    """가장 최근에 배포에 성공한 모델의 타임스탬프를 담은 로컬 마커. 참고용
+    표시일 뿐 신뢰 소스는 아니다(예: AWS에서 수동으로 모델을 되돌리면 이 마커와
+    실제 배포 상태가 어긋날 수 있다 — 그런 동기화까지는 비범위)."""
+    marker_path = MODEL_DIR / ".last_deployed.json"
+    if not marker_path.exists():
+        return None
+    return json.loads(marker_path.read_text(encoding="utf-8"))
+
+
+def set_last_deployed_marker(model_timestamp: str) -> None:
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    marker_path = MODEL_DIR / ".last_deployed.json"
+    payload = {
+        "model_timestamp": model_timestamp,
+        "deployed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    marker_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def list_trained_models() -> list[dict]:
+    """data/regime_ml_models/의 모든 학습 이력을 최신순으로 반환한다. .json
+    사이드카가 있는데 .txt 짝이 없는 항목(불완전한 저장, find_latest_model()과
+    같은 기준)은 건너뛴다."""
+    if not MODEL_DIR.exists():
+        return []
+
+    deployed_marker = get_last_deployed_marker()
+    deployed_timestamp = deployed_marker["model_timestamp"] if deployed_marker else None
+
+    models: list[dict] = []
+    json_files = sorted(MODEL_DIR.glob("regime_ml_*.json"), reverse=True)
+    for json_path in json_files:
+        txt_path = json_path.with_suffix(".txt")
+        if not txt_path.exists():
+            continue
+        sidecar = json.loads(json_path.read_text(encoding="utf-8"))
+        model_timestamp = json_path.stem
+        models.append({
+            "model_timestamp": model_timestamp,
+            "trained_at": _parse_trained_at(txt_path),
+            "performance": sidecar.get("performance"),
+            "is_deployed": model_timestamp == deployed_timestamp,
+        })
+    return models
+
+
+def deploy_model(model_timestamp: str) -> None:
+    """model_timestamp(예: "regime_ml_20260827T223633Z")에 해당하는 모델을
+    scripts/push_regime_ml_model.sh로 AWS 라이브 서버에 배포한다. 성공하면
+    마지막 배포 마커를 갱신한다."""
+    txt_path = MODEL_DIR / f"{model_timestamp}.txt"
+    json_path = MODEL_DIR / f"{model_timestamp}.json"
+    if not txt_path.exists() or not json_path.exists():
+        raise FileNotFoundError(f"모델을 찾을 수 없습니다: {model_timestamp}")
+
+    script_path = REPO_ROOT / "scripts" / "push_regime_ml_model.sh"
+    result = subprocess.run(
+        ["bash", str(script_path), model_timestamp],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "배포 스크립트 실행 실패")
+
+    set_last_deployed_marker(model_timestamp)

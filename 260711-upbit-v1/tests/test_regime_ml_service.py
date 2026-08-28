@@ -234,3 +234,104 @@ def test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row(tmp_path
 
     for label in _LABELS:
         assert result["probs"][label] == pytest.approx(float(sklearn_probs[label]), abs=1e-6)
+
+
+def test_list_trained_models_returns_empty_when_dir_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path / "does_not_exist")
+    assert regime_ml_service.list_trained_models() == []
+
+
+def test_list_trained_models_orders_newest_first_and_marks_deployed(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260101T000000Z", performance={
+        "folds": [], "pooled_correlation": 0.05,
+        "pooled_hit_rate": {label: None for label in _LABELS},
+    })
+    _train_and_save_tiny_model(tmp_path, "20260102T000000Z", performance={
+        "folds": [], "pooled_correlation": 0.08,
+        "pooled_hit_rate": {label: None for label in _LABELS},
+    })
+    regime_ml_service.set_last_deployed_marker("regime_ml_20260101T000000Z")
+
+    models = regime_ml_service.list_trained_models()
+
+    assert [m["model_timestamp"] for m in models] == [
+        "regime_ml_20260102T000000Z", "regime_ml_20260101T000000Z",
+    ]
+    assert models[0]["performance"]["pooled_correlation"] == 0.08
+    assert models[0]["is_deployed"] is False
+    assert models[1]["is_deployed"] is True
+
+
+def test_list_trained_models_skips_incomplete_pairs(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "regime_ml_20260101T000000Z.json").write_text('{"performance": null}', encoding="utf-8")
+    # .txt 짝이 없음 — 불완전한 저장으로 취급해 건너뛴다.
+
+    assert regime_ml_service.list_trained_models() == []
+
+
+def test_get_last_deployed_marker_returns_none_when_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    assert regime_ml_service.get_last_deployed_marker() is None
+
+
+def test_set_last_deployed_marker_persists_and_reads_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    regime_ml_service.set_last_deployed_marker("regime_ml_20260101T000000Z")
+
+    marker = regime_ml_service.get_last_deployed_marker()
+    assert marker["model_timestamp"] == "regime_ml_20260101T000000Z"
+    assert "deployed_at" in marker
+
+
+def test_deploy_model_raises_file_not_found_when_model_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        regime_ml_service.deploy_model("regime_ml_20260101T000000Z")
+
+
+def test_deploy_model_runs_push_script_and_sets_marker(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260101T000000Z")
+
+    captured = {}
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "모델 전송 완료"
+        stderr = ""
+
+    def _fake_run(args, **kwargs):
+        captured["args"] = args
+        return _FakeResult()
+
+    monkeypatch.setattr(regime_ml_service.subprocess, "run", _fake_run)
+
+    regime_ml_service.deploy_model("regime_ml_20260101T000000Z")
+
+    assert captured["args"] == [
+        "bash", str(regime_ml_service.REPO_ROOT / "scripts" / "push_regime_ml_model.sh"),
+        "regime_ml_20260101T000000Z",
+    ]
+    marker = regime_ml_service.get_last_deployed_marker()
+    assert marker["model_timestamp"] == "regime_ml_20260101T000000Z"
+
+
+def test_deploy_model_raises_runtime_error_when_script_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260101T000000Z")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "DEPLOY_SSH_KEY_PATH가 설정되어 있지 않습니다."
+
+    monkeypatch.setattr(regime_ml_service.subprocess, "run", lambda args, **kwargs: _FakeResult())
+
+    with pytest.raises(RuntimeError, match="DEPLOY_SSH_KEY_PATH"):
+        regime_ml_service.deploy_model("regime_ml_20260101T000000Z")
+
+    assert regime_ml_service.get_last_deployed_marker() is None
