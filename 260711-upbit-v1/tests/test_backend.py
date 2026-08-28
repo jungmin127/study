@@ -3042,3 +3042,61 @@ def test_startup_fails_orphaned_running_regime_ml_jobs(monkeypatch, tmp_path):
     job = get_regime_ml_job("orphan-1")
     assert job["status"] == "failed"
     assert "재시작" in job["error_message"]
+
+
+def test_list_regime_ml_models_endpoint_returns_models(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        backend_module, "list_trained_models",
+        lambda: [{"model_timestamp": "regime_ml_1", "trained_at": "2026-01-01T00:00:00+00:00",
+                  "performance": None, "is_deployed": True}],
+    )
+
+    resp = client.get("/api/v1/regime/ml-models")
+    assert resp.status_code == 200
+    assert resp.json()[0]["model_timestamp"] == "regime_ml_1"
+
+
+def test_deploy_regime_ml_model_rejects_when_flag_disabled(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.delenv("ENABLE_ML_TRAINING_UI", raising=False)
+
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_1"})
+    assert resp.status_code == 403
+
+
+def test_deploy_regime_ml_model_returns_404_when_model_missing(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENABLE_ML_TRAINING_UI", "true")
+
+    def _raise(model_timestamp):
+        raise FileNotFoundError(f"모델을 찾을 수 없습니다: {model_timestamp}")
+
+    monkeypatch.setattr(backend_module, "deploy_model", _raise)
+
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_missing"})
+    assert resp.status_code == 404
+
+
+def test_deploy_regime_ml_model_returns_500_when_script_fails(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENABLE_ML_TRAINING_UI", "true")
+
+    def _raise(model_timestamp):
+        raise RuntimeError("scp 실패")
+
+    monkeypatch.setattr(backend_module, "deploy_model", _raise)
+
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_1"})
+    assert resp.status_code == 500
+    assert "scp 실패" in resp.json()["detail"]
+
+
+def test_deploy_regime_ml_model_succeeds(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENABLE_ML_TRAINING_UI", "true")
+    monkeypatch.setattr(backend_module, "deploy_model", lambda model_timestamp: None)
+
+    resp = client.post("/api/v1/regime/ml-deploy", json={"model_timestamp": "regime_ml_1"})
+    assert resp.status_code == 200
+    assert resp.json() == {"deployed": True, "model_timestamp": "regime_ml_1"}

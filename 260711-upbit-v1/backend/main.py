@@ -73,7 +73,11 @@ from backend.grid_search_service import (
     reset_active_job,
     start_job,
 )
-from backend.regime_ml_service import predict_current_ml_regime
+from backend.regime_ml_service import (
+    deploy_model,
+    list_trained_models,
+    predict_current_ml_regime,
+)
 from backend.regime_ml_training_service import (
     JobAlreadyRunningError as RegimeMlJobAlreadyRunningError,
     start_job as start_regime_ml_training_job,
@@ -673,6 +677,28 @@ def start_regime_ml_train_job_endpoint() -> dict:
 @app.get("/api/v1/regime/ml-train/jobs")
 def list_regime_ml_train_jobs_endpoint() -> list[dict]:
     return [_regime_ml_job_response(j) for j in list_regime_ml_jobs()]
+
+
+@app.get("/api/v1/regime/ml-models")
+def list_regime_ml_models_endpoint() -> list[dict]:
+    return list_trained_models()
+
+
+class DeployRegimeMlModelRequest(BaseModel):
+    model_timestamp: str
+
+
+@app.post("/api/v1/regime/ml-deploy")
+def deploy_regime_ml_model_endpoint(req: DeployRegimeMlModelRequest) -> dict:
+    if not _ml_training_ui_enabled():
+        raise HTTPException(status_code=403, detail="이 환경에서는 ML 모델 배포가 비활성화되어 있습니다.")
+    try:
+        deploy_model(req.model_timestamp)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"deployed": True, "model_timestamp": req.model_timestamp}
 
 
 @app.get("/api/v1/indicators/catalog")
