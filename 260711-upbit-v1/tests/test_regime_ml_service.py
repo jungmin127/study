@@ -310,15 +310,31 @@ def test_deploy_model_runs_push_script_and_sets_marker(tmp_path, monkeypatch):
         return _FakeResult()
 
     monkeypatch.setattr(regime_ml_service.subprocess, "run", _fake_run)
+    monkeypatch.setattr(regime_ml_service.shutil, "which", lambda name: "/usr/bin/bash")
 
     regime_ml_service.deploy_model("regime_ml_20260101T000000Z")
 
     assert captured["args"] == [
-        "bash", str(regime_ml_service.REPO_ROOT / "scripts" / "push_regime_ml_model.sh"),
+        "/usr/bin/bash", str(regime_ml_service.REPO_ROOT / "scripts" / "push_regime_ml_model.sh"),
         "regime_ml_20260101T000000Z",
     ]
     marker = regime_ml_service.get_last_deployed_marker()
     assert marker["model_timestamp"] == "regime_ml_20260101T000000Z"
+
+
+def test_deploy_model_raises_runtime_error_when_bash_not_found(tmp_path, monkeypatch):
+    # Windows에서 subprocess.run(["bash", ...])는 CreateProcess의 System32 우선
+    # 검색 순서 때문에 PATH의 Git Bash보다 WSL의 bash.exe 런처를 먼저 찾을 수
+    # 있다(WSL 배포판 미설치 시 UTF-16LE 오류 배너를 찍고 깨짐). 그래서
+    # deploy_model()은 shutil.which("bash")로 명시적 경로를 구해서 넘긴다 —
+    # 그마저도 못 찾으면 RuntimeError로 실패해야 한다(subprocess.run에 넘겨
+    # FileNotFoundError로 새게 두지 않음).
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260101T000000Z")
+    monkeypatch.setattr(regime_ml_service.shutil, "which", lambda name: None)
+
+    with pytest.raises(RuntimeError, match="bash"):
+        regime_ml_service.deploy_model("regime_ml_20260101T000000Z")
 
 
 def test_deploy_model_raises_runtime_error_when_script_fails(tmp_path, monkeypatch):

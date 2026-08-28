@@ -6,4 +6,5 @@ data/
 .playwright-mcp/
 docs/book_ref/
 docs/book_ref_v2/
+docs/regime-page-guide.md
 .env

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -169,13 +170,17 @@ def deploy_model(model_timestamp: str) -> None:
         raise FileNotFoundError(f"모델을 찾을 수 없습니다: {model_timestamp}")
 
     script_path = REPO_ROOT / "scripts" / "push_regime_ml_model.sh"
+    bash_path = shutil.which("bash")
+    if bash_path is None:
+        raise RuntimeError("bash 실행 파일을 찾을 수 없습니다(Git Bash가 설치되어 있는지 확인하세요).")
     try:
         result = subprocess.run(
-            ["bash", str(script_path), model_timestamp],
+            [bash_path, str(script_path), model_timestamp],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
             timeout=120,
             stdin=subprocess.DEVNULL,
         )
