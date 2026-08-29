@@ -28,7 +28,7 @@ import type { RegimeMlJob, RegimeMlModelSummary } from '@/lib/types/eda';
 
 const POLL_INTERVAL_MS = 3000;
 
-function formatCorrelation(value: number | null | undefined): string {
+function formatScore(value: number | null | undefined): string {
   return value === null || value === undefined ? '-' : value.toFixed(3);
 }
 
@@ -130,7 +130,9 @@ export default function RegimeMlAdminPanel() {
             <TableHeader>
               <TableRow>
                 <TableHead>학습시각</TableHead>
-                <TableHead className="text-right">풀링 상관계수</TableHead>
+                <TableHead className="text-right">상관계수(구)</TableHead>
+                <TableHead className="text-right">macro F1(신)</TableHead>
+                <TableHead className="text-right">weighted κ(신)</TableHead>
                 <TableHead>상태</TableHead>
                 <TableHead className="text-right">배포</TableHead>
               </TableRow>
@@ -140,7 +142,13 @@ export default function RegimeMlAdminPanel() {
                 <TableRow key={model.model_timestamp}>
                   <TableCell>{formatDateTime(model.trained_at)}</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {formatCorrelation(model.performance?.pooled_correlation)}
+                    {formatScore(model.performance?.pooled_correlation)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatScore(model.performance?.pooled?.macro_f1)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatScore(model.performance?.pooled?.weighted_kappa)}
                   </TableCell>
                   <TableCell>
                     {model.is_deployed && <Badge variant="default">현재 배포됨</Badge>}
