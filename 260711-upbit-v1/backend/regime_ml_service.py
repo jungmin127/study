@@ -32,6 +32,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 WARMUP_DAYS = 30
 _TIMESTAMP_PATTERN = re.compile(r"regime_ml_(\d{8}T\d{6}Z)")
 
+# TRAINING_MARKETS was exactly these 3 markets for every model trained before the
+# 2026-08-29 market expansion. A sidecar with no "markets" key is necessarily one of
+# those older models — falling back to the *current* (larger) TRAINING_MARKETS here
+# would silently let through markets that model was never trained on (the exact bug
+# this fallback exists to prevent).
+_LEGACY_SIDECAR_MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
+
 
 def find_latest_model() -> tuple[Path, dict] | None:
     """MODEL_DIR에서 파일명 타임스탬프 기준 가장 최근 .txt+.json 페어를 찾는다.
@@ -94,6 +101,13 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
             "학습된 ML 모델이 없습니다. scripts/train_regime_ml.py를 먼저 실행하세요"
         )
     model_path, sidecar = found
+
+    serving_markets = sidecar.get("markets", _LEGACY_SIDECAR_MARKETS)
+    if market not in serving_markets:
+        raise ValueError(
+            f"현재 배포된 모델은 {', '.join(serving_markets)}로만 학습되어 있습니다. "
+            "재학습 후 배포하면 새 마켓이 반영됩니다."
+        )
 
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=WARMUP_DAYS)

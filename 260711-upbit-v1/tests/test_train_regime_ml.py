@@ -298,7 +298,10 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
     with open(json_files[0], encoding="utf-8") as f:
         sidecar = json.load(f)
 
-    assert set(sidecar.keys()) == {"boundaries", "ref_scores", "classes", "fold_index", "performance"}
+    assert set(sidecar.keys()) == {
+        "markets", "boundaries", "ref_scores", "classes", "fold_index", "performance",
+    }
+    assert sidecar["markets"] == list(seeds.keys())
     assert isinstance(sidecar["boundaries"], list) and len(sidecar["boundaries"]) == 4
     assert isinstance(sidecar["ref_scores"], dict)
     assert set(sidecar["ref_scores"].keys()) == set(train_regime_ml.CATEGORY_LABELS)

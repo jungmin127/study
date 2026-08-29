@@ -166,6 +166,7 @@ def run_training(
         pooled_hit_rate = _compute_hit_rate(pooled_confusion)
 
         sidecar = {
+            "markets": markets,
             "boundaries": last_boundaries,
             "ref_scores": last_ref_scores,
             "classes": last_class_order,

@@ -28,11 +28,16 @@ _MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
 _LABELS = ["급하락", "완만하락", "횡보", "완만상승", "급상승"]
 
 
-def _train_and_save_tiny_model(model_dir, timestamp: str, fold_index: int = 3, performance: dict | None = None):
+def _train_and_save_tiny_model(
+    model_dir, timestamp: str, fold_index: int = 3, performance: dict | None = None,
+    markets: list[str] | None = None,
+):
     """scripts/train_regime_ml.py의 실제 흐름(3마켓 풀링 -> market astype category
     -> LightGBM 학습 -> booster_.save_model)을 축소 재현해 .txt+.json 페어를 저장한다.
     performance를 None으로 두면(기본값) performance 키 자체가 없는 구형 사이드카를
-    재현한다 — 명시하면 그 값을 그대로 담는다."""
+    재현한다 — 명시하면 그 값을 그대로 담는다. markets를 None으로 두면(기본값)
+    "markets" 키 자체가 없는 구형(레거시) 사이드카를 재현한다 — 명시하면 그 목록을
+    그대로 담는다(신형 사이드카 재현)."""
     rng = np.random.default_rng(0)
     rows = []
     for market in _MARKETS:
@@ -55,6 +60,8 @@ def _train_and_save_tiny_model(model_dir, timestamp: str, fold_index: int = 3, p
         "classes": [str(c) for c in model.classes_],
         "fold_index": fold_index,
     }
+    if markets is not None:
+        sidecar["markets"] = markets
     if performance is not None:
         sidecar["performance"] = performance
     json_path.write_text(json.dumps(sidecar), encoding="utf-8")
@@ -108,6 +115,64 @@ def test_predict_current_ml_regime_accepts_newly_expanded_market(tmp_path, monke
     (마켓 검증은 통과했다는 뜻)."""
     monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
     with pytest.raises(FileNotFoundError, match="학습된 ML 모델이 없습니다"):
+        predict_current_ml_regime("KRW-SOL", "minutes60")
+
+
+def test_predict_current_ml_regime_rejects_market_not_in_serving_model(tmp_path, monkeypatch):
+    """KRW-SOL은 전역 TRAINING_MARKETS(14개)에는 있지만, 이 서빙 모델의 사이드카가
+    명시한 markets(신형 포맷, KRW-BTC/ETH/XRP 3개)에는 없다 — 전역 상수 검사는
+    통과해도 실제 배포된 모델 기준으로는 거부돼야 한다. load_market_training_data/
+    build_feature_matrix를 monkeypatch해두는 건, 마켓 검증이 그 실제 I/O에 도달하기도
+    전에 먼저 걸려야 한다는 걸 보장하기 위해서다(호출되면 다른 테스트들처럼 이
+    fake들이 반환할 뿐, 진짜 네트워크/데이터 경로를 타지 않는다)."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5, markets=list(_MARKETS))
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    with pytest.raises(ValueError, match="만 학습되어"):
+        predict_current_ml_regime("KRW-SOL", "minutes60")
+
+
+def test_predict_current_ml_regime_rejects_market_not_in_legacy_model_without_markets_key(tmp_path, monkeypatch):
+    """사이드카에 "markets" 키가 아예 없는 구형 모델(이번 마켓 확장 이전에 학습된
+    모든 모델)은 하드코딩된 레거시 3마켓(KRW-BTC/ETH/XRP)만 커버한다고 간주해야
+    한다 — 전역 TRAINING_MARKETS(현재 14개)로 폴백하면 이 테스트가 방지하려는
+    버그(학습 안 된 마켓이 조용히 통과)가 재현된다."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)  # markets 없음(구형)
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    with pytest.raises(ValueError, match="만 학습되어"):
         predict_current_ml_regime("KRW-SOL", "minutes60")
 
 
