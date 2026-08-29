@@ -4,9 +4,13 @@ engine/regime_ml_features.py
 장세 판별 ML 분류기의 피처 매트릭스를 만든다. trading.live_indicators.LIVE_INDICATOR_FACTORY
 (이미 백트레이더 대비 골든테스트로 검증된 순수 pandas 지표)를 재구현 없이 그대로
 순회하고, engine.regime_features.py의 반전게이팅 실험용 5개 함수 + momentum/volatility
-EWMA(raw_score)를 더한다. I/O 없는 순수 함수 — 입력 df는
-engine/regime_ml_data.py가 준비한다. 설계 문서:
-docs/superpowers/specs/2026-08-27-regime-detector-ml-classifier-design.md
+EWMA(raw_score)를 더한다. 코인 차별화 피처(자기상대적, 2026-08-29 문제 재정의 도입)
+3개도 추가한다 — LISTING_AGE_BARS(상장 후 경과 봉 수)/VOLATILITY_PERCENTILE/
+LIQUIDITY_PERCENTILE(둘 다 이 마켓 자신의 과거 1년 분포 대비 백분위). 공유 풀링
+모델이 코인마다 다른 신호를 갖게 하려는 목적이며, 다른 마켓 데이터를 참조하지
+않아(자기 자신의 df만 사용) 추론 시 여러 마켓을 새로 불러올 필요가 없다. I/O
+없는 순수 함수 — 입력 df는 engine/regime_ml_data.py가 준비한다. 설계 문서:
+docs/superpowers/specs/2026-08-29-regime-ml-problem-redefinition-design.md
 """
 from __future__ import annotations
 
@@ -24,6 +28,8 @@ from trading.live_indicators import LIVE_INDICATOR_FACTORY
 # engine/regime_features.py:_MIN_VOLATILITY_FLOOR와 값이 같아야 한다(raw_score
 # 0-나눗셈 방지) — 순환참조를 피하려 별도 정의.
 _MIN_VOLATILITY_FLOOR = 1e-6
+_PERCENTILE_WINDOW_BARS = 8760  # 1시간봉 기준 1년
+_PERCENTILE_MIN_PERIODS = 100  # 약 4일치 이상 쌓이면 백분위 계산 시작(신규상장 코인도 이른 시점부터 값이 나오게)
 
 
 def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -> pd.DataFrame:
@@ -53,6 +59,14 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     features["VPIN_SCORE"] = vpin
     features["LEVEL_PROXIMITY"] = proximity
     features["REVERSAL_GATE"] = reversal_gate(vpin, proximity)
+
+    features["LISTING_AGE_BARS"] = pd.Series(range(len(df)), index=df.index, dtype=float)
+    features["VOLATILITY_PERCENTILE"] = volatility.rolling(
+        _PERCENTILE_WINDOW_BARS, min_periods=_PERCENTILE_MIN_PERIODS
+    ).rank(pct=True)
+    features["LIQUIDITY_PERCENTILE"] = df["trade_value"].rolling(
+        _PERCENTILE_WINDOW_BARS, min_periods=_PERCENTILE_MIN_PERIODS
+    ).rank(pct=True)
 
     result = pd.DataFrame(features, index=df.index)
     result["market"] = pd.Categorical([market] * len(df))

@@ -43,7 +43,10 @@ def test_build_feature_matrix_has_one_column_per_registered_indicator_except_obv
 
     expected_columns = (
         (set(LIVE_INDICATOR_FACTORY.keys()) - {"OBV"})
-        | {"RAW_SCORE", "VOLUME_CONFIRM", "VPIN_SCORE", "LEVEL_PROXIMITY", "REVERSAL_GATE", "market"}
+        | {
+            "RAW_SCORE", "VOLUME_CONFIRM", "VPIN_SCORE", "LEVEL_PROXIMITY", "REVERSAL_GATE",
+            "LISTING_AGE_BARS", "VOLATILITY_PERCENTILE", "LIQUIDITY_PERCENTILE", "market",
+        }
     )
     assert set(result.columns) == expected_columns
 
@@ -71,3 +74,21 @@ def test_build_feature_matrix_sets_market_column_as_category():
 
     assert (result["market"] == "KRW-XRP").all()
     assert str(result["market"].dtype) == "category"
+
+
+def test_build_feature_matrix_listing_age_bars_counts_from_zero():
+    df = _make_full_df()
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    assert list(result["LISTING_AGE_BARS"]) == list(range(len(df)))
+
+
+def test_build_feature_matrix_percentile_features_start_nan_then_bounded_zero_to_one():
+    df = _make_full_df()  # _N=150 > 백분위 min_periods(100)
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    for column in ("VOLATILITY_PERCENTILE", "LIQUIDITY_PERCENTILE"):
+        assert pd.isna(result[column].iloc[0])
+        last_value = result[column].iloc[-1]
+        assert not pd.isna(last_value)
+        assert 0.0 <= last_value <= 1.0
