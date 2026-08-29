@@ -115,19 +115,40 @@ export interface TrendSegmentAnalysis {
   ohlcv: OhlcvPoint[];
 }
 
-export type RegimeCategory = '급상승' | '완만상승' | '횡보' | '완만하락' | '급하락';
+export type RegimeCategory = '하락' | '횡보' | '상승';
 
 export interface MlFoldPerformance {
   fold_index: number;
   n_train: number;
   n_test: number;
-  correlation: number | null;
+  // 레거시(5단계) 모델 전용
+  correlation?: number | null;
+  // 신규(3단계) 모델 전용
+  macro_f1?: number | null;
+  weighted_kappa?: number | null;
+}
+
+export interface ClassPrecisionRecall {
+  precision: number | null;
+  recall: number | null;
+}
+
+export interface MlPooledMetrics {
+  n: number;
+  macro_f1: number | null;
+  weighted_kappa: number | null;
+  confusion: Record<RegimeCategory, Record<RegimeCategory, number>>;
+  class_precision_recall: Record<RegimeCategory, ClassPrecisionRecall>;
 }
 
 export interface MlModelPerformance {
   folds: MlFoldPerformance[];
-  pooled_correlation: number | null;
-  pooled_hit_rate: Record<RegimeCategory, number | null>;
+  // 레거시(5단계) 모델 전용
+  pooled_correlation?: number | null;
+  pooled_hit_rate?: Record<string, number | null>;
+  // 신규(3단계) 모델 전용
+  pooled?: MlPooledMetrics;
+  per_market?: Record<string, MlPooledMetrics>;
 }
 
 export interface MlCurrentPrediction {
