@@ -185,7 +185,13 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
     assert sidecar["markets"] == list(seeds.keys())
     assert sidecar["labeling_method"] == "triple_barrier"
     assert sidecar["barrier_k"] == _BARRIER_K
-    assert set(sidecar["classes"]) == set(train_regime_ml.CATEGORY_LABELS)
+    # set()이 아니라 순서를 그대로 비교한다 — LightGBM의 model.classes_는 이
+    # 한국어 레이블들을 유니코드 코드포인트 순으로 정렬하는데(실측: sorted(['하락',
+    # '횡보','상승']) == ['상승','하락','횡보']), 이 값이 마침 sorted(CATEGORY_LABELS)와
+    # 같다. set 비교로는 코드가 CATEGORY_LABELS를 원래 순서(하락/횡보/상승) 그대로
+    # 하드코딩하는 회귀가 생겨도 통과해버려, 이 테스트가 잡으려는 클래스 순서
+    # 버그를 놓친다.
+    assert sidecar["classes"] == sorted(train_regime_ml.CATEGORY_LABELS)
     assert isinstance(sidecar["fold_index"], int)
     assert sidecar["fold_index"] == reports[-1]["fold_index"]
 

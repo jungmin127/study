@@ -11,6 +11,8 @@ docs/superpowers/specs/2026-08-29-regime-ml-problem-redefinition-design.md
 """
 from __future__ import annotations
 
+import math
+
 from sklearn.metrics import (
     cohen_kappa_score,
     confusion_matrix,
@@ -38,6 +40,11 @@ def compute_classification_metrics(y_true: list[str], y_pred: list[str]) -> dict
 
     macro_f1 = float(f1_score(y_true, y_pred, labels=CATEGORY_LABELS, average="macro", zero_division=0))
     weighted_kappa = float(cohen_kappa_score(y_true, y_pred, labels=CATEGORY_LABELS, weights="linear"))
+    # y_true/y_pred가 둘 다 단일 클래스로만 이뤄지면 cohen_kappa_score 내부에서
+    # 0/0이 발생해 NaN이 나온다 — 이 함수는 "계산 불가"를 이미 None으로 표현하는
+    # 관례(위 n==0 분기 등)를 따르므로, NaN도 0.0이 아니라 None으로 맞춘다.
+    if math.isnan(weighted_kappa):
+        weighted_kappa = None
 
     matrix = confusion_matrix(y_true, y_pred, labels=CATEGORY_LABELS)
     confusion = {

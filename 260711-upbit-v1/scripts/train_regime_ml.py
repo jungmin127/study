@@ -213,6 +213,9 @@ def _print_fold_report(report: dict) -> None:
 def _print_aggregate_summary(
     reports: list[dict], pooled_metrics: dict, per_market_metrics: dict[str, dict]
 ) -> None:
+    """pooled_metrics/per_market_metrics는 모든 fold의 (실제,예측) 쌍을 이어붙인 뒤
+    지표 함수를 단 한 번 호출해서 계산해야 한다 — fold별 지표값을 평균내는 방식은
+    macro F1/kappa처럼 표본 크기에 비선형인 지표에서는 통계적으로 부적절하다."""
     print(f"\n=== 전체 fold 풀링 (fold {len(reports)}개) ===")
     _print_metrics_block(pooled_metrics)
     print("\n=== 마켓별 성능(전체 fold 풀링) ===")

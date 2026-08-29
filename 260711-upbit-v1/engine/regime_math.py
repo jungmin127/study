@@ -31,8 +31,10 @@ def _ewm_std_series(returns: pd.Series, half_life_bars: float) -> pd.Series:
 
 def ewm_volatility(returns: pd.Series, half_life_bars: float) -> float:
     """수익률의 지수가중 표준편차(가장 최근 값) — 변동성 정규화용.
-    분자(모멘텀=EWMA 평균)와 분모가 서로 다른 통계량이어야 score가 카테고리 대표값
-    ±2.0(급상승/급하락)에 실제로 도달할 수 있다(EWMA 절댓값평균을 쓰면 삼각부등식으로
-    score가 [-1, 1]에 갇히는 버그가 있었다 — 규칙기반 판별기 시절 Task 3 최종리뷰에서
-    발견)."""
+    분자(모멘텀=EWMA 평균)와 분모가 서로 다른 통계량이어야 score가 [-1, 1] 밖으로도
+    나갈 수 있다(EWMA 절댓값평균을 쓰면 삼각부등식으로 score가 [-1, 1]에 갇히는
+    버그가 있었다 — 규칙기반 판별기 시절 Task 3 최종리뷰에서 발견). 이 score의
+    구간을 카테고리 경계로 나누던 대표값 기반 5단계 스킴은 이후 Triple Barrier
+    레이블링으로 대체되어 더 이상 쓰이지 않지만, EWMA 수학 자체(및 이 함수)는
+    engine/regime_ml_features.py의 RAW_SCORE 피처가 여전히 사용한다."""
     return float(_ewm_std_series(returns, half_life_bars).iloc[-1])
