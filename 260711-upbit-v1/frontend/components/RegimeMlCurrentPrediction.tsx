@@ -31,6 +31,8 @@ function categoryVarName(label: RegimeCategory): string {
       return '--marker-boundary';
     case '하락':
       return '--regime-surge-down';
+    default:
+      return '--marker-boundary';
   }
 }
 
@@ -89,7 +91,7 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
             <div className="mb-3 flex items-baseline gap-2">
               <span className="text-2xl font-bold">{data.predicted_category}</span>
               <span className="text-sm text-muted-foreground">
-                확신도 {(data.probs[data.predicted_category] * 100).toFixed(1)}%
+                확신도 {((data.probs[data.predicted_category] ?? 0) * 100).toFixed(1)}%
               </span>
             </div>
             <div className="mb-3 space-y-1.5">
@@ -100,13 +102,13 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
                     <div
                       className="h-full rounded-full"
                       style={{
-                        width: `${(data.probs[label] * 100).toFixed(1)}%`,
+                        width: `${((data.probs[label] ?? 0) * 100).toFixed(1)}%`,
                         backgroundColor: `var(${categoryVarName(label)})`,
                       }}
                     />
                   </div>
                   <span className="w-10 shrink-0 text-right tabular-nums">
-                    {(data.probs[label] * 100).toFixed(1)}%
+                    {((data.probs[label] ?? 0) * 100).toFixed(1)}%
                   </span>
                 </div>
               ))}
