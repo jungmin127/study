@@ -32,11 +32,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 WARMUP_DAYS = 30
 _TIMESTAMP_PATTERN = re.compile(r"regime_ml_(\d{8}T\d{6}Z)")
 
-# TRAINING_MARKETS was exactly these 3 markets for every model trained before the
-# 2026-08-29 market expansion. A sidecar with no "markets" key is necessarily one of
-# those older models — falling back to the *current* (larger) TRAINING_MARKETS here
-# would silently let through markets that model was never trained on (the exact bug
-# this fallback exists to prevent).
+# 2026-08-29 마켓 확장 이전에 학습된 모든 모델은 정확히 이 3개 마켓으로만
+# 학습됐다. "markets" 키가 없는 사이드카는 전부 그 시절 모델이라는 뜻이므로,
+# 현재(더 커진) TRAINING_MARKETS로 폴백하면 그 모델이 실제로 학습한 적 없는
+# 마켓까지 조용히 통과시켜버린다(바로 이 폴백이 막으려는 버그).
 _LEGACY_SIDECAR_MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
 
 
