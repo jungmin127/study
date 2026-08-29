@@ -1,117 +1,80 @@
 """
 tests/test_regime_ml_labels.py
 
-engine.regime_ml_labels의 레이블 생성 함수를 검증한다. compute_normalized_realized_series는
-과거 규칙기반 판별기(E 작업으로 2026-08-28 삭제됨)가 쓰던 것과 같은 정규화 실현수익률
-공식(다음 n_bars 평균수익률 / 이후 EWM변동성)을 그대로 따른다.
+engine.regime_ml_labels.compute_triple_barrier_labels()를 검증한다. Triple
+Barrier Method — 상단/하단 경계 중 어느 쪽이 먼저 터치되는지, 둘 다 안
+터치되면 만기(횡보), 미래 데이터가 부족하면 NaN인지 확인한다.
 """
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
-from engine.regime_math import ewm_volatility
-from engine.regime_ml_labels import (
-    CATEGORY_LABELS,
-    bucket_to_category,
-    category_representative_scores,
-    compute_normalized_realized_series,
-    compute_quantile_boundaries,
-)
+from engine.regime_ml_labels import CATEGORY_LABELS, compute_triple_barrier_labels
+
+_HALF_LIFE_BARS = 5.0
+_N_BARS = 10
+_K = 1.0
+# 앞 50봉: ±1 오실레이션으로 EWM 변동성을 0보다 크게 만드는 워밍업 구간.
+# 마지막 값(인덱스 49, 홀수라 -1 적용)이 99.0이라 이후 케이스의 기준가로 쓴다.
+_WARMUP = [100.0 + (1.0 if i % 2 == 0 else -1.0) for i in range(50)]
+_BASE = _WARMUP[-1]
+assert _BASE == 99.0
 
 
 def _make_close_df(closes: list[float]) -> pd.DataFrame:
     return pd.DataFrame({"close": closes})
 
 
-def test_compute_normalized_realized_series_matches_rule_based_normalization_formula():
-    # 상승폭이 점점 커지는 시계열 — 뒤로 갈수록 정규화 실현수익률이 커져야 함
-    closes = [100.0 * (1.001**i) for i in range(80)]
+def test_compute_triple_barrier_labels_assigns_up_when_upper_touched_first():
+    future_up = [_BASE * (1.05**i) for i in range(1, 11)]  # 5%/bar 복리 급등
+    closes = _WARMUP + future_up + [future_up[-1]] * 5
+    labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
+
+    assert labels.iloc[49] == "상승"
+
+
+def test_compute_triple_barrier_labels_assigns_down_when_lower_touched_first():
+    future_down = [_BASE * (0.95**i) for i in range(1, 11)]  # 5%/bar 복리 급락
+    closes = _WARMUP + future_down + [future_down[-1]] * 5
+    labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
+
+    assert labels.iloc[49] == "하락"
+
+
+def test_compute_triple_barrier_labels_assigns_sideways_when_neither_touched():
+    future_flat = [_BASE] * 10  # 완전 횡보(수익률 0) -> 어떤 임계값도 못 넘음
+    closes = _WARMUP + future_flat + [_BASE] * 5
+    labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
+
+    assert labels.iloc[49] == "횡보"
+
+
+def test_compute_triple_barrier_labels_picks_whichever_barrier_hits_first():
+    # 먼저 하단을 살짝 터치(-3%/-4%)한 뒤에야 상단을 크게 터치(+10%) — 크기가 아니라
+    # "몇 봉째 터치했는지"만으로 결정돼야 하므로 하락이 정답.
+    future_tie = [_BASE * 0.97, _BASE * 0.96, _BASE * 1.10] + [_BASE * 1.10] * 7
+    closes = _WARMUP + future_tie + [_BASE * 1.10] * 5
+    labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
+
+    assert labels.iloc[49] == "하락"
+
+
+def test_compute_triple_barrier_labels_nan_when_future_data_insufficient():
+    future_flat = [_BASE] * 10
+    closes = _WARMUP + future_flat + [_BASE] * 5
+    labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
+
+    assert labels.iloc[-_N_BARS:].isna().all()
+
+
+def test_compute_triple_barrier_labels_preserves_length_and_index():
+    closes = _WARMUP + [_BASE] * 15
     df = _make_close_df(closes)
-    half_life_bars = 24.0
-    n_bars = 60
+    labels = compute_triple_barrier_labels(df, _HALF_LIFE_BARS, _N_BARS, _K)
 
-    series = compute_normalized_realized_series(df, half_life_bars, n_bars)
-
-    assert len(series) == len(df)
-    # 마지막 n_bars 구간은 미래 데이터가 없어 NaN
-    assert series.iloc[-n_bars:].isna().all()
-    # 워밍업 이후 앞부분은 값이 존재
-    assert series.iloc[0:len(df) - n_bars].notna().all()
-
-    # 수치 검증: 특정 인덱스 t에서 독립적으로 계산한 예상값과 비교
-    t = 10
-    returns = df["close"].pct_change(fill_method=None)
-    future_returns = returns.iloc[t + 1 : t + 1 + n_bars]
-    realized_volatility = ewm_volatility(future_returns, half_life_bars)
-    expected = future_returns.mean() / realized_volatility
-    assert series.iloc[t] == pytest.approx(expected)
+    assert len(labels) == len(df)
+    assert list(labels.index) == list(df.index)
 
 
-def test_compute_normalized_realized_series_returns_all_nan_when_too_short():
-    df = _make_close_df([100.0, 101.0, 102.0])
-    series = compute_normalized_realized_series(df, half_life_bars=24.0, n_bars=60)
-    assert series.isna().all()
-    assert len(series) == 3
-
-
-def test_compute_quantile_boundaries_are_ascending_and_within_range():
-    values = pd.Series([float(i) for i in range(1, 101)])  # 1..100
-    boundaries = compute_quantile_boundaries(values, quantiles=(0.02, 0.16, 0.84, 0.98))
-
-    assert len(boundaries) == 4
-    assert boundaries == sorted(boundaries)
-    assert values.min() <= boundaries[0]
-    assert boundaries[-1] <= values.max()
-
-
-def test_compute_quantile_boundaries_ignores_nan():
-    values = pd.Series([1.0, 2.0, float("nan"), 3.0, 4.0, float("nan"), 5.0])
-    quantiles_tuple = (0.25, 0.4, 0.6, 0.75)
-    boundaries = compute_quantile_boundaries(values, quantiles=quantiles_tuple)
-
-    # NaN이 섞이지 않음
-    assert all(b == b for b in boundaries)
-
-    # NaN을 제외한 값으로 예상값을 직접 계산하여 검증
-    clean = values.dropna()
-    expected = [float(clean.quantile(q)) for q in quantiles_tuple]
-    for actual, exp in zip(boundaries, expected):
-        assert actual == pytest.approx(exp)
-
-
-def test_compute_quantile_boundaries_raises_when_all_nan():
-    values = pd.Series([float("nan"), float("nan")])
-    with pytest.raises(ValueError, match="표본이 없습니다"):
-        compute_quantile_boundaries(values)
-
-
-def test_bucket_to_category_assigns_correct_label():
-    boundaries = [-10.0, -1.0, 1.0, 10.0]
-    assert bucket_to_category(-20.0, boundaries) == "급하락"
-    assert bucket_to_category(-10.0, boundaries) == "완만하락"  # 경계값은 다음 구간(>=)
-    assert bucket_to_category(0.0, boundaries) == "횡보"
-    assert bucket_to_category(5.0, boundaries) == "완만상승"
-    assert bucket_to_category(100.0, boundaries) == "급상승"
-
-
-def test_category_representative_scores_uses_median_of_bucket():
-    # 급하락 구간에 -20, -15 두 값 -> 중앙값 -17.5
-    values = pd.Series([-20.0, -15.0, 0.0, 0.0, 5.0, 5.0, 20.0])
-    boundaries = [-10.0, -1.0, 1.0, 10.0]
-
-    scores = category_representative_scores(values, boundaries)
-
-    assert set(scores.keys()) == set(CATEGORY_LABELS)
-    assert scores["급하락"] == pytest.approx(-17.5)
-    assert scores["횡보"] == pytest.approx(0.0)
-
-
-def test_category_representative_scores_falls_back_when_bucket_empty():
-    # "완만하락" 구간(-10<=v<-1)에 값이 하나도 없음
-    values = pd.Series([-20.0, 0.0, 20.0])
-    boundaries = [-10.0, -1.0, 1.0, 10.0]
-
-    scores = category_representative_scores(values, boundaries)
-
-    assert scores["완만하락"] == pytest.approx((boundaries[0] + boundaries[1]) / 2)
+def test_category_labels_has_three_ordered_classes():
+    assert CATEGORY_LABELS == ["하락", "횡보", "상승"]

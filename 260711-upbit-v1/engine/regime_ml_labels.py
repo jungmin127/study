@@ -1,77 +1,52 @@
 """
 engine/regime_ml_labels.py
 
-장세 판별 ML 분류기의 레이블(정답 카테고리)을 만든다. 정규화 실현수익률(다음 n_bars
-평균수익률을 이후 EWM변동성으로 정규화한 값)은 과거 규칙기반 판별기(E 작업으로
-2026-08-28 삭제됨)가 쓰던 것과 같은 정규화 방식이다 — 카테고리 경계만 고정값이 아니라
-fold별 훈련구간 분위수로 계산한다는 점이 다르다. 설계 문서:
-docs/superpowers/specs/2026-08-27-regime-detector-ml-classifier-design.md
+장세 판별 ML 분류기의 레이블(정답 카테고리)을 만든다. Triple Barrier Method(Marcos
+Lopez de Prado) — 상단 익절선/하단 손절선/만기 중 무엇이 먼저 터치되는지로 라벨을
+정한다. 이전의 "다음 n_bars 평균수익률을 fold별 훈련구간 분위수로 나누는" 방식은
+fold마다 카테고리 경계가 달라지는 불안정성이 있어 폐기했다(2026-08-27 도입,
+2026-08-29 문제 재정의에서 교체). 설계 문서:
+docs/superpowers/specs/2026-08-29-regime-ml-problem-redefinition-design.md
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
-from engine.regime_math import ewm_volatility
-
-CATEGORY_LABELS: list[str] = ["급하락", "완만하락", "횡보", "완만상승", "급상승"]
+CATEGORY_LABELS: list[str] = ["하락", "횡보", "상승"]
 
 
-def compute_normalized_realized_series(
-    df: pd.DataFrame, half_life_bars: float, n_bars: int
+def compute_triple_barrier_labels(
+    df: pd.DataFrame, half_life_bars: float, n_bars: int, k: float
 ) -> pd.Series:
-    """df["close"] 기준 각 시점 t에서 "다음 n_bars 평균수익률 / 이후 EWM변동성"을 계산한다.
-    미래 데이터가 부족한 마지막 n_bars 구간, 또는 구간 내 결측이 있으면 NaN."""
+    """각 시점 t에서 상단(+k*vol_t)/하단(-k*vol_t) 경계와 n_bars 만기 중 무엇이
+    먼저 터치되는지로 라벨링한다. vol_t는 t까지의 과거 수익률만으로 계산한
+    EWM 변동성이라(pandas ewm은 인과적) 추론 시점에도 동일하게 재현 가능하다.
+    두 경계가 같은 봉에서 동시에 터치되는 경우는 없다(k>0이면 상단·하단이
+    서로 반대 부호). 반환: CATEGORY_LABELS 값 또는 NaN(미래 데이터 부족)으로
+    이뤄진 object Series, df와 같은 길이/인덱스."""
     returns = df["close"].pct_change(fill_method=None)
-    values: list[float] = [float("nan")] * len(df)
-    for t in range(max(len(df) - n_bars, 0)):
-        future_returns = returns.iloc[t + 1 : t + 1 + n_bars]
-        if future_returns.empty or future_returns.isna().any():
+    volatility = returns.ewm(halflife=half_life_bars).std()
+    close = df["close"].to_numpy()
+    n = len(df)
+
+    labels: list[object] = [float("nan")] * n
+    for t in range(max(n - n_bars, 0)):
+        vol_t = volatility.iloc[t]
+        if pd.isna(vol_t) or vol_t <= 0:
             continue
-        realized_volatility = ewm_volatility(future_returns, half_life_bars)
-        if realized_volatility <= 0:
-            continue
-        values[t] = future_returns.mean() / realized_volatility
-    return pd.Series(values, index=df.index)
-
-
-def compute_quantile_boundaries(
-    values: pd.Series, quantiles: tuple[float, ...] = (0.02, 0.16, 0.84, 0.98)
-) -> list[float]:
-    """values(NaN 제외)에서 quantiles에 해당하는 경계값을 오름차순으로 반환한다."""
-    clean = values.dropna()
-    if clean.empty:
-        raise ValueError("경계값을 계산할 표본이 없습니다")
-    return [float(clean.quantile(q)) for q in quantiles]
-
-
-def bucket_to_category(value: float, boundaries: list[float]) -> str:
-    """boundaries(오름차순 4개)를 기준으로 value를 5개 카테고리 중 하나로 분류한다.
-    과거 규칙기반 판별기(E 작업으로 2026-08-28 삭제됨)가 쓰던 것과 같은 "미만이면
-    그 카테고리" 규칙이다."""
-    for label, boundary in zip(CATEGORY_LABELS[:-1], boundaries):
-        if value < boundary:
-            return label
-    return CATEGORY_LABELS[-1]
-
-
-def category_representative_scores(
-    values: pd.Series, boundaries: list[float]
-) -> dict[str, float]:
-    """각 카테고리 구간에 속한 values의 중앙값을 대표값으로 반환한다(회귀 상관계수 계산용
-    expected_score 산출에 씀). 구간에 표본이 하나도 없으면(fold 초반 등) 양끝 카테고리는
-    해당 경계값, 중간 카테고리는 인접 경계값의 중점으로 대체한다."""
-    clean = values.dropna()
-    labels_per_value = clean.apply(lambda v: bucket_to_category(v, boundaries))
-
-    result: dict[str, float] = {}
-    for i, label in enumerate(CATEGORY_LABELS):
-        bucket_values = clean[labels_per_value == label]
-        if not bucket_values.empty:
-            result[label] = float(bucket_values.median())
-        elif i == 0:
-            result[label] = boundaries[0]
-        elif i == len(CATEGORY_LABELS) - 1:
-            result[label] = boundaries[-1]
+        upper = k * vol_t
+        lower = -k * vol_t
+        entry = close[t]
+        future = close[t + 1 : t + 1 + n_bars] / entry - 1.0
+        up_hits = np.flatnonzero(future >= upper)
+        down_hits = np.flatnonzero(future <= lower)
+        up_first = up_hits[0] if up_hits.size else None
+        down_first = down_hits[0] if down_hits.size else None
+        if up_first is not None and (down_first is None or up_first <= down_first):
+            labels[t] = "상승"
+        elif down_first is not None:
+            labels[t] = "하락"
         else:
-            result[label] = (boundaries[i - 1] + boundaries[i]) / 2
-    return result
+            labels[t] = "횡보"
+    return pd.Series(labels, index=df.index)
