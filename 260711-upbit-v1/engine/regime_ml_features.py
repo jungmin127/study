@@ -60,7 +60,14 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     features["LEVEL_PROXIMITY"] = proximity
     features["REVERSAL_GATE"] = reversal_gate(vpin, proximity)
 
-    features["LISTING_AGE_BARS"] = pd.Series(range(len(df)), index=df.index, dtype=float)
+    # 상한을 두지 않으면(구 버전) 워크포워드 검증에서 테스트 폴드의 모든 행이
+    # 학습 폴드의 어떤 값보다도 항상 크다(시간이 항상 더 뒤이므로) — 트리 모델이
+    # 아웃오브폴드로 일반화할 수 없는데도 실제 학습에서 전체 gain의 약 40%를
+    # 차지했다. _PERCENTILE_WINDOW_BARS에서 포화시켜 "최근 상장(첫 1년 내)" 신호는
+    # 유지하면서 무한 증가 문제를 없앤다.
+    features["LISTING_AGE_BARS"] = pd.Series(
+        range(len(df)), index=df.index, dtype=float
+    ).clip(upper=_PERCENTILE_WINDOW_BARS)
     features["VOLATILITY_PERCENTILE"] = volatility.rolling(
         _PERCENTILE_WINDOW_BARS, min_periods=_PERCENTILE_MIN_PERIODS
     ).rank(pct=True)

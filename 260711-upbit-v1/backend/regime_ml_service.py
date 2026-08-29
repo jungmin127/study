@@ -27,9 +27,16 @@ MODEL_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # OBV 스케일 불일치는 engine/regime_ml_features.py:build_feature_matrix()가 OBV를
-# 피처에서 제외해 해결했다(OBV_ROC로 대체) — WARMUP_DAYS=30이 짧아도 더 이상
+# 피처에서 제외해 해결했다(OBV_ROC로 대체) — 짧은 워밍업 기간이어도 더 이상
 # 학습/추론 간 스케일이 어긋나지 않는다.
-WARMUP_DAYS = 30
+#
+# 이 값은 engine/regime_ml_features.py의 _PERCENTILE_WINDOW_BARS(8760봉=365일)
+# 이상이어야 한다(engine/regime_ml_features.py:_MIN_VOLATILITY_FLOOR 주석과 같은
+# 이유로 모듈 간 동기화가 필요한 상수) — VOLATILITY_PERCENTILE/LIQUIDITY_PERCENTILE/
+# (포화된) LISTING_AGE_BARS는 전부 이 윈도우로 계산되는 롤링 백분위라, 여기서 더 짧은
+# 기간만 불러오면 학습 때와 다른 통계(1년 백분위가 아니라 몇십 일 백분위)가 되어
+# train/serve skew가 생긴다.
+WARMUP_DAYS = 370
 _TIMESTAMP_PATTERN = re.compile(r"regime_ml_(\d{8}T\d{6}Z)")
 
 # 2026-08-29 마켓 확장 이전에 학습된 모든 모델은 정확히 이 3개 마켓으로만
