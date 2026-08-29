@@ -8,32 +8,28 @@ import { formatDateTime, formatTimeframe } from '@/lib/format';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { InfoPopover } from '@/components/ui/info-popover';
 
-const CATEGORY_ORDER: RegimeCategory[] = ['급상승', '완만상승', '횡보', '완만하락', '급하락'];
+const CATEGORY_ORDER: RegimeCategory[] = ['상승', '횡보', '하락'];
 export const TRAINED_MARKETS = [
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP',
   'KRW-SOL', 'KRW-DOGE', 'KRW-LINK', 'KRW-ADA', 'KRW-XLM', 'KRW-TRX',
   'KRW-TRUMP', 'KRW-BCH', 'KRW-BSV', 'KRW-QTUM', 'KRW-ALGO',
 ];
 
-function formatPct(value: number | null): string {
-  return value === null ? '-' : `${(value * 100).toFixed(1)}%`;
+function formatPct(value: number | null | undefined): string {
+  return value === null || value === undefined ? '-' : `${(value * 100).toFixed(1)}%`;
 }
 
-function formatCorrelation(value: number | null): string {
-  return value === null ? '-' : value.toFixed(3);
+function formatScore(value: number | null | undefined): string {
+  return value === null || value === undefined ? '-' : value.toFixed(3);
 }
 
 function categoryVarName(label: RegimeCategory): string {
   switch (label) {
-    case '급상승':
+    case '상승':
       return '--regime-surge-up';
-    case '완만상승':
-      return '--regime-mild-up';
     case '횡보':
       return '--marker-boundary';
-    case '완만하락':
-      return '--regime-mild-down';
-    case '급하락':
+    case '하락':
       return '--regime-surge-down';
   }
 }
@@ -74,6 +70,7 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
   }, [market, timeframe]);
 
   const modelPerformance = data?.model_performance ?? null;
+  const pooled = modelPerformance?.pooled ?? null;
 
   return (
     <div className="rounded-xl border p-6 shadow-sm">
@@ -122,12 +119,11 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
             <h3 className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
               모델 성능
               <InfoPopover>
-                피어슨 상관계수(-1 ~ +1). 시점마다 예측 확률벡터를 카테고리별 기준점수(급상승 +0.35
-                ~ 급하락 -0.35)로 가중평균한 &ldquo;기댓값&rdquo;과, 이후 n봉 동안의 실현수익률을 변동성으로
-                정규화한 값 사이의 선형 상관관계입니다. +1에 가까울수록 예측 방향과 실제 방향이
-                강하게 같이 움직이고, -1에 가까울수록 반대로 움직이며, 0에 가까우면 확률벡터에
-                예측력이 거의 없다는 뜻입니다. 아래 hit-rate(예측 카테고리별 적중률)와 달리, 확률분포
-                전체(강도 포함)를 반영하는 지표입니다.
+                macro F1(0~1)은 3개 클래스(하락/횡보/상승)의 F1-score 평균, weighted
+                kappa(-1~+1)는 우연히 맞을 확률을 보정한 일치도(순서형 가중치 적용,
+                하락↔상승처럼 먼 오분류에 더 큰 벌점)입니다. 둘 다 1(또는 macro
+                F1=1)에 가까울수록 좋고, weighted kappa가 0 이하면 무작위 추측보다도
+                못하다는 뜻입니다.
               </InfoPopover>
             </h3>
             {modelPerformance ? (
@@ -139,7 +135,8 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
                         <TableHead>fold</TableHead>
                         <TableHead className="text-right">train</TableHead>
                         <TableHead className="text-right">test</TableHead>
-                        <TableHead className="text-right">상관계수</TableHead>
+                        <TableHead className="text-right">macro F1</TableHead>
+                        <TableHead className="text-right">weighted kappa</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -151,29 +148,32 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
                           <TableCell>{fold.fold_index}</TableCell>
                           <TableCell className="text-right tabular-nums">{fold.n_train.toLocaleString()}</TableCell>
                           <TableCell className="text-right tabular-nums">{fold.n_test.toLocaleString()}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatCorrelation(fold.correlation)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatScore(fold.macro_f1)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatScore(fold.weighted_kappa)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  풀링 상관계수: {formatCorrelation(modelPerformance.pooled_correlation)}
+                  풀링 macro F1: {formatScore(pooled?.macro_f1)} / weighted kappa: {formatScore(pooled?.weighted_kappa)}
                 </p>
                 <h4 className="mt-2 flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                  카테고리별 hit-rate(전체 fold 합산)
+                  클래스별 precision/recall(전체 fold 풀링)
                   <InfoPopover>
-                    각 카테고리로 예측했을 때 실제로 그 카테고리가 맞았던 비율(적중건수/예측건수,
-                    전체 fold 합산 기준)입니다. 위 확신도·상관계수와 달리 예측이 맞았는지 여부만
-                    보는 단순 지표입니다.
+                    precision은 이 카테고리로 예측했을 때 실제로 맞았던 비율, recall은
+                    실제로 이 카테고리였던 것 중 모델이 맞춘 비율입니다.
                   </InfoPopover>
                 </h4>
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  {CATEGORY_ORDER.map((label) => (
-                    <span key={label}>
-                      {label} {formatPct(modelPerformance.pooled_hit_rate[label])}
-                    </span>
-                  ))}
+                  {CATEGORY_ORDER.map((label) => {
+                    const pr = pooled?.class_precision_recall?.[label];
+                    return (
+                      <span key={label}>
+                        {label} P {formatPct(pr?.precision)} / R {formatPct(pr?.recall)}
+                      </span>
+                    );
+                  })}
                 </div>
               </>
             ) : (
