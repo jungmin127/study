@@ -2888,7 +2888,7 @@ def test_regime_ml_current_prediction_returns_result(monkeypatch, tmp_path):
         captured["args"] = (market, timeframe)
         return {
             "predicted_category": "횡보",
-            "probs": {"급하락": 0.1, "완만하락": 0.2, "횡보": 0.3, "완만상승": 0.25, "급상승": 0.15},
+            "probs": {"하락": 0.3, "횡보": 0.4, "상승": 0.3},
             "model_trained_at": "2026-08-27T05:20:47+00:00",
             "model_fold_index": 5,
         }
