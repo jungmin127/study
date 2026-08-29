@@ -23,9 +23,32 @@ import pytest
 
 import backend.regime_ml_service as regime_ml_service
 from backend.regime_ml_service import find_latest_model, predict_current_ml_regime
+from engine.regime_ml_features import build_feature_matrix
 
 _MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
-_LABELS = ["급하락", "완만하락", "횡보", "완만상승", "급상승"]
+_LABELS = ["하락", "횡보", "상승"]
+
+
+def _make_synthetic_ohlcv_df(n: int = 150) -> pd.DataFrame:
+    """tests/test_regime_ml_features.py의 _make_full_df()와 같은 형태 —
+    build_feature_matrix()가 요구하는 전체 컬럼(OHLCV+외부지표)을 갖춘 합성
+    데이터프레임."""
+    rng = np.random.default_rng(42)
+    dates = pd.date_range("2024-01-01", periods=n, freq="h", tz="UTC")
+    close = 100.0 + np.cumsum(rng.normal(0, 1.0, n))
+    high = close + rng.uniform(0.1, 1.0, n)
+    low = close - rng.uniform(0.1, 1.0, n)
+    volume = rng.uniform(10, 100, n)
+    return pd.DataFrame({
+        "candle_time": dates,
+        "close": close, "high": high, "low": low,
+        "volume": volume, "trade_value": volume * close,
+        "btc_close": close * 1.1, "usdt_close": np.full(n, 1350.0),
+        "binance_close": close / 1350.0,
+        "fear_greed_value": rng.uniform(0, 100, n),
+        "funding_rate_value": rng.uniform(-0.05, 0.05, n),
+        "korea_premium_value": rng.uniform(-2, 2, n),
+    })
 
 
 def _train_and_save_tiny_model(
@@ -367,6 +390,37 @@ def test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row(tmp_path
 
     for label in _LABELS:
         assert result["probs"][label] == pytest.approx(float(sklearn_probs[label]), abs=1e-6)
+
+
+def test_real_feature_matrix_matches_real_saved_model_feature_count(tmp_path):
+    """Fix 1(피처/모델 스키마 불일치로 인한 lightgbm.basic.LightGBMError 미처리
+    크래시)의 회귀 방지 테스트다. 이 파일의 다른 모든 테스트는
+    build_feature_matrix()를 monkeypatch로 대체해 FEATURE_A/FEATURE_B 2개짜리
+    가짜 피처만 쓰기 때문에, engine.regime_ml_features.build_feature_matrix가 실제로
+    만드는 컬럼 수와 저장된 모델이 기대하는 피처 수가 어긋나는 종류의 버그는
+    그 무엇으로도 잡히지 않는다(실제로 61->64 컬럼 변경이 이렇게 새어나가
+    운영에서 크래시가 났다). 여기서는 monkeypatch 없이 진짜
+    build_feature_matrix()로 피처를 만들고, 그걸로 진짜 LightGBM 모델을
+    학습·저장·재로드해서 저장된 부스터가 기대하는 피처 개수가 현재 코드가
+    만드는 피처 개수와 정확히 일치하는지, 그리고 predict()가 실제로 에러 없이
+    도는지를 직접 확인한다."""
+    df = _make_synthetic_ohlcv_df()
+    features_df = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0).dropna()
+    assert len(features_df) > 10
+
+    rng = np.random.default_rng(7)
+    labels = rng.choice(_LABELS, size=len(features_df))
+
+    model = lgb.LGBMClassifier(objective="multiclass", num_leaves=4, min_child_samples=1, random_state=0)
+    model.fit(features_df, labels)
+
+    model_path = tmp_path / "regime_ml_test_model.txt"
+    model.booster_.save_model(str(model_path))
+    booster = lgb.Booster(model_file=str(model_path))
+
+    assert booster.num_feature() == len(features_df.columns)
+    probs = booster.predict(features_df.iloc[[-1]], validate_features=True)
+    assert probs.shape[0] == 1
 
 
 def test_list_trained_models_returns_empty_when_dir_missing(tmp_path, monkeypatch):

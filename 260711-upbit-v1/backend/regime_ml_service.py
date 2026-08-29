@@ -126,6 +126,18 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
     last_row = features_df.iloc[[-1]]
 
     booster = lgb.Booster(model_file=str(model_path))
+    # 배포된 모델이 학습 당시와 다른 피처 개수를 기대하면(예: build_feature_matrix에
+    # 피처를 추가/삭제하는 코드 변경 후 재학습 없이 배포) booster.predict(...,
+    # validate_features=True)가 lightgbm.basic.LightGBMError를 던지는데, 이는
+    # backend/main.py의 ml-current-prediction 엔드포인트가 잡는 3종
+    # (ValueError/FileNotFoundError/RuntimeError) 어디에도 속하지 않아 그대로
+    # 미처리 서버 에러로 샌다 — 여기서 먼저 검사해 RuntimeError로 변환한다.
+    if booster.num_feature() != len(last_row.columns):
+        raise RuntimeError(
+            f"배포된 모델이 학습 당시와 다른 피처 스키마를 기대합니다"
+            f"(모델={booster.num_feature()}개 피처, 현재 코드={len(last_row.columns)}개 피처) — "
+            "재학습 후 새 모델을 배포하세요."
+        )
     probs_row = booster.predict(last_row, validate_features=True)[0]
     classes: list[str] = sidecar["classes"]
     probs = {label: float(p) for label, p in zip(classes, probs_row)}
