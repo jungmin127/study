@@ -250,6 +250,43 @@ def test_run_training_performance_folds_excludes_skipped_folds(tmp_path, monkeyp
     assert [f["fold_index"] for f in sidecar["performance"]["folds"]] == [2, 3]
 
 
+def test_run_training_passes_sample_weight_to_fit(tmp_path, monkeypatch):
+    """model.fit()이 sample_weight 인자를 받는지, 그리고 그 길이가 train 표본
+    수와 같은지 확인한다 — LGBMClassifier.fit을 monkeypatch해 실제 호출 인자를
+    가로챈다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    captured_calls = []
+    original_fit = train_regime_ml.lgb.LGBMClassifier.fit
+
+    def _capturing_fit(self, X, y, sample_weight=None, **kwargs):
+        captured_calls.append({"n_X": len(X), "n_y": len(y), "sample_weight": sample_weight})
+        return original_fit(self, X, y, sample_weight=sample_weight, **kwargs)
+
+    monkeypatch.setattr(train_regime_ml.lgb.LGBMClassifier, "fit", _capturing_fit)
+
+    reports = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+    )
+    assert len(reports) >= 1
+    assert len(captured_calls) == len(reports)
+    for call in captured_calls:
+        assert call["sample_weight"] is not None
+        assert len(call["sample_weight"]) == call["n_X"]
+        assert all(w > 0 for w in call["sample_weight"])
+
+
 def test_run_training_saves_calibration_fields_in_sidecar(tmp_path, monkeypatch):
     seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
     monkeypatch.setattr(

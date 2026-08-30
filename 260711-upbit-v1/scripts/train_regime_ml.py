@@ -30,7 +30,11 @@ from engine.regime_ml_calibration import (
 from engine.regime_ml_constants import TRAINING_MARKETS
 from engine.regime_ml_data import load_market_training_data
 from engine.regime_ml_features import build_feature_matrix
-from engine.regime_ml_labels import CATEGORY_LABELS, compute_triple_barrier_labels
+from engine.regime_ml_labels import (
+    CATEGORY_LABELS,
+    compute_sample_uniqueness_weights,
+    compute_triple_barrier_labels,
+)
 from engine.regime_ml_metrics import compute_classification_metrics
 from engine.regime_ml_splits import generate_walk_forward_folds
 from upbit_data_service import timeframe_duration
@@ -76,12 +80,16 @@ def run_training(
 
     print(f"half_life_bars={half_life_bars:.1f}, n_bars={n_bars}, timeframe={timeframe}, barrier_k={barrier_k}")
 
-    market_frames: dict[str, tuple[pd.Series, pd.DataFrame, pd.Series]] = {}
+    market_frames: dict[str, tuple[pd.Series, pd.DataFrame, pd.Series, pd.Series]] = {}
     for market in markets:
         raw_df = load_market_training_data(market, timeframe, start, end)
         features_df = build_feature_matrix(raw_df, market, half_life_bars)
         labels = compute_triple_barrier_labels(raw_df, half_life_bars, n_bars, barrier_k)
-        market_frames[market] = (raw_df["candle_time"], features_df, labels)
+        # AFML sample uniqueness 가중치 — 겹치는(=동시활성) 라벨이 많은 구간을
+        # LightGBM이 과도하게 반복학습하지 않도록 class_weight="balanced"와는 별개
+        # 축으로 sample_weight에 곱해 함께 쓴다(engine/regime_ml_labels.py 참고).
+        weights = compute_sample_uniqueness_weights(labels, n_bars)
+        market_frames[market] = (raw_df["candle_time"], features_df, labels, weights)
 
     # fold 0은 test_start == start라 train_end(=test_start - embargo)가 항상 start
     # 이전이 되어 훈련 표본이 구조적으로 0이다(아래 min_train_samples 가드로 항상
@@ -99,18 +107,20 @@ def run_training(
     all_proba_down: list[float] = []
 
     for fold in folds:
-        train_X_parts, train_y_parts, test_X_parts, test_y_parts = [], [], [], []
-        for candle_time, features_df, labels in market_frames.values():
+        train_X_parts, train_y_parts, train_w_parts, test_X_parts, test_y_parts = [], [], [], [], []
+        for candle_time, features_df, labels, weights in market_frames.values():
             valid = labels.notna()
             train_mask = valid & (candle_time <= fold.train_end)
             test_mask = valid & (candle_time >= fold.test_start) & (candle_time <= fold.test_end)
             train_X_parts.append(features_df[train_mask])
             train_y_parts.append(labels[train_mask])
+            train_w_parts.append(weights[train_mask])
             test_X_parts.append(features_df[test_mask])
             test_y_parts.append(labels[test_mask])
 
         train_X = pd.concat(train_X_parts)
         train_y = pd.concat(train_y_parts)
+        train_w = pd.concat(train_w_parts)
         test_X = pd.concat(test_X_parts)
         test_y = pd.concat(test_y_parts)
 
@@ -124,7 +134,7 @@ def run_training(
         model = lgb.LGBMClassifier(
             objective="binary", class_weight="balanced", importance_type="gain", random_state=42
         )
-        model.fit(train_X_fit, train_y)
+        model.fit(train_X_fit, train_y, sample_weight=train_w.to_numpy())
         last_model = model
         last_class_order = [str(c) for c in model.classes_]
         last_fold_index = fold.fold_index
