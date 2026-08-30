@@ -115,7 +115,7 @@ export interface TrendSegmentAnalysis {
   ohlcv: OhlcvPoint[];
 }
 
-export type RegimeCategory = '하락' | '횡보' | '상승';
+export type RegimeCategory = '하락' | '하락아님';
 
 export interface MlFoldPerformance {
   fold_index: number;
@@ -123,7 +123,7 @@ export interface MlFoldPerformance {
   n_test: number;
   // 레거시(5단계) 모델 전용
   correlation?: number | null;
-  // 신규(3단계) 모델 전용
+  // 신규(분류) 모델 전용
   macro_f1?: number | null;
   weighted_kappa?: number | null;
 }
@@ -146,7 +146,7 @@ export interface MlModelPerformance {
   // 레거시(5단계) 모델 전용
   pooled_correlation?: number | null;
   pooled_hit_rate?: Record<string, number | null>;
-  // 신규(3단계) 모델 전용
+  // 신규(분류) 모델 전용
   pooled?: MlPooledMetrics;
   per_market?: Record<string, MlPooledMetrics>;
 }

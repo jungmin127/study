@@ -7,9 +7,9 @@ scripts.train_regime_ml.run_training()의 end-to-end 스모크 테스트. 실제
 -> 모델 저장)이 에러 없이 완주하는지만 검증한다. 개별 단계(레이블/분할/피처/로더/
 분류지표)의 세부 동작은 각자의 유닛테스트(test_regime_ml_labels.py 등)가 이미
 검증한다. barrier_k=6.0은 이 합성 데이터(seed 1/2/3, _N=24*40시간)에서 모든 fold의
-train/test에 3클래스가 전부 나타나는 것으로 실측 확인된 값이다(LightGBM multiclass
-학습이 클래스 1개짜리 표본으로 실패하지 않도록 — 실제 운영 상수 BARRIER_K=5.5와는
-별개로, 테스트 전용으로 고른 값).
+train/test에 하락/하락아님 두 클래스가 전부 나타나는 것으로 실측 확인된 값이다
+(LightGBM binary 학습이 클래스 1개짜리 표본으로 실패하지 않도록 — 실제 운영 상수
+BARRIER_K=6.25와는 별개로, 테스트 전용으로 고른 값).
 """
 from __future__ import annotations
 
@@ -187,10 +187,10 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
     assert sidecar["barrier_k"] == _BARRIER_K
     # set()이 아니라 순서를 그대로 비교한다 — LightGBM의 model.classes_는 이
     # 한국어 레이블들을 유니코드 코드포인트 순으로 정렬하는데(실측: sorted(['하락',
-    # '횡보','상승']) == ['상승','하락','횡보']), 이 값이 마침 sorted(CATEGORY_LABELS)와
-    # 같다. set 비교로는 코드가 CATEGORY_LABELS를 원래 순서(하락/횡보/상승) 그대로
-    # 하드코딩하는 회귀가 생겨도 통과해버려, 이 테스트가 잡으려는 클래스 순서
-    # 버그를 놓친다.
+    # '하락아님']) == ['하락', '하락아님']), 이 값이 마침 sorted(CATEGORY_LABELS)와
+    # 같다. 이 순서가 binary objective에서 model.predict()가 반환하는 스칼라가 어느
+    # 클래스의 확률인지(classes[1])를 결정하므로(backend/regime_ml_service.py 참고),
+    # set 비교로는 순서가 어긋나는 회귀를 놓친다.
     assert sidecar["classes"] == sorted(train_regime_ml.CATEGORY_LABELS)
     assert isinstance(sidecar["fold_index"], int)
     assert sidecar["fold_index"] == reports[-1]["fold_index"]

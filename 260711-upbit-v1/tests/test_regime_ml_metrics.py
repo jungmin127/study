@@ -23,7 +23,7 @@ def test_compute_classification_metrics_returns_none_values_for_empty_input():
 
 
 def test_compute_classification_metrics_perfect_predictions_score_maximally():
-    y_true = ["하락", "횡보", "상승", "하락", "횡보", "상승"]
+    y_true = ["하락", "하락아님", "하락", "하락아님", "하락", "하락아님"]
     y_pred = list(y_true)
 
     result = compute_classification_metrics(y_true, y_pred)
@@ -37,21 +37,21 @@ def test_compute_classification_metrics_perfect_predictions_score_maximally():
 
 
 def test_compute_classification_metrics_confusion_matrix_is_row_predicted_col_actual():
-    # 상승을 2번 예측했는데 실제로는 1번만 맞음(1번은 실제 횡보) -> precision(상승)=0.5
-    y_true = ["상승", "횡보", "하락"]
-    y_pred = ["상승", "상승", "하락"]
+    # 하락아님을 2번 예측했는데 실제로는 1번만 맞음(1번은 실제 하락) -> precision(하락아님)=0.5
+    y_true = ["하락아님", "하락", "하락"]
+    y_pred = ["하락아님", "하락아님", "하락"]
 
     result = compute_classification_metrics(y_true, y_pred)
 
-    assert result["confusion"]["상승"] == {"하락": 0, "횡보": 1, "상승": 1}
-    assert result["class_precision_recall"]["상승"]["precision"] == 0.5
-    assert result["class_precision_recall"]["상승"]["recall"] == 1.0
+    assert result["confusion"]["하락아님"] == {"하락": 1, "하락아님": 1}
+    assert result["class_precision_recall"]["하락아님"]["precision"] == 0.5
+    assert result["class_precision_recall"]["하락아님"]["recall"] == 1.0
 
 
 def test_compute_classification_metrics_worst_case_kappa_and_f1_are_low():
-    # 실제와 정반대로만 예측(하락<->상승 뒤바꿈) -> 우연보다도 못한 성능
-    y_true = ["하락", "하락", "상승", "상승"]
-    y_pred = ["상승", "상승", "하락", "하락"]
+    # 실제와 정반대로만 예측(하락<->하락아님 뒤바꿈) -> 우연보다도 못한 성능
+    y_true = ["하락", "하락", "하락아님", "하락아님"]
+    y_pred = ["하락아님", "하락아님", "하락", "하락"]
 
     result = compute_classification_metrics(y_true, y_pred)
 

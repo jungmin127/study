@@ -2,8 +2,8 @@
 tests/test_regime_ml_labels.py
 
 engine.regime_ml_labels.compute_triple_barrier_labels()를 검증한다. Triple
-Barrier Method — 상단/하단 경계 중 어느 쪽이 먼저 터치되는지, 둘 다 안
-터치되면 만기(횡보), 미래 데이터가 부족하면 NaN인지 확인한다.
+Barrier Method — 하단 경계가 먼저 터치되면 "하락", 상단이 먼저 터치되거나
+둘 다 안 터치되면(횡보) "하락아님", 미래 데이터가 부족하면 NaN인지 확인한다.
 """
 from __future__ import annotations
 
@@ -25,12 +25,12 @@ def _make_close_df(closes: list[float]) -> pd.DataFrame:
     return pd.DataFrame({"close": closes})
 
 
-def test_compute_triple_barrier_labels_assigns_up_when_upper_touched_first():
+def test_compute_triple_barrier_labels_assigns_not_down_when_upper_touched_first():
     future_up = [_BASE * (1.05**i) for i in range(1, 11)]  # 5%/bar 복리 급등
     closes = _WARMUP + future_up + [future_up[-1]] * 5
     labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
 
-    assert labels.iloc[49] == "상승"
+    assert labels.iloc[49] == "하락아님"
 
 
 def test_compute_triple_barrier_labels_assigns_down_when_lower_touched_first():
@@ -41,12 +41,12 @@ def test_compute_triple_barrier_labels_assigns_down_when_lower_touched_first():
     assert labels.iloc[49] == "하락"
 
 
-def test_compute_triple_barrier_labels_assigns_sideways_when_neither_touched():
+def test_compute_triple_barrier_labels_assigns_not_down_when_neither_touched():
     future_flat = [_BASE] * 10  # 완전 횡보(수익률 0) -> 어떤 임계값도 못 넘음
     closes = _WARMUP + future_flat + [_BASE] * 5
     labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
 
-    assert labels.iloc[49] == "횡보"
+    assert labels.iloc[49] == "하락아님"
 
 
 def test_compute_triple_barrier_labels_picks_whichever_barrier_hits_first():
@@ -76,5 +76,5 @@ def test_compute_triple_barrier_labels_preserves_length_and_index():
     assert list(labels.index) == list(df.index)
 
 
-def test_category_labels_has_three_ordered_classes():
-    assert CATEGORY_LABELS == ["하락", "횡보", "상승"]
+def test_category_labels_has_two_ordered_classes():
+    assert CATEGORY_LABELS == ["하락", "하락아님"]

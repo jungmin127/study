@@ -1,10 +1,12 @@
 """
 scripts/train_regime_ml.py
 
-장세 판별기 ML 학습+워크포워드 검증 파이프라인. Triple Barrier Method(하락/횡보/상승
-3단계)로 레이블링하고, fold별/전체 풀링/마켓별 분류지표(macro F1/weighted kappa/
-confusion matrix/클래스별 precision·recall)를 콘솔에 리포트한다. 이전(5단계+상관계수)
-버전은 2026-08-29 문제 재정의에서 교체됐다. 설계 문서:
+장세 판별기 ML 학습+워크포워드 검증 파이프라인. Triple Barrier Method(하락 vs
+하락아님 이진분류)로 레이블링하고, fold별/전체 풀링/마켓별 분류지표(macro F1/
+weighted kappa/confusion matrix/클래스별 precision·recall)를 콘솔에 리포트한다.
+이전(5단계+상관계수) 버전은 2026-08-29 문제 재정의에서 3단계로, 3단계는
+2026-08-30 실측(pooled weighted kappa 0.072→0.0914, 14마켓 기준)으로 이진분류로
+교체됐다. 설계 문서:
 docs/superpowers/specs/2026-08-29-regime-ml-problem-redefinition-design.md
 
 Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/train_regime_ml.py
@@ -54,8 +56,8 @@ def run_training(
     model_output_dir: Path,
 ) -> list[dict]:
     """마켓별로 데이터를 한 번씩만 로드/피처화(fold마다 반복하지 않음)하고, 워크포워드
-    fold 루프를 돌며 LightGBM을 학습·평가한다. Triple Barrier 레이블(하락/횡보/상승)로
-    학습하고, fold별 + 전체 풀링 + 마켓별 분류지표(macro F1/weighted kappa/confusion/
+    fold 루프를 돌며 LightGBM을 학습·평가한다. Triple Barrier 레이블(하락 vs 하락아님
+    이진분류)로 학습하고, fold별 + 전체 풀링 + 마켓별 분류지표(macro F1/weighted kappa/confusion/
     precision·recall)를 계산한다. fold별 리포트 리스트를 반환하고, 마지막으로 성공한
     fold의 모델을 model_output_dir에 저장한다. 표본이 min_train_samples 미만이거나
     테스트 표본이 없는 fold는 건너뛴다."""
@@ -110,7 +112,7 @@ def run_training(
         test_X_fit = test_X.assign(market=test_X["market"].astype("category"))
 
         model = lgb.LGBMClassifier(
-            objective="multiclass", class_weight="balanced", importance_type="gain", random_state=42
+            objective="binary", class_weight="balanced", importance_type="gain", random_state=42
         )
         model.fit(train_X_fit, train_y)
         last_model = model

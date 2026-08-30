@@ -1,7 +1,7 @@
 """
 engine/regime_ml_metrics.py
 
-3단계 장세 분류(CATEGORY_LABELS)의 성능 지표를 계산한다. sklearn 표준 함수를 얇게
+이진 장세 분류(CATEGORY_LABELS)의 성능 지표를 계산한다. sklearn 표준 함수를 얇게
 감싸 팀 관례 스키마(dict, confusion은 행=예측/열=실제)로 변환한다 —
 scripts/train_regime_ml.py가 fold별/마켓별로 반복 호출한다. 이전(5단계 시절)
 피어슨 상관계수 기반 평가는 확률벡터의 기댓값과 연속값(실현수익률)을 비교하는

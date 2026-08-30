@@ -13,5 +13,6 @@ from __future__ import annotations
 TRAINING_MARKETS = [
     "KRW-BTC", "KRW-ETH", "KRW-XRP",
     "KRW-SOL", "KRW-DOGE", "KRW-LINK", "KRW-ADA", "KRW-XLM", "KRW-TRX",
-    "KRW-TRUMP", "KRW-BCH", "KRW-BSV", "KRW-QTUM", "KRW-ALGO",
+    "KRW-BCH", "KRW-BSV", "KRW-QTUM", "KRW-ALGO",
+    "KRW-SHIB", "KRW-SUI", "KRW-SEI", "KRW-NEAR", "KRW-ETC", "KRW-STX", "KRW-HBAR",
 ]

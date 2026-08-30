@@ -26,7 +26,7 @@ from backend.regime_ml_service import find_latest_model, predict_current_ml_regi
 from engine.regime_ml_features import build_feature_matrix
 
 _MARKETS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
-_LABELS = ["하락", "횡보", "상승"]
+_LABELS = ["하락", "하락아님"]
 
 
 def _make_synthetic_ohlcv_df(n: int = 150) -> pd.DataFrame:
@@ -70,7 +70,7 @@ def _train_and_save_tiny_model(
     df["market"] = df["market"].astype("category")
     labels = pd.Series(rng.choice(_LABELS, size=len(df)))
 
-    model = lgb.LGBMClassifier(objective="multiclass", num_leaves=4, min_child_samples=1, random_state=0)
+    model = lgb.LGBMClassifier(objective="binary", num_leaves=4, min_child_samples=1, random_state=0)
     model.fit(df, labels)
 
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -129,16 +129,16 @@ def test_predict_current_ml_regime_rejects_non_hourly_timeframe():
 
 def test_predict_current_ml_regime_rejects_untrained_market():
     with pytest.raises(ValueError, match="만 학습되어"):
-        predict_current_ml_regime("KRW-ETC", "minutes60")
+        predict_current_ml_regime("KRW-AVAX", "minutes60")
 
 
 def test_predict_current_ml_regime_accepts_newly_expanded_market(tmp_path, monkeypatch):
-    """KRW-SOL은 이번에 TRAINING_MARKETS에 새로 추가되는 마켓이다 — "학습 안 된
+    """KRW-SHIB는 이번에 TRAINING_MARKETS에 새로 추가되는 마켓이다 — "학습 안 된
     마켓" ValueError가 아니라, 모델 파일이 없다는 FileNotFoundError가 나야 한다
     (마켓 검증은 통과했다는 뜻)."""
     monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
     with pytest.raises(FileNotFoundError, match="학습된 ML 모델이 없습니다"):
-        predict_current_ml_regime("KRW-SOL", "minutes60")
+        predict_current_ml_regime("KRW-SHIB", "minutes60")
 
 
 def test_predict_current_ml_regime_rejects_market_not_in_serving_model(tmp_path, monkeypatch):
@@ -411,7 +411,7 @@ def test_real_feature_matrix_matches_real_saved_model_feature_count(tmp_path):
     rng = np.random.default_rng(7)
     labels = rng.choice(_LABELS, size=len(features_df))
 
-    model = lgb.LGBMClassifier(objective="multiclass", num_leaves=4, min_child_samples=1, random_state=0)
+    model = lgb.LGBMClassifier(objective="binary", num_leaves=4, min_child_samples=1, random_state=0)
     model.fit(features_df, labels)
 
     model_path = tmp_path / "regime_ml_test_model.txt"

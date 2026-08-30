@@ -8,11 +8,12 @@ import { formatDateTime, formatTimeframe } from '@/lib/format';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { InfoPopover } from '@/components/ui/info-popover';
 
-const CATEGORY_ORDER: RegimeCategory[] = ['상승', '횡보', '하락'];
+const CATEGORY_ORDER: RegimeCategory[] = ['하락', '하락아님'];
 export const TRAINED_MARKETS = [
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP',
   'KRW-SOL', 'KRW-DOGE', 'KRW-LINK', 'KRW-ADA', 'KRW-XLM', 'KRW-TRX',
-  'KRW-TRUMP', 'KRW-BCH', 'KRW-BSV', 'KRW-QTUM', 'KRW-ALGO',
+  'KRW-BCH', 'KRW-BSV', 'KRW-QTUM', 'KRW-ALGO',
+  'KRW-SHIB', 'KRW-SUI', 'KRW-SEI', 'KRW-NEAR', 'KRW-ETC', 'KRW-STX', 'KRW-HBAR',
 ];
 
 function formatPct(value: number | null | undefined): string {
@@ -25,12 +26,10 @@ function formatScore(value: number | null | undefined): string {
 
 function categoryVarName(label: RegimeCategory): string {
   switch (label) {
-    case '상승':
-      return '--regime-surge-up';
-    case '횡보':
-      return '--marker-boundary';
     case '하락':
       return '--regime-surge-down';
+    case '하락아님':
+      return '--regime-surge-up';
     default:
       return '--marker-boundary';
   }
@@ -121,11 +120,10 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
             <h3 className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
               모델 성능
               <InfoPopover>
-                macro F1(0~1)은 3개 클래스(하락/횡보/상승)의 F1-score 평균, weighted
-                kappa(-1~+1)는 우연히 맞을 확률을 보정한 일치도(순서형 가중치 적용,
-                하락↔상승처럼 먼 오분류에 더 큰 벌점)입니다. 둘 다 1(또는 macro
-                F1=1)에 가까울수록 좋고, weighted kappa가 0 이하면 무작위 추측보다도
-                못하다는 뜻입니다.
+                macro F1(0~1)은 하락/하락아님 두 클래스의 F1-score 평균, weighted
+                kappa(-1~+1)는 우연히 맞을 확률을 보정한 일치도입니다. 둘 다 1(또는
+                macro F1=1)에 가까울수록 좋고, weighted kappa가 0 이하면 무작위
+                추측보다도 못하다는 뜻입니다.
               </InfoPopover>
             </h3>
             {modelPerformance ? (

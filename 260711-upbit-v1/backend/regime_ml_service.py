@@ -144,9 +144,17 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
             f"(모델={booster.num_feature()}개 피처, 현재 코드={len(last_row.columns)}개 피처) — "
             "재학습 후 새 모델을 배포하세요."
         )
-    probs_row = booster.predict(last_row, validate_features=True)[0]
+    raw_prediction = booster.predict(last_row, validate_features=True)[0]
     classes: list[str] = sidecar["classes"]
-    probs = {label: float(p) for label, p in zip(classes, probs_row)}
+    if len(classes) == 2:
+        # LightGBM의 binary objective는 booster.predict()가 클래스별 벡터가 아니라
+        # classes[1](model.classes_의 두 번째, 정렬순 두 번째 값)에 대한 확률 스칼라
+        # 하나만 반환한다(multiclass처럼 행마다 길이-n_classes 벡터가 아님) — 실측
+        # 확인: sklearn LGBMClassifier.predict_proba()의 두 번째 컬럼과 정확히 일치.
+        positive_prob = float(raw_prediction)
+        probs = {classes[0]: 1.0 - positive_prob, classes[1]: positive_prob}
+    else:
+        probs = {label: float(p) for label, p in zip(classes, raw_prediction)}
     predicted_category = max(probs, key=probs.get)
 
     return {
