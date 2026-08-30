@@ -8,6 +8,7 @@ Barrier Method — 하단 경계가 먼저 터치되면 "하락", 상단이 먼�
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from engine.regime_ml_labels import CATEGORY_LABELS, compute_triple_barrier_labels
 
@@ -112,3 +113,55 @@ def test_compute_triple_barrier_labels_vol_t_excludes_current_bar_return():
     labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
 
     assert labels.iloc[crash_index] == "하락"
+
+
+def test_compute_sample_uniqueness_weights_isolated_label_gets_weight_one():
+    """다른 라벨과 활성구간이 전혀 안 겹치는 라벨은 c_t가 항상 1이라
+    uniqueness weight도 정확히 1.0이어야 한다."""
+    from engine.regime_ml_labels import compute_sample_uniqueness_weights
+
+    # 라벨 2개, n_bars=2라 활성구간은 [0,2]와 [10,12] — 전혀 안 겹침.
+    labels = pd.Series([float("nan")] * 13)
+    labels.iloc[0] = "하락"
+    labels.iloc[10] = "하락아님"
+
+    weights = compute_sample_uniqueness_weights(labels, n_bars=2)
+
+    assert weights.iloc[0] == pytest.approx(1.0)
+    assert weights.iloc[10] == pytest.approx(1.0)
+
+
+def test_compute_sample_uniqueness_weights_fully_overlapping_labels_get_weight_half():
+    """두 라벨이 활성구간을 완전히 공유하면(t=0, t=1, n_bars=1 -> 둘 다 [t,t+1]이
+    [0,1]과 [1,2]로 한 시점(t=1)을 공유) 그 겹치는 시점에서는 c_t=2가 되어
+    각 라벨의 평균 uniqueness가 1보다 작아져야 한다."""
+    from engine.regime_ml_labels import compute_sample_uniqueness_weights
+
+    labels = pd.Series(["하락", "하락아님", float("nan")])  # n_bars=1
+
+    weights = compute_sample_uniqueness_weights(labels, n_bars=1)
+
+    # 라벨0 활성구간=[0,1], 라벨1 활성구간=[1,2] -> t=1에서 c_t=2, 나머지는 c_t=1.
+    # 라벨0 weight = mean(1/c_0, 1/c_1) = mean(1/1, 1/2) = 0.75
+    assert weights.iloc[0] == pytest.approx(0.75)
+
+
+def test_compute_sample_uniqueness_weights_nan_labels_stay_nan_and_are_excluded_from_concurrency():
+    from engine.regime_ml_labels import compute_sample_uniqueness_weights
+
+    labels = pd.Series(["하락", float("nan"), "하락아님"])
+
+    weights = compute_sample_uniqueness_weights(labels, n_bars=1)
+
+    assert pd.isna(weights.iloc[1])
+    assert weights.iloc[0] == pytest.approx(1.0)  # 이웃이 NaN이라 안 겹침
+
+
+def test_compute_sample_uniqueness_weights_preserves_length_and_index():
+    from engine.regime_ml_labels import compute_sample_uniqueness_weights
+
+    labels = pd.Series(["하락"] * 5, index=range(100, 105))
+    weights = compute_sample_uniqueness_weights(labels, n_bars=2)
+
+    assert len(weights) == len(labels)
+    assert list(weights.index) == list(labels.index)

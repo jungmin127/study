@@ -61,3 +61,24 @@ def compute_triple_barrier_labels(
         else:
             labels[t] = "하락아님"
     return pd.Series(labels, index=df.index)
+
+
+def compute_sample_uniqueness_weights(labels: pd.Series, n_bars: int) -> pd.Series:
+    """AFML(López de Prado)의 sample uniqueness 가중치. 라벨 i의 활성구간은
+    [i, i+n_bars](Triple Barrier가 최대 n_bars 앞을 내다보므로)다. 각 시점 t에서
+    동시에 활성인 라벨 개수 c_t를 구한 뒤, 라벨 i의 가중치 = i의 활성구간에 속한
+    모든 t에 대한 1/c_t의 평균이다 — 겹치는 라벨이 많을수록(=서로 독립적이지
+    않을수록) 가중치가 작아져 LightGBM이 그 구간을 과도하게 반복학습하지 않게
+    한다. class_weight="balanced"와는 별개 축이라 sample_weight로 곱해서 함께
+    쓴다(scripts/train_regime_ml.py 참고). NaN 라벨은 애초에 학습에 안 쓰이므로
+    동시활성 카운트에도 안 넣고, 반환값도 NaN으로 남긴다."""
+    active = labels.notna().astype(float)
+    # c_t = t를 활성구간에 포함하는 라벨 개수 = sum(active[i] for i in [t-n_bars, t])
+    # (라벨 i의 구간이 [i, i+n_bars]이므로 t를 포함하려면 t-n_bars <= i <= t).
+    concurrency = active.rolling(window=n_bars + 1, min_periods=1).sum()
+    with np.errstate(divide="ignore"):
+        inverse_concurrency = 1.0 / concurrency
+    # 라벨 i의 가중치 = t in [i, i+n_bars] 구간에 대한 1/c_t의 평균(전방 롤링) ->
+    # 역순으로 뒤집어 trailing rolling mean을 적용한 뒤 다시 뒤집는 표준 트릭.
+    forward_mean = inverse_concurrency[::-1].rolling(window=n_bars + 1, min_periods=1).mean()[::-1]
+    return forward_mean.where(labels.notna())
