@@ -57,8 +57,13 @@ export default function RegimeDashboard() {
           {marketsError && <p className="mt-1 text-xs text-destructive">{marketsError}</p>}
         </div>
       </div>
-      {market && <RegimeMlCurrentPrediction market={market} timeframe={TIMEFRAME} />}
-      <RegimeMlAdminPanel />
+      {market && (
+        <RegimeMlCurrentPrediction
+          market={market}
+          timeframe={TIMEFRAME}
+          rightPanel={<RegimeMlAdminPanel compact />}
+        />
+      )}
     </div>
   );
 }

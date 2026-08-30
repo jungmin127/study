@@ -22,7 +22,7 @@ import {
   getRegimeMlTrainJobs,
   startRegimeMlTrainJob,
 } from '@/lib/api/eda';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatDateTimeShort } from '@/lib/format';
 import { useVisiblePolling } from '@/lib/hooks/useVisiblePolling';
 import type { RegimeMlJob, RegimeMlModelSummary } from '@/lib/types/eda';
 
@@ -32,7 +32,12 @@ function formatScore(value: number | null | undefined): string {
   return value === null || value === undefined ? '-' : value.toFixed(3);
 }
 
-export default function RegimeMlAdminPanel() {
+interface RegimeMlAdminPanelProps {
+  /** ML현재예측 카드 우측 칸에 끼워 넣을 때 — 카드 테두리/여백 없이 좁은 폭에 맞춘다. */
+  compact?: boolean;
+}
+
+export default function RegimeMlAdminPanel({ compact = false }: RegimeMlAdminPanelProps) {
   const [enabled, setEnabled] = useState(false);
   const [jobs, setJobs] = useState<RegimeMlJob[]>([]);
   const [models, setModels] = useState<RegimeMlModelSummary[]>([]);
@@ -110,20 +115,79 @@ export default function RegimeMlAdminPanel() {
 
   if (!enabled) return null;
 
+  const heading = compact ? 'ML 재학습' : 'ML 재학습 관리자 패널';
+
   return (
-    <div className="rounded-xl border p-6 shadow-sm">
-      <h2 className="mb-3 text-sm font-semibold">ML 재학습 관리자 패널</h2>
-      <div className="mb-4 flex items-center gap-3">
-        <Button type="button" size="sm" onClick={handleStart} disabled={runningJob !== null}>
-          {runningJob ? '학습 중...' : '학습 시작'}
-        </Button>
-        {startError && <p className="text-xs text-destructive">{startError}</p>}
-        {latestJob !== null && latestJob.status === 'failed' && (
-          <p className="text-xs text-destructive">마지막 학습 실패: {latestJob.error_message}</p>
+    <div className={compact ? '' : 'rounded-xl border p-6 shadow-sm'}>
+      <div className={compact ? 'mb-1.5 flex items-center justify-between gap-2' : 'mb-3'}>
+        <h2 className={compact ? 'text-[11px] font-medium text-muted-foreground' : 'text-sm font-semibold'}>
+          {heading}
+        </h2>
+        {compact && (
+          <Button type="button" size="sm" className="h-6 px-2 text-[11px]" onClick={handleStart} disabled={runningJob !== null}>
+            {runningJob ? '학습 중...' : '학습 시작'}
+          </Button>
         )}
       </div>
+      {!compact && (
+        <div className="mb-4 flex items-center gap-3">
+          <Button type="button" size="sm" onClick={handleStart} disabled={runningJob !== null}>
+            {runningJob ? '학습 중...' : '학습 시작'}
+          </Button>
+          {startError && <p className="text-xs text-destructive">{startError}</p>}
+          {latestJob !== null && latestJob.status === 'failed' && (
+            <p className="text-xs text-destructive">마지막 학습 실패: {latestJob.error_message}</p>
+          )}
+        </div>
+      )}
+      {compact && (startError || (latestJob !== null && latestJob.status === 'failed')) && (
+        <p className="mb-1.5 text-[10px] text-destructive">
+          {startError ?? `마지막 학습 실패: ${latestJob?.error_message}`}
+        </p>
+      )}
+
       {models.length === 0 ? (
-        <p className="text-sm text-muted-foreground">학습된 모델이 없습니다.</p>
+        <p className={compact ? 'text-[11px] text-muted-foreground' : 'text-sm text-muted-foreground'}>
+          학습된 모델이 없습니다.
+        </p>
+      ) : compact ? (
+        <div className="max-h-[168px] overflow-y-auto overflow-x-hidden rounded-md border">
+          <table className="w-full text-[11px]">
+            <thead className="sticky top-0 bg-card">
+              <tr className="border-b text-muted-foreground">
+                <th className="px-2 py-1 text-left font-medium">학습시각</th>
+                <th className="px-2 py-1 text-right font-medium">F1</th>
+                <th className="px-2 py-1 text-right font-medium">κ</th>
+                <th className="px-2 py-1 text-right font-medium">배포</th>
+              </tr>
+            </thead>
+            <tbody>
+              {models.map((model) => (
+                <tr key={model.model_timestamp} className="border-b last:border-0">
+                  <td className="px-2 py-1 whitespace-nowrap">
+                    {formatDateTimeShort(model.trained_at)}
+                    {model.is_deployed && (
+                      <Badge variant="default" className="ml-1.5 h-4 px-1 text-[9px]">
+                        배포됨
+                      </Badge>
+                    )}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">{formatScore(model.performance?.pooled?.macro_f1)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{formatScore(model.performance?.pooled?.weighted_kappa)}</td>
+                  <td className="px-2 py-1 text-right">
+                    <button
+                      type="button"
+                      className="text-[11px] text-primary underline-offset-2 hover:underline"
+                      onClick={() => setDeployTarget(model.model_timestamp)}
+                    >
+                      배포
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="overflow-hidden rounded-md border">
           <Table>

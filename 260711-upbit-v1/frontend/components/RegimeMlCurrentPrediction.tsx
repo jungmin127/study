@@ -39,9 +39,11 @@ function categoryVarName(label: RegimeCategory): string {
 interface RegimeMlCurrentPredictionProps {
   market: string;
   timeframe: string;
+  /** fold별 상세 성능 옆(우측 칸)에 끼워 넣을 내용 — 재학습 관리자 패널용. */
+  rightPanel?: React.ReactNode;
 }
 
-export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeMlCurrentPredictionProps) {
+export default function RegimeMlCurrentPrediction({ market, timeframe, rightPanel }: RegimeMlCurrentPredictionProps) {
   const [data, setData] = useState<MlCurrentPrediction | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,15 +115,17 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
             </span>
           </div>
 
-          <div className="flex h-3.5 overflow-hidden rounded-full bg-muted">
-            <div style={{ width: `${downProb * 100}%`, backgroundColor: `var(${categoryVarName('하락')})` }} />
-            <div style={{ width: `${notDownProb * 100}%`, backgroundColor: `var(${categoryVarName('하락아님')})` }} />
-          </div>
-          <div className="mt-1.5 flex justify-between text-xs">
-            <span className="font-semibold" style={{ color: `var(${categoryVarName('하락')})` }}>
-              하락 {(downProb * 100).toFixed(1)}%
-            </span>
-            <span className="text-muted-foreground">하락아님 {(notDownProb * 100).toFixed(1)}%</span>
+          <div className="w-1/2">
+            <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
+              <div style={{ width: `${downProb * 100}%`, backgroundColor: `var(${categoryVarName('하락')})` }} />
+              <div style={{ width: `${notDownProb * 100}%`, backgroundColor: `var(${categoryVarName('하락아님')})` }} />
+            </div>
+            <div className="mt-1 flex justify-between text-[11px]">
+              <span className="font-semibold" style={{ color: `var(${categoryVarName('하락')})` }}>
+                하락 {(downProb * 100).toFixed(1)}%
+              </span>
+              <span className="text-muted-foreground">하락아님 {(notDownProb * 100).toFixed(1)}%</span>
+            </div>
           </div>
 
           <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
@@ -171,7 +175,7 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
             )}
           </div>
 
-          {/* 상세: fold별 성능(좌) / 모델 정보(우) */}
+          {/* 상세: fold별 성능+모델정보(좌) / ML 재학습 관리자 패널(우) */}
           {modelPerformance && (
             <div className="mt-4 grid grid-cols-2 gap-4 border-t pt-3">
               <div>
@@ -211,32 +215,12 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
                   fold 5(가장 최근까지 학습)의 모델이 실제 서빙에 쓰입니다 — 표는 다른
                   시기에도 성능이 안정적인지 보여주는 참고용입니다.
                 </p>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                  학습시각 {formatDateTime(data.model_trained_at)} · 사용 fold {data.model_fold_index} ·
+                  기준 봉 {formatDateTime(data.bar_time)} · 학습 마켓 {TRAINED_MARKETS.length}개
+                </p>
               </div>
-              <div>
-                <h4 className="mb-1.5 text-[11px] font-medium text-muted-foreground">모델 정보</h4>
-                <div className="overflow-hidden rounded-md border">
-                  <table className="w-full text-[11px]">
-                    <tbody>
-                      <tr className="border-b">
-                        <td className="px-2 py-1.5 text-muted-foreground">학습시각</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{formatDateTime(data.model_trained_at)}</td>
-                      </tr>
-                      <tr className="border-b">
-                        <td className="px-2 py-1.5 text-muted-foreground">사용 fold</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{data.model_fold_index}</td>
-                      </tr>
-                      <tr className="border-b">
-                        <td className="px-2 py-1.5 text-muted-foreground">기준 봉 시각</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{formatDateTime(data.bar_time)}</td>
-                      </tr>
-                      <tr>
-                        <td className="px-2 py-1.5 text-muted-foreground">학습 마켓 수</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{TRAINED_MARKETS.length}개</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <div>{rightPanel}</div>
             </div>
           )}
         </div>
