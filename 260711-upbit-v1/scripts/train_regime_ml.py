@@ -28,6 +28,7 @@ from engine.regime_ml_calibration import (
     select_threshold_for_target_precision,
 )
 from engine.regime_ml_constants import TRAINING_MARKETS
+from engine.regime_ml_cross_sectional import compute_cross_sectional_features
 from engine.regime_ml_data import load_market_training_data
 from engine.regime_ml_features import build_feature_matrix
 from engine.regime_ml_labels import (
@@ -80,10 +81,30 @@ def run_training(
 
     print(f"half_life_bars={half_life_bars:.1f}, n_bars={n_bars}, timeframe={timeframe}, barrier_k={barrier_k}")
 
+    # cross-sectional(베타중립) 피처는 마켓 하나만으로 계산할 수 없다 — 모든 마켓의
+    # 수익률을 먼저 다 모아야 "같은 시각 다른 마켓 대비 지금 이 코인이 어떤지"를 구할
+    # 수 있으므로, raw 데이터 로드를 피처화보다 먼저 전체 마켓에 대해 끝낸다.
+    raw_frames: dict[str, pd.DataFrame] = {
+        market: load_market_training_data(market, timeframe, start, end) for market in markets
+    }
+    market_returns = {
+        market: raw_df.set_index("candle_time")["close"].pct_change(fill_method=None)
+        for market, raw_df in raw_frames.items()
+    }
+    cross_sectional = compute_cross_sectional_features(market_returns, btc_market="KRW-BTC")
+
     market_frames: dict[str, tuple[pd.Series, pd.DataFrame, pd.Series, pd.Series]] = {}
-    for market in markets:
-        raw_df = load_market_training_data(market, timeframe, start, end)
+    for market, raw_df in raw_frames.items():
         features_df = build_feature_matrix(raw_df, market, half_life_bars)
+        # cross_sectional[market]은 candle_time(전체 마켓 합집합)을 인덱스로 갖는다.
+        # 이 마켓 고유의 candle_time 순서로 reindex하면 raw_df/features_df와 정확히
+        # 같은 행 수·같은 순서가 보장된다(reindex는 대상 인덱스 길이만큼 결과를
+        # 만들며, 없는 시점은 NaN으로 채운다 — 행이 늘거나 줄지 않는다). 두 프레임
+        # 모두 위치 기반(0..n-1)으로 reset한 뒤 axis=1 concat해 위치로 정렬하고,
+        # 마지막에 원래 인덱스(raw_df.index == features_df.index)를 복원한다.
+        cs_df = cross_sectional[market].reindex(raw_df["candle_time"]).reset_index(drop=True)
+        features_df = pd.concat([features_df.reset_index(drop=True), cs_df], axis=1)
+        features_df.index = raw_df.index
         labels = compute_triple_barrier_labels(raw_df, half_life_bars, n_bars, barrier_k)
         # AFML sample uniqueness 가중치 — 겹치는(=동시활성) 라벨이 많은 구간을
         # LightGBM이 과도하게 반복학습하지 않도록 class_weight="balanced"와는 별개

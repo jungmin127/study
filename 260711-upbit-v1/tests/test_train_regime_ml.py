@@ -321,3 +321,37 @@ def test_run_training_saves_calibration_fields_in_sidecar(tmp_path, monkeypatch)
     assert len(sidecar["threshold_table"]) > 0
     for row in sidecar["threshold_table"]:
         assert set(row.keys()) == {"threshold", "precision", "recall", "n_predicted_down"}
+
+
+def test_run_training_features_include_cross_sectional_columns(tmp_path, monkeypatch):
+    """model.fit()에 실제로 넘어가는 학습 피처에 BETA_NEUTRAL_RETURN/
+    CROSS_SECTIONAL_RANK가 포함되는지 확인한다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    captured_columns = []
+    original_fit = train_regime_ml.lgb.LGBMClassifier.fit
+
+    def _capturing_fit(self, X, y, **kwargs):
+        captured_columns.append(list(X.columns))
+        return original_fit(self, X, y, **kwargs)
+
+    monkeypatch.setattr(train_regime_ml.lgb.LGBMClassifier, "fit", _capturing_fit)
+
+    reports = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+    )
+    assert len(reports) >= 1
+    for columns in captured_columns:
+        assert "BETA_NEUTRAL_RETURN" in columns
+        assert "CROSS_SECTIONAL_RANK" in columns
