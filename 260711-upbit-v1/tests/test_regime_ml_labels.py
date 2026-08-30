@@ -121,7 +121,7 @@ def test_compute_sample_uniqueness_weights_isolated_label_gets_weight_one():
     from engine.regime_ml_labels import compute_sample_uniqueness_weights
 
     # 라벨 2개, n_bars=2라 활성구간은 [0,2]와 [10,12] — 전혀 안 겹침.
-    labels = pd.Series([float("nan")] * 13)
+    labels = pd.Series([float("nan")] * 13, dtype=object)
     labels.iloc[0] = "하락"
     labels.iloc[10] = "하락아님"
 
