@@ -33,9 +33,13 @@ TRAIN_START = datetime(2024, 1, 1, tzinfo=timezone.utc)
 TRAIN_END = datetime.now(timezone.utc)
 N_FOLDS = 5
 MIN_TRAIN_SAMPLES = 500
-# scripts/select_barrier_k.py로 2026-08-29 실측(14마켓, 2024-01-01~현재) 결정.
-# 하락 35.3% / 횡보 31.7% / 상승 33.0% (최대편차 2.0%p, 그리드 중 최선).
-BARRIER_K = 5.5
+# scripts/select_barrier_k.py로 2026-08-29 실측(14마켓, 2024-01-01~현재) 최초 결정한
+# 값은 5.5(클래스 분포 균형 기준 — 하락 35.3%/횡보 31.7%/상승 33.0%, 최대편차 2.0%p).
+# 2026-08-30 실제 walk-forward 성능(kappa) 기준 재탐색(4.0/4.75/5.5/6.25/7.0 grid)에서
+# 6.25가 pooled weighted kappa 0.0603→0.0658로 더 좋아 채택(분포 균형은 성능과 별개
+# 기준이었다는 뜻). FEAR_GREED_CMC 제거(engine/regime_ml_features.py 참고)와 조합하면
+# 0.0603→0.0724.
+BARRIER_K = 6.25
 MODEL_OUTPUT_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
 
 

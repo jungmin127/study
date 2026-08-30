@@ -4,13 +4,31 @@ engine/regime_ml_features.py
 장세 판별 ML 분류기의 피처 매트릭스를 만든다. trading.live_indicators.LIVE_INDICATOR_FACTORY
 (이미 백트레이더 대비 골든테스트로 검증된 순수 pandas 지표)를 재구현 없이 그대로
 순회하고, engine.regime_features.py의 반전게이팅 실험용 5개 함수 + momentum/volatility
-EWMA(raw_score)를 더한다. 코인 차별화 피처(자기상대적, 2026-08-29 문제 재정의 도입)
-3개도 추가한다 — LISTING_AGE_BARS(상장 후 경과 봉 수)/VOLATILITY_PERCENTILE/
-LIQUIDITY_PERCENTILE(둘 다 이 마켓 자신의 과거 1년 분포 대비 백분위). 공유 풀링
-모델이 코인마다 다른 신호를 갖게 하려는 목적이며, 다른 마켓 데이터를 참조하지
-않아(자기 자신의 df만 사용) 추론 시 여러 마켓을 새로 불러올 필요가 없다. I/O
-없는 순수 함수 — 입력 df는 engine/regime_ml_data.py가 준비한다. 설계 문서:
-docs/superpowers/specs/2026-08-29-regime-ml-problem-redefinition-design.md
+EWMA(raw_score)를 더한다. 코인 차별화 피처(자기상대적, 2026-08-29 문제 재정의 도입)도
+추가한다 — VOLATILITY_PERCENTILE/LIQUIDITY_PERCENTILE(둘 다 이 마켓 자신의 과거 1년
+분포 대비 백분위). 공유 풀링 모델이 코인마다 다른 신호를 갖게 하려는 목적이며, 다른
+마켓 데이터를 참조하지 않아(자기 자신의 df만 사용) 추론 시 여러 마켓을 새로 불러올
+필요가 없다. I/O 없는 순수 함수 — 입력 df는 engine/regime_ml_data.py가 준비한다. 설계
+문서: docs/superpowers/specs/2026-08-29-regime-ml-problem-redefinition-design.md
+
+원래 세 번째 피처로 LISTING_AGE_BARS(상장 후 경과 봉 수)도 있었으나 2026-08-30
+ablation 실험으로 제거했다 — engine.regime_ml_data.load_market_training_data가 항상
+고정된 start(TRAIN_START)부터 캔들을 불러오기 때문에, 그 시점 이전에 이미 상장돼
+있던 마켓(14개 중 13개)에게는 "실제 상장 이후 경과"가 아니라 사실상 모든 마켓에
+동일하게 찍히는 "TRAIN_START부터 경과한 시간"이었다. 워크포워드 fold는 시간순으로
+나뉘므로 이 피처가 암묵적으로 "지금이 몇 번째 fold냐"를 알려주는 캘린더 프록시로
+작동해, 학습 구간 초반에만 통하는 패턴을 학습시켜 out-of-fold 일반화를 오히려
+깎아먹었다(게인 1위, 2위의 1.7배였는데도). 제거 후 pooled weighted kappa
+0.028→0.065로 개선 확인.
+
+같은 날 이어진 ablation에서 FEAR_GREED_CMC도 제거했다 — LISTING_AGE_BARS와
+마찬가지로 모든 마켓에 동일 시점·동일 값이 찍히는 전 마켓 공유 매크로 시계열이라
+(공포탐욕지수 자체는 진짜 정보값이 있어 순수 캘린더 프록시는 아니지만) 게인
+2위였는데도 제거가 순이익이었다(단독 제거 kappa 0.060→0.063). barrier_k를
+5.5→6.25로 조정(기존 5.5는 클래스 분포 균형만 기준으로 뽑은 값이라 kappa 기준
+재탐색; 4.0/4.75/5.5/6.25/7.0 그리드서치)한 것과 조합하면 kappa 0.060→0.072로
+두 효과가 거의 더해진다(상쇄되지 않음). 실험 스크립트는 커밋하지 않음(scratch,
+일회성).
 """
 from __future__ import annotations
 
@@ -41,9 +59,11 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     # OBV(create_obv)는 윈도우 없는 누적합이라 추론 시(짧은 최근 구간)와 학습
     # 시(수년치) 스케일이 어긋난다(backend/regime_ml_service.py 참고) — 피처에서
     # 제외한다. 같은 레지스트리의 OBV_ROC는 rolling window 기반 %지표라 스케일
-    # 문제가 없으므로 그대로 둔다.
+    # 문제가 없으므로 그대로 둔다. FEAR_GREED_CMC는 모듈 독스트링에 적었듯
+    # ablation으로 제거가 순이익임을 확인해 제외한다.
+    _EXCLUDED_INDICATORS = {"OBV", "FEAR_GREED_CMC"}
     features: dict[str, pd.Series] = {
-        name: factory(df) for name, factory in LIVE_INDICATOR_FACTORY.items() if name != "OBV"
+        name: factory(df) for name, factory in LIVE_INDICATOR_FACTORY.items() if name not in _EXCLUDED_INDICATORS
     }
 
     returns = df["close"].pct_change(fill_method=None)
@@ -60,14 +80,6 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     features["LEVEL_PROXIMITY"] = proximity
     features["REVERSAL_GATE"] = reversal_gate(vpin, proximity)
 
-    # 상한을 두지 않으면(구 버전) 워크포워드 검증에서 테스트 폴드의 모든 행이
-    # 학습 폴드의 어떤 값보다도 항상 크다(시간이 항상 더 뒤이므로) — 트리 모델이
-    # 아웃오브폴드로 일반화할 수 없는데도 실제 학습에서 전체 gain의 약 40%를
-    # 차지했다. _PERCENTILE_WINDOW_BARS에서 포화시켜 "최근 상장(첫 1년 내)" 신호는
-    # 유지하면서 무한 증가 문제를 없앤다.
-    features["LISTING_AGE_BARS"] = pd.Series(
-        range(len(df)), index=df.index, dtype=float
-    ).clip(upper=_PERCENTILE_WINDOW_BARS)
     features["VOLATILITY_PERCENTILE"] = volatility.rolling(
         _PERCENTILE_WINDOW_BARS, min_periods=_PERCENTILE_MIN_PERIODS
     ).rank(pct=True)
