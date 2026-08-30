@@ -8,7 +8,6 @@ import { formatDateTime, formatTimeframe } from '@/lib/format';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { InfoPopover } from '@/components/ui/info-popover';
 
-const CATEGORY_ORDER: RegimeCategory[] = ['하락', '하락아님'];
 export const TRAINED_MARKETS = [
   'KRW-BTC', 'KRW-ETH', 'KRW-XRP',
   'KRW-SOL', 'KRW-DOGE', 'KRW-LINK', 'KRW-ADA', 'KRW-XLM', 'KRW-TRX',
@@ -29,7 +28,9 @@ function categoryVarName(label: RegimeCategory): string {
     case '하락':
       return '--regime-surge-down';
     case '하락아님':
-      return '--regime-surge-up';
+      // 상승색(--regime-surge-up)을 쓰지 않는다 — 하락아님은 횡보+상승을 합친
+      // 값이라 "상승"으로 오인하기 쉬운데, 상승색을 쓰면 그 오해를 더 부추긴다.
+      return '--marker-boundary';
     default:
       return '--marker-boundary';
   }
@@ -72,10 +73,19 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
 
   const modelPerformance = data?.model_performance ?? null;
   const pooled = modelPerformance?.pooled ?? null;
+  const downProb = data ? (data.probs['하락'] ?? 0) : 0;
+  const notDownProb = data ? (data.probs['하락아님'] ?? 0) : 0;
 
   return (
     <div className="rounded-xl border p-6 shadow-sm">
-      <h2 className="mb-3 text-sm font-semibold">ML 현재예측</h2>
+      <div className="mb-4 flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold">ML 현재예측</h2>
+        {data && (
+          <span className="text-xs text-muted-foreground">
+            {market} {formatTimeframe(timeframe)}
+          </span>
+        )}
+      </div>
       {timeframe !== 'minutes60' ? (
         <p className="text-sm text-muted-foreground">ML은 1시간봉 전용입니다.</p>
       ) : !TRAINED_MARKETS.includes(market) ? (
@@ -85,58 +95,95 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
       ) : error ? (
         <p className="text-sm text-muted-foreground">{error}</p>
       ) : data ? (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          <div>
-            <div className="mb-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold">{data.predicted_category}</span>
-              <span className="text-sm text-muted-foreground">
-                확신도 {((data.probs[data.predicted_category] ?? 0) * 100).toFixed(1)}%
+        <div>
+          {/* 히어로: 다음 60봉 내 하락 확률 */}
+          <div className="mb-1 text-xs text-muted-foreground">다음 60봉 내 하락 확률</div>
+          <div className="mb-3 flex items-baseline gap-2">
+            <span
+              className="text-5xl font-bold tracking-tight tabular-nums"
+              style={{ color: `var(${categoryVarName('하락')})` }}
+            >
+              {(downProb * 100).toFixed(1)}
+            </span>
+            <span className="text-xl font-semibold" style={{ color: `var(${categoryVarName('하락')})` }}>
+              %
+            </span>
+            <span className="ml-1 text-sm text-muted-foreground">
+              {data.predicted_category === '하락' ? '하락 우세' : '하락아님 우세'}
+            </span>
+          </div>
+
+          <div className="flex h-3.5 overflow-hidden rounded-full bg-muted">
+            <div style={{ width: `${downProb * 100}%`, backgroundColor: `var(${categoryVarName('하락')})` }} />
+            <div style={{ width: `${notDownProb * 100}%`, backgroundColor: `var(${categoryVarName('하락아님')})` }} />
+          </div>
+          <div className="mt-1.5 flex justify-between text-xs">
+            <span className="font-semibold" style={{ color: `var(${categoryVarName('하락')})` }}>
+              하락 {(downProb * 100).toFixed(1)}%
+            </span>
+            <span className="text-muted-foreground">하락아님 {(notDownProb * 100).toFixed(1)}%</span>
+          </div>
+
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+            앞으로 60시간 안에 현재 변동성 대비 큰 폭의 하락이, 큰 폭의 상승보다 먼저 나타날지를 예측합니다.
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            ※ 하락아님은 횡보·상승을 모두 포함합니다 — &ldquo;상승&rdquo;을 의미하지 않습니다.
+          </p>
+
+          {/* 모델 성능: 한 줄 4칸 */}
+          <div className="mt-4 border-t pt-4">
+            <div className="mb-2 flex items-center gap-1.5">
+              <h3 className="text-xs font-semibold text-muted-foreground">모델 성능</h3>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground/70">
+                참고용 보조 신호
               </span>
             </div>
-            <div className="mb-3 space-y-1.5">
-              {CATEGORY_ORDER.map((label) => (
-                <div key={label} className="flex items-center gap-2 text-xs">
-                  <span className="w-14 shrink-0 text-muted-foreground">{label}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${((data.probs[label] ?? 0) * 100).toFixed(1)}%`,
-                        backgroundColor: `var(${categoryVarName(label)})`,
-                      }}
-                    />
-                  </div>
-                  <span className="w-10 shrink-0 text-right tabular-nums">
-                    {((data.probs[label] ?? 0) * 100).toFixed(1)}%
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {market} {formatTimeframe(timeframe)} 기준, {formatDateTime(data.bar_time)} 봉 데이터. (모델: {formatDateTime(data.model_trained_at)} 학습, fold {data.model_fold_index})
-            </p>
+            {pooled ? (
+              <div className="grid grid-cols-4 gap-2">
+                <StatCard
+                  label="macro F1"
+                  value={formatScore(pooled.macro_f1)}
+                  caption="두 클래스 예측력의 평균(0~1, 높을수록 좋음)"
+                  info="macro F1(0~1)은 하락/하락아님 두 클래스의 F1-score 평균입니다. 1에 가까울수록 좋습니다."
+                />
+                <StatCard
+                  label="weighted kappa"
+                  value={formatScore(pooled.weighted_kappa)}
+                  caption="우연히 맞을 확률을 뺀 순수 적중력(0이면 무작위와 동일)"
+                  info="weighted kappa(-1~+1)는 우연히 맞을 확률을 보정한 일치도입니다. 0 이하면 무작위 추측보다도 못하다는 뜻입니다."
+                />
+                <StatCard
+                  label="하락 precision"
+                  value={formatPct(pooled.class_precision_recall['하락']?.precision)}
+                  caption='"하락" 경고 중 실제로 맞은 비율'
+                  info="precision은 이 카테고리로 예측했을 때 실제로 맞았던 비율입니다."
+                />
+                <StatCard
+                  label="하락 recall"
+                  value={formatPct(pooled.class_precision_recall['하락']?.recall)}
+                  caption="실제 하락 중 모델이 잡아낸 비율"
+                  info="recall은 실제로 이 카테고리였던 것 중 모델이 맞춘 비율입니다."
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">성능 지표 없음(재학습 후 모델을 배포하면 표시됩니다)</p>
+            )}
           </div>
-          <div className="border-t pt-3 md:border-l md:border-t-0 md:pl-6 md:pt-0">
-            <h3 className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
-              모델 성능
-              <InfoPopover>
-                macro F1(0~1)은 하락/하락아님 두 클래스의 F1-score 평균, weighted
-                kappa(-1~+1)는 우연히 맞을 확률을 보정한 일치도입니다. 둘 다 1(또는
-                macro F1=1)에 가까울수록 좋고, weighted kappa가 0 이하면 무작위
-                추측보다도 못하다는 뜻입니다.
-              </InfoPopover>
-            </h3>
-            {modelPerformance ? (
-              <>
+
+          {/* 상세: fold별 성능(좌) / 모델 정보(우) */}
+          {modelPerformance && (
+            <div className="mt-4 grid grid-cols-2 gap-4 border-t pt-3">
+              <div>
+                <h4 className="mb-1.5 text-[11px] font-medium text-muted-foreground">fold별 상세 성능</h4>
                 <div className="overflow-hidden rounded-md border">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>fold</TableHead>
-                        <TableHead className="text-right">train</TableHead>
-                        <TableHead className="text-right">test</TableHead>
-                        <TableHead className="text-right">macro F1</TableHead>
-                        <TableHead className="text-right">weighted kappa</TableHead>
+                        <TableHead className="text-[11px]">fold</TableHead>
+                        <TableHead className="text-right text-[11px]">test</TableHead>
+                        <TableHead className="text-right text-[11px]">F1</TableHead>
+                        <TableHead className="text-right text-[11px]">kappa</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -145,43 +192,78 @@ export default function RegimeMlCurrentPrediction({ market, timeframe }: RegimeM
                           key={fold.fold_index}
                           className={fold.fold_index === data.model_fold_index ? 'font-semibold' : ''}
                         >
-                          <TableCell>{fold.fold_index}</TableCell>
-                          <TableCell className="text-right tabular-nums">{fold.n_train.toLocaleString()}</TableCell>
-                          <TableCell className="text-right tabular-nums">{fold.n_test.toLocaleString()}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatScore(fold.macro_f1)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatScore(fold.weighted_kappa)}</TableCell>
+                          <TableCell className="text-[11px]">{fold.fold_index}</TableCell>
+                          <TableCell className="text-right text-[11px] tabular-nums">
+                            {fold.n_test.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right text-[11px] tabular-nums">
+                            {formatScore(fold.macro_f1)}
+                          </TableCell>
+                          <TableCell className="text-right text-[11px] tabular-nums">
+                            {formatScore(fold.weighted_kappa)}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  풀링 macro F1: {formatScore(pooled?.macro_f1)} / weighted kappa: {formatScore(pooled?.weighted_kappa)}
+                <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                  fold 5(가장 최근까지 학습)의 모델이 실제 서빙에 쓰입니다 — 표는 다른
+                  시기에도 성능이 안정적인지 보여주는 참고용입니다.
                 </p>
-                <h4 className="mt-2 flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                  클래스별 precision/recall(전체 fold 풀링)
-                  <InfoPopover>
-                    precision은 이 카테고리로 예측했을 때 실제로 맞았던 비율, recall은
-                    실제로 이 카테고리였던 것 중 모델이 맞춘 비율입니다.
-                  </InfoPopover>
-                </h4>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  {CATEGORY_ORDER.map((label) => {
-                    const pr = pooled?.class_precision_recall?.[label];
-                    return (
-                      <span key={label}>
-                        {label} P {formatPct(pr?.precision)} / R {formatPct(pr?.recall)}
-                      </span>
-                    );
-                  })}
+              </div>
+              <div>
+                <h4 className="mb-1.5 text-[11px] font-medium text-muted-foreground">모델 정보</h4>
+                <div className="overflow-hidden rounded-md border">
+                  <table className="w-full text-[11px]">
+                    <tbody>
+                      <tr className="border-b">
+                        <td className="px-2 py-1.5 text-muted-foreground">학습시각</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{formatDateTime(data.model_trained_at)}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-2 py-1.5 text-muted-foreground">사용 fold</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{data.model_fold_index}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-2 py-1.5 text-muted-foreground">기준 봉 시각</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{formatDateTime(data.bar_time)}</td>
+                      </tr>
+                      <tr>
+                        <td className="px-2 py-1.5 text-muted-foreground">학습 마켓 수</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{TRAINED_MARKETS.length}개</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
-              </>
-            ) : (
-              <p className="text-xs text-muted-foreground">성능 지표 없음(재학습 후 모델을 배포하면 표시됩니다)</p>
-            )}
-          </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  caption,
+  info,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+  info: string;
+}) {
+  return (
+    <div className="rounded-lg border px-3 py-2.5">
+      <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        {label}
+        <InfoPopover>{info}</InfoPopover>
+      </div>
+      <div className="my-0.5 text-xl font-bold tabular-nums">{value}</div>
+      <div className="text-[10.5px] leading-tight text-muted-foreground/70">{caption}</div>
     </div>
   );
 }
