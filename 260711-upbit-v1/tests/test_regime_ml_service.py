@@ -60,12 +60,23 @@ def _train_and_save_tiny_model(
     performance를 None으로 두면(기본값) performance 키 자체가 없는 구형 사이드카를
     재현한다 — 명시하면 그 값을 그대로 담는다. markets를 None으로 두면(기본값)
     "markets" 키 자체가 없는 구형(레거시) 사이드카를 재현한다 — 명시하면 그 목록을
-    그대로 담는다(신형 사이드카 재현)."""
+    그대로 담는다(신형 사이드카 재현).
+
+    Task 9(cross-sectional 피처 서빙 배선) 이후로는 predict_current_ml_regime()이
+    항상(레거시/신형 사이드카 무관하게, serving_markets 기본 폴백에 KRW-BTC가 포함되므로)
+    BETA_NEUTRAL_RETURN/CROSS_SECTIONAL_RANK 2개 컬럼을 피처 행렬에 병합한 뒤
+    booster.predict()를 호출한다 — 그래서 이 헬퍼가 저장하는 모델도 같은 2개
+    컬럼을 포함해 학습해야 피처 개수/이름이 어긋나지 않는다(안 그러면 모든
+    성공 경로 테스트가 predict_current_ml_regime()의 피처 스키마 불일치
+    RuntimeError로 실패한다)."""
     rng = np.random.default_rng(0)
     rows = []
     for market in _MARKETS:
         for _ in range(30):
-            rows.append({"FEATURE_A": rng.normal(), "FEATURE_B": rng.normal(), "market": market})
+            rows.append({
+                "FEATURE_A": rng.normal(), "FEATURE_B": rng.normal(), "market": market,
+                "BETA_NEUTRAL_RETURN": rng.normal(), "CROSS_SECTIONAL_RANK": rng.uniform(),
+            })
     df = pd.DataFrame(rows)
     df["market"] = df["market"].astype("category")
     labels = pd.Series(rng.choice(_LABELS, size=len(df)))
@@ -363,26 +374,49 @@ def test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row(tmp_path
     Categorical을 넘기든 예측 결과가 동일해서, 이 테스트는 그 차이를 구분하지 못한다.
     그래도 predict_current_ml_regime()의 명시적 categories= 코드는 계속 유지한다 — 이
     LightGBM 내부 자동 재매핑 동작이 버전 간에도 계속 유지된다고 의존하지 않는 방어적
-    코딩이기 때문이다."""
+    코딩이기 때문이다.
+
+    Task 9 이후로는 모델이 BETA_NEUTRAL_RETURN/CROSS_SECTIONAL_RANK까지 포함해
+    학습되므로(_train_and_save_tiny_model 참고), 이 테스트의 query_row도 그 2개
+    컬럼을 채워야 한다 — 실제 predict_current_ml_regime()이 3개 마켓의 원천
+    데이터로부터 계산할 값과 정확히 같은 값을(compute_cross_sectional_features를
+    직접 불러 미리 계산해) 넣어야 두 경로(저수준 Booster.predict() vs 고수준
+    LGBMClassifier.predict_proba())가 진짜 동일 입력을 비교하게 된다."""
     monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
     _, _, model = _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)
+
+    t0 = pd.Timestamp("2026-08-27T04:00:00")
+    t1 = pd.Timestamp("2026-08-27T05:00:00")
+    raw_by_market = {
+        "KRW-BTC": pd.DataFrame({"close": [100.0, 101.0], "candle_time": [t0, t1]}),
+        "KRW-ETH": pd.DataFrame({"close": [50.0, 51.5], "candle_time": [t0, t1]}),
+        "KRW-XRP": pd.DataFrame({"close": [10.0, 9.8], "candle_time": [t0, t1]}),
+    }
+    market_returns = {
+        m: raw_df.set_index("candle_time")["close"].pct_change(fill_method=None)
+        for m, raw_df in raw_by_market.items()
+    }
+    cross_sectional = regime_ml_service.compute_cross_sectional_features(market_returns, btc_market="KRW-BTC")
+    eth_last = cross_sectional["KRW-ETH"].iloc[-1]
 
     query_row = pd.DataFrame({
         "FEATURE_A": [0.5],
         "FEATURE_B": [-0.3],
         "market": pd.Categorical(["KRW-ETH"], categories=sorted(_MARKETS)),
+        "BETA_NEUTRAL_RETURN": [eth_last["BETA_NEUTRAL_RETURN"]],
+        "CROSS_SECTIONAL_RANK": [eth_last["CROSS_SECTIONAL_RANK"]],
     })
     sklearn_probs = dict(zip(model.classes_, model.predict_proba(query_row)[0]))
 
-    fake_raw_df = pd.DataFrame({
-        "close": [1.0],
-        "candle_time": [pd.Timestamp("2026-08-27T05:00:00")],
-    })
-    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+    monkeypatch.setattr(
+        regime_ml_service, "load_market_training_data",
+        lambda market, timeframe, start, end: raw_by_market[market],
+    )
     monkeypatch.setattr(
         regime_ml_service, "build_feature_matrix",
         lambda df, market, half_life_bars: pd.DataFrame({
-            "FEATURE_A": [0.5], "FEATURE_B": [-0.3], "market": pd.Categorical([market]),
+            "FEATURE_A": [0.5] * len(df), "FEATURE_B": [-0.3] * len(df),
+            "market": pd.Categorical([market] * len(df)),
         }),
     )
 
@@ -454,6 +488,83 @@ def test_predict_current_ml_regime_legacy_sidecar_keeps_argmax_behavior(tmp_path
 
     # 보정 전 raw 확률 그대로 argmax한 결과와 같아야 한다.
     assert result["predicted_category"] == max(result["probs"], key=result["probs"].get)
+
+
+def test_predict_current_ml_regime_loads_all_training_markets_for_cross_sectional_features(
+    tmp_path, monkeypatch
+):
+    """cross-sectional 피처가 배선된 뒤에는 단일 마켓 예측이라도
+    load_market_training_data가 serving_markets 전체 개수만큼 호출돼야 한다
+    (베타중립/순위 피처 계산에 다른 마켓들의 동시각 수익률이 필요하므로)."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5, markets=list(_MARKETS))
+
+    call_log = []
+
+    def _fake_load(market, timeframe, start, end):
+        call_log.append(market)
+        return pd.DataFrame({
+            "close": [1.0] * 5,
+            "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", _fake_load)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    predict_current_ml_regime("KRW-ETH", "minutes60")
+
+    assert set(call_log) == set(_MARKETS)
+
+
+def test_predict_current_ml_regime_merges_cross_sectional_columns_into_predicted_row(
+    tmp_path, monkeypatch
+):
+    """load_market_training_data 호출 횟수뿐 아니라, 실제로 BETA_NEUTRAL_RETURN/
+    CROSS_SECTIONAL_RANK 컬럼이 booster.predict()에 넘어가는 마지막 행에 존재하고
+    NaN이 아닌지까지 검증한다(단순히 호출됐는지만으로는 병합 자체가 빠져도 잡아내지
+    못하므로)."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5, markets=list(_MARKETS))
+
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda market, timeframe, start, end: pd.DataFrame({
+        "close": [1.0, 1.02, 0.99, 1.03, 1.01],
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    }))
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    captured_rows = {}
+    original_predict = lgb.Booster.predict
+
+    def _spying_predict(self, data, *args, **kwargs):
+        captured_rows["row"] = data
+        return original_predict(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(lgb.Booster, "predict", _spying_predict)
+
+    predict_current_ml_regime("KRW-ETH", "minutes60")
+
+    row = captured_rows["row"]
+    assert {"BETA_NEUTRAL_RETURN", "CROSS_SECTIONAL_RANK"} <= set(row.columns)
+    assert not row["BETA_NEUTRAL_RETURN"].isna().any()
+    assert not row["CROSS_SECTIONAL_RANK"].isna().any()
 
 
 def test_real_feature_matrix_matches_real_saved_model_feature_count(tmp_path):

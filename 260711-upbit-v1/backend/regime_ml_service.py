@@ -21,6 +21,7 @@ import pandas as pd
 from engine.regime_math import half_life_bars_for_timeframe
 from engine.regime_ml_calibration import apply_calibration
 from engine.regime_ml_constants import TRAINING_MARKETS
+from engine.regime_ml_cross_sectional import compute_cross_sectional_features
 from engine.regime_ml_data import load_market_training_data
 from engine.regime_ml_features import build_feature_matrix
 
@@ -117,11 +118,26 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
 
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=WARMUP_DAYS)
-    df = load_market_training_data(market, timeframe, start, end)
+    # cross-sectional 피처(베타중립/순위)는 같은 시각 다른 마켓들의 동시 수익률이
+    # 있어야 계산할 수 있으므로, 단일 마켓 예측이라도 이 모델이 실제로 학습한
+    # serving_markets 전체의 원천 데이터를 불러온다(TRAINING_MARKETS 전역 상수가
+    # 아니라 serving_markets를 써야 하는 이유는 위 검증 로직과 동일: 이 모델이
+    # 학습하지 않은 마켓까지 섞이면 안 된다).
+    raw_frames = {m: load_market_training_data(m, timeframe, start, end) for m in serving_markets}
+    df = raw_frames[market]
     bar_time = _to_utc_iso(df["candle_time"].iloc[-1])
 
     half_life_bars = half_life_bars_for_timeframe(timeframe)
     features_df = build_feature_matrix(df, market, half_life_bars)
+
+    market_returns = {
+        m: raw_df.set_index("candle_time")["close"].pct_change(fill_method=None)
+        for m, raw_df in raw_frames.items()
+    }
+    cross_sectional = compute_cross_sectional_features(market_returns, btc_market="KRW-BTC")
+    cs_df = cross_sectional[market].reindex(df["candle_time"]).reset_index(drop=True)
+    features_df = pd.concat([features_df.reset_index(drop=True), cs_df], axis=1)
+    features_df.index = df.index
     # 학습 시 train_X["market"].astype("category")가 TRAINING_MARKETS의 알파벳순으로
     # 카테고리 코드(0/1/2)를 배정했고, 저장된 부스터는 그 정수 코드만 기억한다 — 추론 시
     # 이 전체 목록을 categories=로 명시하지 않으면(예: 1행짜리 프레임에 그냥
