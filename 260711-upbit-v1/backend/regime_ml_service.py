@@ -19,6 +19,7 @@ import lightgbm as lgb
 import pandas as pd
 
 from engine.regime_math import half_life_bars_for_timeframe
+from engine.regime_ml_calibration import apply_calibration
 from engine.regime_ml_constants import TRAINING_MARKETS
 from engine.regime_ml_data import load_market_training_data
 from engine.regime_ml_features import build_feature_matrix
@@ -152,10 +153,17 @@ def predict_current_ml_regime(market: str, timeframe: str) -> dict:
         # 하나만 반환한다(multiclass처럼 행마다 길이-n_classes 벡터가 아님) — 실측
         # 확인: sklearn LGBMClassifier.predict_proba()의 두 번째 컬럼과 정확히 일치.
         positive_prob = float(raw_prediction)
-        probs = {classes[0]: 1.0 - positive_prob, classes[1]: positive_prob}
+        raw_probs = {classes[0]: 1.0 - positive_prob, classes[1]: positive_prob}
     else:
-        probs = {label: float(p) for label, p in zip(classes, raw_prediction)}
-    predicted_category = max(probs, key=probs.get)
+        raw_probs = {label: float(p) for label, p in zip(classes, raw_prediction)}
+
+    # sidecar에 decision_threshold/calibration_breakpoints가 없으면(구형 모델)
+    # 항등 보정 + threshold 0.5로 폴백한다 — 이는 원래 argmax 방식과 동치다.
+    breakpoints = sidecar.get("calibration_breakpoints", [])
+    calibrated_down = apply_calibration(breakpoints, raw_probs["하락"])
+    probs = {"하락": calibrated_down, "하락아님": 1.0 - calibrated_down}
+    decision_threshold = sidecar.get("decision_threshold", 0.5)
+    predicted_category = "하락" if calibrated_down >= decision_threshold else "하락아님"
 
     return {
         "predicted_category": predicted_category,

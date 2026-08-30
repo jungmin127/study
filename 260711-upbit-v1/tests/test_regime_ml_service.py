@@ -392,6 +392,70 @@ def test_predict_current_ml_regime_matches_sklearn_wrapper_for_same_row(tmp_path
         assert result["probs"][label] == pytest.approx(float(sklearn_probs[label]), abs=1e-6)
 
 
+def test_predict_current_ml_regime_applies_custom_threshold_and_calibration(tmp_path, monkeypatch):
+    """sidecar에 decision_threshold=0.3(0.5보다 낮음)과, 원래 확률을 항상 0.9로
+    끌어올리는 calibration_breakpoints가 있으면, 원래라면 "하락아님"으로
+    argmax됐을 raw_prediction도 보정+낮은 threshold를 거쳐 "하락"으로 뒤집혀야
+    한다."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    txt_path, json_path, model = _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)
+    sidecar = json.loads(json_path.read_text(encoding="utf-8"))
+    sidecar["decision_threshold"] = 0.3
+    # 모든 입력 확률을 0.9로 보정하는 항등에 가까운(사실상 상수) 브레이크포인트
+    sidecar["calibration_breakpoints"] = [[0.0, 0.9], [1.0, 0.9]]
+    json_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    result = predict_current_ml_regime("KRW-ETH", "minutes60")
+
+    assert result["predicted_category"] == "하락"
+    assert result["probs"]["하락"] == pytest.approx(0.9, abs=1e-6)
+    assert result["probs"]["하락아님"] == pytest.approx(0.1, abs=1e-6)
+
+
+def test_predict_current_ml_regime_legacy_sidecar_keeps_argmax_behavior(tmp_path, monkeypatch):
+    """decision_threshold/calibration_breakpoints 키가 아예 없는 구형 sidecar는
+    기존과 동일하게 항등 보정 + threshold 0.5(=argmax와 동치)로 동작해야 한다."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+    _train_and_save_tiny_model(tmp_path, "20260827T052047Z", fold_index=5)
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng.normal(size=len(df)),
+            "FEATURE_B": rng.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    result = predict_current_ml_regime("KRW-ETH", "minutes60")
+
+    # 보정 전 raw 확률 그대로 argmax한 결과와 같아야 한다.
+    assert result["predicted_category"] == max(result["probs"], key=result["probs"].get)
+
+
 def test_real_feature_matrix_matches_real_saved_model_feature_count(tmp_path):
     """Fix 1(피처/모델 스키마 불일치로 인한 lightgbm.basic.LightGBMError 미처리
     크래시)의 회귀 방지 테스트다. 이 파일의 다른 모든 테스트는
