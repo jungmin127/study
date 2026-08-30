@@ -2880,6 +2880,31 @@ def test_replace_live_strategy_returns_409_when_position_open(monkeypatch, tmp_p
     assert resp.status_code == 409
 
 
+def test_regime_fact_segments_returns_result(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    captured = {}
+
+    def _fake_compute(market, timeframe):
+        captured["args"] = (market, timeframe)
+        return {
+            "market": market,
+            "timeframe": timeframe,
+            "bars": [{"time": "2026-01-01T00:00:00+00:00", "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "label": "하락"}],
+            "segments": [{"start": "2026-01-01T00:00:00+00:00", "end": "2026-01-02T00:00:00+00:00", "label": "하락", "bar_count": 24}],
+        }
+
+    monkeypatch.setattr(backend_module, "compute_fact_regime_segments", _fake_compute)
+
+    resp = client.get(
+        "/api/v1/regime/fact-segments",
+        params={"market": "KRW-BTC", "timeframe": "minutes60"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["segments"][0]["label"] == "하락"
+    assert captured["args"] == ("KRW-BTC", "minutes60")
+
+
 def test_regime_ml_current_prediction_returns_result(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     captured = {}

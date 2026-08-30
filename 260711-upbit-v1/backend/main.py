@@ -78,6 +78,7 @@ from backend.regime_ml_service import (
     list_trained_models,
     predict_current_ml_regime,
 )
+from backend.regime_fact_service import compute_fact_regime_segments
 from backend.regime_ml_training_service import (
     JobAlreadyRunningError as RegimeMlJobAlreadyRunningError,
     start_job as start_regime_ml_training_job,
@@ -638,6 +639,14 @@ def get_trend_segments_endpoint(market: str) -> dict:
 def refresh_trend_segments_endpoint(market: str) -> dict:
     result = get_or_compute_trend_segments(market, force_refresh=True)
     return {**result, "ohlcv": _trend_segment_ohlcv(market)}
+
+
+@app.get("/api/v1/regime/fact-segments")
+def get_regime_fact_segments_endpoint(
+    market: str = Query(...),
+    timeframe: str = Query(...),
+) -> dict:
+    return compute_fact_regime_segments(market, timeframe)
 
 
 @app.get("/api/v1/regime/ml-current-prediction")
