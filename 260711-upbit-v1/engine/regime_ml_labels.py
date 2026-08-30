@@ -31,9 +31,13 @@ def compute_triple_barrier_labels(
     서로 반대 부호). 하단이 먼저(또는 유일하게) 터치되면 "하락", 상단이 먼저
     터치되거나 만기까지 어느 쪽도 안 터치되면(횡보) "하락아님"이다. 반환:
     CATEGORY_LABELS 값 또는 NaN(미래 데이터 부족)으로 이뤄진 object Series,
-    df와 같은 길이/인덱스."""
+    df와 같은 길이/인덱스.
+    vol_t는 t-1까지의 수익률만으로 계산한다(.shift(1)) — t 시점 자신의 수익률까지
+    포함하면 급락이 일어난 바로 그 봉에서 vol이 급등해 barrier가 넓어지고, 그 결과
+    "이미 크게 빠진 봉"이 역설적으로 "하락아님"으로 라벨링되는 문제가 있었다
+    (docs/regime-ml-backlog.md 기술부채 항목, 2026-08-31 KRW-SHIB 실측으로 확인)."""
     returns = df["close"].pct_change(fill_method=None)
-    volatility = returns.ewm(halflife=half_life_bars).std()
+    volatility = returns.ewm(halflife=half_life_bars).std().shift(1)
     close = df["close"].to_numpy()
     n = len(df)
 

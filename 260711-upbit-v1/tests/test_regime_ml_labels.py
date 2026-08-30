@@ -78,3 +78,37 @@ def test_compute_triple_barrier_labels_preserves_length_and_index():
 
 def test_category_labels_has_two_ordered_classes():
     assert CATEGORY_LABELS == ["하락", "하락아님"]
+
+
+def test_compute_triple_barrier_labels_vol_t_excludes_current_bar_return():
+    """급락이 일어난 바로 그 봉(t=crash_index) 자신의 수익률이 그 봉의 barrier 폭
+    계산에 포함되면(이전 구현), 급락 자체가 vol_t를 급등시켜 barrier가 넓어지고,
+    급락 직후의 완만한 추가 하락은 그 넓어진 barrier를 못 건드려 "하락아님"으로
+    잘못 라벨링될 수 있다(docs/regime-ml-backlog.md 기술부채 항목, KRW-SHIB 실측
+    사례 재현). vol_t를 t-1까지만 쓰도록 shift하면, 급락 봉의 barrier는 급락 이전의
+    평온한 vol 기준으로 좁게 잡히므로 같은 완만한 추가 하락도 "하락"으로 잡혀야
+    한다. 추가 하락폭은 "직전 평온 구간의 vol"보다 큰 값으로 직접 계산해서 정하므로
+    (하드코딩된 %가 아님) 어떤 halflife/k 조합에서도 재현 가능하다."""
+    crash_index = 59  # _WARMUP(인덱스 0~49) 이후 stable 구간의 10번째 봉
+    crashed_close = _BASE * 0.5  # 그 봉 자체가 -50% 급락
+
+    # shift(1) 적용 시 t=crash_index의 barrier에 쓰이는 vol은 급락 이전(워밍업
+    # 오실레이션) 수준으로 안정돼 있다 — 그 크기를 먼저 직접 계산해, 이후의
+    # 완만한 추가 하락폭을 "좁은 barrier는 반드시 넘지만, 급락을 포함해 부풀려진
+    # barrier는 절대 못 넘을" 크기(안전 마진 확보를 위해 3배 차이)로 잡는다.
+    warmup_returns = pd.Series(_WARMUP).pct_change(fill_method=None)
+    pre_crash_vol = warmup_returns.ewm(halflife=_HALF_LIFE_BARS).std().iloc[-1]
+    assert pre_crash_vol > 0
+    narrow_barrier = _K * pre_crash_vol
+    further_decline_pct = narrow_barrier * 1.5  # 좁은 barrier는 확실히 넘는 크기
+
+    future_after_crash = [
+        crashed_close * (1 - further_decline_pct * (i / 9)) for i in range(1, 10)
+    ]  # 급락 이후 9봉에 걸쳐 완만하게 further_decline_pct까지 추가 하락(더 이상 급락 아님)
+    closes = (
+        _WARMUP + [_BASE] * 9 + [crashed_close] + future_after_crash + [future_after_crash[-1]] * 5
+    )
+
+    labels = compute_triple_barrier_labels(_make_close_df(closes), _HALF_LIFE_BARS, _N_BARS, _K)
+
+    assert labels.iloc[crash_index] == "하락"
