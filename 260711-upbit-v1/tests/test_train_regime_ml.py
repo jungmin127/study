@@ -181,6 +181,7 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
 
     assert set(sidecar.keys()) == {
         "markets", "labeling_method", "barrier_k", "classes", "fold_index", "performance",
+        "decision_threshold", "calibration_breakpoints", "threshold_table",
     }
     assert sidecar["markets"] == list(seeds.keys())
     assert sidecar["labeling_method"] == "triple_barrier"
@@ -247,3 +248,39 @@ def test_run_training_performance_folds_excludes_skipped_folds(tmp_path, monkeyp
         sidecar = json.load(f)
 
     assert [f["fold_index"] for f in sidecar["performance"]["folds"]] == [2, 3]
+
+
+def test_run_training_saves_calibration_fields_in_sidecar(tmp_path, monkeypatch):
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    reports = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+    )
+    assert len(reports) >= 1
+
+    json_files = list(tmp_path.glob("*.json"))
+    assert len(json_files) == 1
+    with open(json_files[0], encoding="utf-8") as f:
+        sidecar = json.load(f)
+
+    assert isinstance(sidecar["decision_threshold"], float)
+    assert 0.0 <= sidecar["decision_threshold"] <= 1.0
+    assert isinstance(sidecar["calibration_breakpoints"], list)
+    for point in sidecar["calibration_breakpoints"]:
+        assert len(point) == 2
+        assert 0.0 <= point[1] <= 1.0
+    assert isinstance(sidecar["threshold_table"], list)
+    assert len(sidecar["threshold_table"]) > 0
+    for row in sidecar["threshold_table"]:
+        assert set(row.keys()) == {"threshold", "precision", "recall", "n_predicted_down"}

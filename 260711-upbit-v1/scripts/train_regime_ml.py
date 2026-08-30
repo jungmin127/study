@@ -22,6 +22,11 @@ import numpy as np
 import pandas as pd
 
 from engine.regime_math import N_MULTIPLIER, half_life_bars_for_timeframe
+from engine.regime_ml_calibration import (
+    compute_precision_recall_table,
+    fit_isotonic_breakpoints,
+    select_threshold_for_target_precision,
+)
 from engine.regime_ml_constants import TRAINING_MARKETS
 from engine.regime_ml_data import load_market_training_data
 from engine.regime_ml_features import build_feature_matrix
@@ -42,6 +47,10 @@ MIN_TRAIN_SAMPLES = 500
 # 기준이었다는 뜻). FEAR_GREED_CMC 제거(engine/regime_ml_features.py 참고)와 조합하면
 # 0.0603→0.0724.
 BARRIER_K = 6.25
+# docs/ML_Regime_Switching_Additional_Improvements.md 1-2절 예시값("예 55%+")을
+# 그대로 채택 — "하락" 경고의 신뢰도를 55% 이상으로 끌어올리는 게 목표.
+TARGET_DOWN_PRECISION = 0.55
+_THRESHOLD_GRID = [round(0.30 + 0.05 * i, 2) for i in range(13)]  # 0.30~0.90
 MODEL_OUTPUT_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
 
 
@@ -87,6 +96,7 @@ def run_training(
     all_true: list[str] = []
     all_pred: list[str] = []
     all_markets: list[str] = []
+    all_proba_down: list[float] = []
 
     for fold in folds:
         train_X_parts, train_y_parts, test_X_parts, test_y_parts = [], [], [], []
@@ -123,6 +133,9 @@ def run_training(
         top_features = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:15]
 
         predictions = model.predict(test_X_fit)
+        proba_matrix = model.predict_proba(test_X_fit)
+        down_col = list(model.classes_).index("하락")
+        proba_down = proba_matrix[:, down_col].tolist()
         true_values = test_y.to_numpy()
         test_markets = test_X_fit["market"].astype(str).to_numpy()
 
@@ -141,6 +154,7 @@ def run_training(
         all_true.extend(true_values)
         all_pred.extend(predictions)
         all_markets.extend(test_markets)
+        all_proba_down.extend(proba_down)
 
     pooled_metrics = compute_classification_metrics(all_true, all_pred)
     per_market_metrics: dict[str, dict] = {}
@@ -152,6 +166,18 @@ def run_training(
         per_market_metrics[market] = compute_classification_metrics(
             list(all_true_arr[mask]), list(all_pred_arr[mask])
         )
+
+    # all_true가 비어있으면(모든 fold가 표본 부족으로 스킵) last_model도 None이라
+    # 아래 sidecar 저장 블록이 통째로 스킵된다 — IsotonicRegression.fit이 표본 0개를
+    # 거부하므로 여기서도 같은 조건으로 계산을 건너뛴다.
+    threshold_table: list[dict] = []
+    decision_threshold = 0.5
+    calibration_breakpoints: list[list[float]] = []
+    if all_true:
+        threshold_table = compute_precision_recall_table(all_true, all_proba_down, _THRESHOLD_GRID)
+        decision_threshold = select_threshold_for_target_precision(threshold_table, TARGET_DOWN_PRECISION)
+        calibration_breakpoints = fit_isotonic_breakpoints(all_true, all_proba_down)
+        _print_threshold_table(threshold_table, decision_threshold)
 
     _print_aggregate_summary(reports, pooled_metrics, per_market_metrics)
 
@@ -167,6 +193,9 @@ def run_training(
             "barrier_k": barrier_k,
             "classes": last_class_order,
             "fold_index": last_fold_index,
+            "decision_threshold": decision_threshold,
+            "calibration_breakpoints": calibration_breakpoints,
+            "threshold_table": threshold_table,
             "performance": {
                 "folds": [
                     {
@@ -214,6 +243,16 @@ def _print_fold_report(report: dict) -> None:
     print("  [피처 중요도(gain) 상위 15개]")
     for name, importance in report["top_features"]:
         print(f"    {name}: {importance:.1f}")
+
+
+def _print_threshold_table(table: list[dict], decision_threshold: float) -> None:
+    print(f"\n=== Threshold별 '하락' precision/recall (목표 precision={TARGET_DOWN_PRECISION}) ===")
+    for row in table:
+        marker = " <- 채택" if row["threshold"] == decision_threshold else ""
+        print(
+            f"  threshold={row['threshold']:.2f}  precision={row['precision']:.3f}  "
+            f"recall={row['recall']:.3f}  n_predicted_down={row['n_predicted_down']}{marker}"
+        )
 
 
 def _print_aggregate_summary(
