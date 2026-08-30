@@ -117,6 +117,24 @@ export interface TrendSegmentAnalysis {
 
 export type RegimeCategory = '하락' | '하락아님';
 
+export interface RegimeFactBar extends OhlcvPoint {
+  label: RegimeCategory | null;
+}
+
+export interface RegimeFactSegment {
+  start: string;
+  end: string;
+  label: RegimeCategory;
+  bar_count: number;
+}
+
+export interface RegimeFactAnalysis {
+  market: string;
+  timeframe: string;
+  bars: RegimeFactBar[];
+  segments: RegimeFactSegment[];
+}
+
 export interface MlFoldPerformance {
   fold_index: number;
   n_train: number;

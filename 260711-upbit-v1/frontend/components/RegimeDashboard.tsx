@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import RegimeMlCurrentPrediction, { TRAINED_MARKETS } from '@/components/RegimeMlCurrentPrediction';
 import RegimeMlAdminPanel from '@/components/RegimeMlAdminPanel';
+import RegimeFactSegmentView from '@/components/RegimeFactSegmentView';
 import { sortMarkets } from '@/components/CoinSelect';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/client';
@@ -64,6 +65,7 @@ export default function RegimeDashboard() {
           rightPanel={<RegimeMlAdminPanel compact />}
         />
       )}
+      {market && <RegimeFactSegmentView market={market} timeframe={TIMEFRAME} />}
     </div>
   );
 }

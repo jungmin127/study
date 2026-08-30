@@ -11,6 +11,7 @@ import type {
   IndicatorPool,
   Market,
   MlCurrentPrediction,
+  RegimeFactAnalysis,
   RegimeMlJob,
   RegimeMlModelSummary,
   RunBacktestRequest,
@@ -160,6 +161,14 @@ export function getRegimeMlCurrentPrediction(params: {
 }): Promise<MlCurrentPrediction> {
   const query = new URLSearchParams(params);
   return apiFetch<MlCurrentPrediction>(`/api/v1/regime/ml-current-prediction?${query.toString()}`);
+}
+
+export function getRegimeFactSegments(params: {
+  market: string;
+  timeframe: string;
+}): Promise<RegimeFactAnalysis> {
+  const query = new URLSearchParams(params);
+  return apiFetch<RegimeFactAnalysis>(`/api/v1/regime/fact-segments?${query.toString()}`);
 }
 
 export function getRegimeMlTrainEnabled(): Promise<{ enabled: boolean }> {

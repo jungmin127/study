@@ -23,7 +23,7 @@ function formatScore(value: number | null | undefined): string {
   return value === null || value === undefined ? '-' : value.toFixed(3);
 }
 
-function categoryVarName(label: RegimeCategory): string {
+export function categoryVarName(label: RegimeCategory): string {
   switch (label) {
     case '하락':
       return '--regime-surge-down';
