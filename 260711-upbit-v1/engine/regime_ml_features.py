@@ -50,24 +50,12 @@ _PERCENTILE_WINDOW_BARS = 8760  # 1시간봉 기준 1년
 _PERCENTILE_MIN_PERIODS = 100  # 약 4일치 이상 쌓이면 백분위 계산 시작(신규상장 코인도 이른 시점부터 값이 나오게)
 
 
-def _hours_since_last_change(series: pd.Series, candle_time: pd.Series) -> pd.Series:
-    """series 값이 이전 행 대비 바뀐 가장 최근 시점(candle_time 기준)으로부터
-    경과한 시간(시간 단위)을 반환한다. series가 NaN인 구간(워밍업 등)은 변화
-    시점으로 치지 않는다 — series.notna()가 False인 행은 변화 판정에서 제외한다.
-    아직 어떤 실제 값도 나오지 않은 구간(첫 유효값 이전)은 NaN을 반환한다."""
-    changed = series.ne(series.shift(1)) & series.notna()
-    change_times = candle_time.where(changed)
-    last_change_time = change_times.ffill()
-    return (candle_time - last_change_time).dt.total_seconds() / 3600.0
-
-
 def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -> pd.DataFrame:
     """df: close/high/low/volume/trade_value + btc_close/usdt_close/binance_close/
-    fear_greed_value/funding_rate_value/korea_premium_value/fed_funds_rate_value/
-    treasury_yield_spread_value/kr_call_rate_value/usdkrw_rate_value를 전부
-    포함해야 한다(engine.regime_ml_data.load_market_training_data()가 반환하는
-    형태). 반환 DataFrame은 df와 같은 행 수/인덱스를 유지하며(워밍업 구간은 NaN),
-    원본 OHLCV 컬럼은 포함하지 않는다(피처 전용) — market 범주형 컬럼만 추가한다."""
+    fear_greed_value/funding_rate_value/korea_premium_value를 전부 포함해야 한다
+    (engine.regime_ml_data.load_market_training_data()가 반환하는 형태). 반환
+    DataFrame은 df와 같은 행 수/인덱스를 유지하며(워밍업 구간은 NaN), 원본 OHLCV
+    컬럼은 포함하지 않는다(피처 전용) — market 범주형 컬럼만 추가한다."""
     # OBV(create_obv)는 윈도우 없는 누적합이라 추론 시(짧은 최근 구간)와 학습
     # 시(수년치) 스케일이 어긋난다(backend/regime_ml_service.py 참고) — 피처에서
     # 제외한다. 같은 레지스트리의 OBV_ROC는 rolling window 기반 %지표라 스케일
@@ -98,18 +86,6 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     features["LIQUIDITY_PERCENTILE"] = df["trade_value"].rolling(
         _PERCENTILE_WINDOW_BARS, min_periods=_PERCENTILE_MIN_PERIODS
     ).rank(pct=True)
-
-    # 금리 피처(2026-08-31 추가) — 미국-한국 정책금리 스프레드(캐리트레이드/자본
-    # 유출입 유인)와 미국 장단기 국채금리차(매크로 리스크온/오프 선행지표),
-    # 금리결정 경과시간(변동성 급등 구간 포착 후보). US_KR_RATE_SPREAD/
-    # YIELD_CURVE_SPREAD는 스프레드라 원시 레벨보다 정상성이 높다.
-    # HOURS_SINCE_RATE_DECISION은 변경 시점마다 0으로 리셋되므로(단조증가 아님)
-    # LISTING_AGE_BARS류 fold 위치 프록시 위험이 낮다.
-    features["US_KR_RATE_SPREAD"] = df["fed_funds_rate_value"] - df["kr_call_rate_value"]
-    features["YIELD_CURVE_SPREAD"] = df["treasury_yield_spread_value"]
-    fed_hours_since = _hours_since_last_change(df["fed_funds_rate_value"], df["candle_time"])
-    kr_hours_since = _hours_since_last_change(df["kr_call_rate_value"], df["candle_time"])
-    features["HOURS_SINCE_RATE_DECISION"] = pd.concat([fed_hours_since, kr_hours_since], axis=1).min(axis=1, skipna=True)
 
     result = pd.DataFrame(features, index=df.index)
     result["market"] = pd.Categorical([market] * len(df))

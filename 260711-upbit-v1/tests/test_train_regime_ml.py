@@ -43,9 +43,6 @@ def _make_synthetic_market_df(market: str, seed: int) -> pd.DataFrame:
         "fear_greed_value": rng.uniform(0, 100, _N),
         "funding_rate_value": rng.uniform(-0.05, 0.05, _N),
         "korea_premium_value": rng.uniform(-2, 2, _N),
-        "fed_funds_rate_value": np.where(np.arange(_N) < _N // 2, 5.33, 5.25),
-        "kr_call_rate_value": np.where(np.arange(_N) < _N // 3, 3.50, 3.25),
-        "treasury_yield_spread_value": rng.uniform(-0.5, 0.5, _N),
     })
 
 
