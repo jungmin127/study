@@ -48,6 +48,9 @@ def _make_synthetic_ohlcv_df(n: int = 150) -> pd.DataFrame:
         "fear_greed_value": rng.uniform(0, 100, n),
         "funding_rate_value": rng.uniform(-0.05, 0.05, n),
         "korea_premium_value": rng.uniform(-2, 2, n),
+        "fed_funds_rate_value": np.where(np.arange(n) < n // 2, 5.33, 5.25),
+        "kr_call_rate_value": np.where(np.arange(n) < n // 3, 3.50, 3.25),
+        "treasury_yield_spread_value": rng.uniform(-0.5, 0.5, n),
     })
 
 
