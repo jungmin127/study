@@ -567,6 +567,61 @@ def test_predict_current_ml_regime_merges_cross_sectional_columns_into_predicted
     assert not row["CROSS_SECTIONAL_RANK"].isna().any()
 
 
+def test_predict_current_ml_regime_raises_when_deployed_model_predates_cross_sectional_features(
+    tmp_path, monkeypatch
+):
+    """cross-sectional 피처가 서빙에 배선된 뒤, 아직 그 피처 없이 학습된(재학습되지
+    않은) 구형 모델이 그대로 배포돼 있으면 — 피처 개수가 어긋나므로 기존 방어
+    코드(피처 스키마 불일치 RuntimeError)가 여전히 조용한 크래시 대신 명확한
+    에러로 잡아내야 한다."""
+    monkeypatch.setattr(regime_ml_service, "MODEL_DIR", tmp_path)
+
+    rng = np.random.default_rng(0)
+    rows = []
+    for market in _MARKETS:
+        for _ in range(30):
+            # 의도적으로 BETA_NEUTRAL_RETURN/CROSS_SECTIONAL_RANK 없이(구형) 학습한다.
+            rows.append({"FEATURE_A": rng.normal(), "FEATURE_B": rng.normal(), "market": market})
+    legacy_df = pd.DataFrame(rows)
+    legacy_df["market"] = legacy_df["market"].astype("category")
+    legacy_labels = pd.Series(rng.choice(_LABELS, size=len(legacy_df)))
+    legacy_model = lgb.LGBMClassifier(
+        objective="binary", num_leaves=4, min_child_samples=1, random_state=0
+    )
+    legacy_model.fit(legacy_df, legacy_labels)
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    txt_path = tmp_path / "regime_ml_20260827T052047Z.txt"
+    json_path = tmp_path / "regime_ml_20260827T052047Z.json"
+    legacy_model.booster_.save_model(str(txt_path))
+    json_path.write_text(json.dumps({
+        "boundaries": [-0.2, -0.1, 0.1, 0.2],
+        "ref_scores": {label: 0.0 for label in _LABELS},
+        "classes": [str(c) for c in legacy_model.classes_],
+        "fold_index": 5,
+        "markets": list(_MARKETS),
+    }), encoding="utf-8")
+
+    fake_raw_df = pd.DataFrame({
+        "close": [1.0] * 5,
+        "candle_time": pd.date_range("2026-08-27T01:00:00", periods=5, freq="h"),
+    })
+    monkeypatch.setattr(regime_ml_service, "load_market_training_data", lambda *a, **k: fake_raw_df)
+
+    def _fake_build_feature_matrix(df, market, half_life_bars):
+        rng2 = np.random.default_rng(1)
+        return pd.DataFrame({
+            "FEATURE_A": rng2.normal(size=len(df)),
+            "FEATURE_B": rng2.normal(size=len(df)),
+            "market": pd.Categorical([market] * len(df)),
+        })
+
+    monkeypatch.setattr(regime_ml_service, "build_feature_matrix", _fake_build_feature_matrix)
+
+    with pytest.raises(RuntimeError, match="다른 피처 스키마"):
+        predict_current_ml_regime("KRW-ETH", "minutes60")
+
+
 def test_real_feature_matrix_matches_real_saved_model_feature_count(tmp_path):
     """Fix 1(피처/모델 스키마 불일치로 인한 lightgbm.basic.LightGBMError 미처리
     크래시)의 회귀 방지 테스트다. 이 파일의 다른 모든 테스트는
