@@ -171,19 +171,19 @@ def _parse_frankfurter_json(payload: dict) -> pd.DataFrame:
     if not rates:
         return pd.DataFrame(columns=["date", "usdkrw_rate_value"])
 
-    records = [{"date": date_str, "usdkrw_rate_value": values["KRW"]} for date_str, values in rates.items()]
+    records = [{"date": date_str, "usdkrw_rate_value": values.get("KRW")} for date_str, values in rates.items()]
     df = pd.DataFrame(records)
     df["date"] = pd.to_datetime(df["date"], utc=True).dt.as_unit("us")
-    return df.sort_values("date").reset_index(drop=True)
+    return df.sort_values("date").dropna(subset=["usdkrw_rate_value"]).reset_index(drop=True)
 
 
 def get_usdkrw_rate(start: datetime, end: datetime) -> pd.DataFrame:
-    """캐시가 오늘(UTC)을 포함하지 않으면 히스토리 전체를 재조회해 덮어쓴다 —
-    _get_fred_series와 동일한 패턴(provider가 달라 공용 헬퍼로 묶지는 않음)."""
+    """캐시 파일이 stale(24시간 초과)하면 히스토리 전체를 재조회해 덮어쓴다 —
+    _get_fred_series/_cache_is_stale와 동일한 mtime 기반 패턴(provider가 달라도
+    _cache_is_stale은 파일명만 받으므로 그대로 재사용 가능하다)."""
     cached = _load_cache("frankfurter_usdkrw", "usdkrw_rate_value")
-    today = datetime.now(timezone.utc).date()
 
-    if cached.empty or cached["date"].max().date() < today:
+    if cached.empty or _cache_is_stale("frankfurter_usdkrw"):
         with httpx.Client(timeout=15) as client:
             payload = _fetch_frankfurter_json(client, _HISTORY_START, datetime.now(timezone.utc))
         cached = _parse_frankfurter_json(payload)

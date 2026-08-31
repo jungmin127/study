@@ -272,7 +272,10 @@ def test_get_usdkrw_rate_refetches_when_cache_is_stale(monkeypatch, tmp_path):
     monkeypatch.setattr(mds, "CACHE_DIR", tmp_path)
     stale_date = datetime.now(timezone.utc) - timedelta(days=3)
     cached = pd.DataFrame({"date": pd.to_datetime([stale_date.date()], utc=True), "usdkrw_rate_value": [1300.0]})
-    cached.to_parquet(tmp_path / "frankfurter_usdkrw.parquet", index=False)
+    cache_file = tmp_path / "frankfurter_usdkrw.parquet"
+    cached.to_parquet(cache_file, index=False)
+    old_mtime = time.time() - (25 * 3600)  # TTL(24h)보다 오래된 것으로 백데이트
+    os.utime(cache_file, (old_mtime, old_mtime))
 
     def fake_fetch(client, start, end):
         today_str = datetime.now(timezone.utc).date().isoformat()
@@ -283,6 +286,21 @@ def test_get_usdkrw_rate_refetches_when_cache_is_stale(monkeypatch, tmp_path):
     result = mds.get_usdkrw_rate(datetime.now(timezone.utc) - timedelta(days=1), datetime.now(timezone.utc))
 
     assert result.iloc[-1]["usdkrw_rate_value"] == 1400.0
+
+
+def test_get_usdkrw_rate_skips_fetch_when_cache_file_is_fresh_even_if_data_is_old(monkeypatch, tmp_path):
+    """Frankfurter는 주말/공휴일에 키 자체가 없어 캐시 데이터의 최신 날짜가 '오늘'이
+    되는 일이 거의 없다 — 파일 자체가 최근에 갱신됐다면(mtime 기준) 데이터 자체는
+    며칠 전 것이어도 재조회하면 안 된다(2026-08-31 리뷰에서 발견된 버그의 회귀 테스트)."""
+    monkeypatch.setattr(mds, "CACHE_DIR", tmp_path)
+    old_data_date = datetime.now(timezone.utc) - timedelta(days=5)
+    cached = pd.DataFrame({"date": pd.to_datetime([old_data_date.date()], utc=True), "usdkrw_rate_value": [1313.23]})
+    cached.to_parquet(tmp_path / "frankfurter_usdkrw.parquet", index=False)  # 방금 쓴 파일 -> mtime은 fresh
+    monkeypatch.setattr(mds, "_fetch_frankfurter_json", _fail_fetch)
+
+    result = mds.get_usdkrw_rate(datetime.now(timezone.utc) - timedelta(days=10), datetime.now(timezone.utc))
+
+    assert result.iloc[-1]["usdkrw_rate_value"] == 1313.23
 
 
 def test_merge_usdkrw_rate_backward_fills():
