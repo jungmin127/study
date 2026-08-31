@@ -115,6 +115,42 @@ def test_compute_triple_barrier_labels_vol_t_excludes_current_bar_return():
     assert labels.iloc[crash_index] == "하락"
 
 
+def test_compute_triple_barrier_labels_nans_out_labels_whose_window_spans_a_gap():
+    """라벨 i의 미래 윈도우 [i+1, i+1+n_bars](행 기준)가 실제로는 결측 구간을
+    걸쳐 있어(그 구간의 실제 경과 시간이 half_life_bars_for_timeframe가 가정하는
+    "n_bars개 봉 = n_bars 시간"보다 훨씬 길면) 그 라벨은 NaN 처리돼야 한다."""
+    closes = _WARMUP + [_BASE] * 15
+    df = _make_close_df(closes)
+    candle_time = pd.date_range("2024-01-01", periods=len(df), freq="h", tz="UTC")
+    # index 49(=_WARMUP 마지막)부터 시작하는 미래 윈도우 한가운데(index 55)에서
+    # 24시간 결측을 만든다 -> index 49 라벨의 [50, 59] 윈도우가 이 결측을 포함.
+    candle_time = pd.Series(candle_time)
+    candle_time.iloc[55:] = candle_time.iloc[55:] + pd.Timedelta(hours=24)
+
+    labels_without_gap_check = compute_triple_barrier_labels(df, _HALF_LIFE_BARS, _N_BARS, _K)
+    labels_with_gap_check = compute_triple_barrier_labels(
+        df, _HALF_LIFE_BARS, _N_BARS, _K, candle_time=candle_time
+    )
+
+    assert not pd.isna(labels_without_gap_check.iloc[49])  # 결측을 모르면 라벨이 붙음
+    assert pd.isna(labels_with_gap_check.iloc[49])  # 결측을 알면 NaN 처리
+
+
+def test_compute_triple_barrier_labels_candle_time_none_matches_previous_behavior():
+    """candle_time을 안 넘기면(기존 호출자들의 방식) 결과가 정확히 이전과
+    동일해야 한다 — 이 함수의 다른 호출자(backend/regime_fact_service.py 등)에
+    영향이 없다는 회귀 방지."""
+    closes = _WARMUP + [_BASE] * 15
+    df = _make_close_df(closes)
+
+    labels_default = compute_triple_barrier_labels(df, _HALF_LIFE_BARS, _N_BARS, _K)
+    labels_explicit_none = compute_triple_barrier_labels(
+        df, _HALF_LIFE_BARS, _N_BARS, _K, candle_time=None
+    )
+
+    pd.testing.assert_series_equal(labels_default, labels_explicit_none)
+
+
 def test_compute_sample_uniqueness_weights_isolated_label_gets_weight_one():
     """다른 라벨과 활성구간이 전혀 안 겹치는 라벨은 c_t가 항상 1이라
     uniqueness weight도 정확히 1.0이어야 한다."""
