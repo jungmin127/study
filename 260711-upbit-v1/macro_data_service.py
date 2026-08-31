@@ -15,6 +15,7 @@ IRSTCI01KRM156N(한국 콜금리/은행간금리, OECD 경유)을 대리지표�
 from __future__ import annotations
 
 import io
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,8 @@ RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
 
 CACHE_DIR = Path(__file__).parent / "data" / "cache" / "external"
+
+_CACHE_TTL_HOURS = 24
 
 # 학습 구간(TRAIN_START=2024-01-01)보다 충분히 이전이면 되므로, 전체 히스토리를
 # 받을 필요 없이 이 시점부터만 받는다(응답 크기/캐시 갱신 비용 절감).
@@ -86,13 +89,27 @@ def _save_cache(name: str, df: pd.DataFrame) -> None:
     df.to_parquet(_cache_path(name), index=False)
 
 
-def _get_fred_series(name: str, series_id: str, value_col: str, start: datetime, end: datetime) -> pd.DataFrame:
-    """캐시가 오늘(UTC)을 포함하지 않으면(=하루 지났으면) 히스토리 전체를 재조회해
-    덮어쓴다 — external_data_service.get_fear_greed_cmc와 동일한 패턴."""
-    cached = _load_cache(name, value_col)
-    today = datetime.now(timezone.utc).date()
+def _cache_is_stale(name: str) -> bool:
+    """캐시 파일이 24시간 이상 지났으면 stale로 본다. 데이터 내용(예: "오늘 날짜
+    데이터가 있는가")이 아니라 파일 자체의 최종 수정 시각을 기준으로 삼는다 —
+    FRED의 FEDFUNDS/IRSTCI01KRM156N은 월간 시리즈라 "오늘 날짜 데이터"가 사실상
+    영원히 나타나지 않고(external_data_service.get_fear_greed_cmc의 "오늘 날짜
+    포함 여부" 체크를 그대로 썼다가는 매 호출마다 무조건 재요청하게 됨), T10Y2Y도
+    발표 지연이 있어 마찬가지 문제가 있다."""
+    path = _cache_path(name)
+    if not path.exists():
+        return True
+    age_seconds = time.time() - path.stat().st_mtime
+    return age_seconds > _CACHE_TTL_HOURS * 3600
 
-    if cached.empty or cached["date"].max().date() < today:
+
+def _get_fred_series(name: str, series_id: str, value_col: str, start: datetime, end: datetime) -> pd.DataFrame:
+    """캐시 파일이 stale(24시간 초과)하면 히스토리 전체를 재조회해 덮어쓴다.
+    "오늘 날짜 데이터 포함 여부"가 아니라 파일 mtime을 기준으로 삼는 이유는
+    _cache_is_stale() docstring 참고."""
+    cached = _load_cache(name, value_col)
+
+    if cached.empty or _cache_is_stale(name):
         with httpx.Client(timeout=15) as client:
             text = _fetch_fred_csv(client, series_id, _HISTORY_START, datetime.now(timezone.utc))
         cached = _parse_fred_csv(text, value_col)
