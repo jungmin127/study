@@ -32,6 +32,7 @@ ablation 실험으로 제거했다 — engine.regime_ml_data.load_market_trainin
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from engine.regime_features import (
@@ -86,6 +87,21 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     features["LIQUIDITY_PERCENTILE"] = df["trade_value"].rolling(
         _PERCENTILE_WINDOW_BARS, min_periods=_PERCENTILE_MIN_PERIODS
     ).rank(pct=True)
+
+    # 캘린더 피처 재시도(2026-08-31, 우선순위0 조사 결과 반영) — 2026-08-31 첫
+    # 시도 때는 시간대/요일/월/월중 8개를 한 그룹으로 묶어 전부 폐기했었다.
+    # eta²(fold간 분산 비율) 실측 결과 MONTH_SIN/COS만 0.61로 fold와 강하게
+    # 얽혀 있고(학습 구간이 2.6년뿐이라 fold 하나(~5개월)가 12개월 주기를 다
+    # 못 채워서 생기는 문제) HOUR/DOW/DAY_OF_MONTH는 전부 0.002 이하였다 —
+    # MONTH_SIN/COS를 빼고 나머지 3개 신호만 재시도한다
+    # (docs/regime-ml-backlog.md 우선순위0 결론 참고).
+    kst_time = df["candle_time"].dt.tz_convert("Asia/Seoul")
+    features["HOUR_SIN"] = np.sin(2 * np.pi * kst_time.dt.hour / 24)
+    features["HOUR_COS"] = np.cos(2 * np.pi * kst_time.dt.hour / 24)
+    features["DOW_SIN"] = np.sin(2 * np.pi * kst_time.dt.dayofweek / 7)
+    features["DOW_COS"] = np.cos(2 * np.pi * kst_time.dt.dayofweek / 7)
+    features["DAY_OF_MONTH_SIN"] = np.sin(2 * np.pi * (kst_time.dt.day - 1) / 31)
+    features["DAY_OF_MONTH_COS"] = np.cos(2 * np.pi * (kst_time.dt.day - 1) / 31)
 
     result = pd.DataFrame(features, index=df.index)
     result["market"] = pd.Categorical([market] * len(df))

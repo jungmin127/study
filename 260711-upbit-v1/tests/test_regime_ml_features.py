@@ -47,6 +47,7 @@ def test_build_feature_matrix_has_one_column_per_registered_indicator_except_obv
         | {
             "RAW_SCORE", "VOLUME_CONFIRM", "VPIN_SCORE", "LEVEL_PROXIMITY", "REVERSAL_GATE",
             "VOLATILITY_PERCENTILE", "LIQUIDITY_PERCENTILE", "market",
+            "HOUR_SIN", "HOUR_COS", "DOW_SIN", "DOW_COS", "DAY_OF_MONTH_SIN", "DAY_OF_MONTH_COS",
         }
     )
     assert set(result.columns) == expected_columns
@@ -94,3 +95,36 @@ def test_build_feature_matrix_percentile_features_start_nan_then_bounded_zero_to
         last_value = result[column].iloc[-1]
         assert not pd.isna(last_value)
         assert 0.0 <= last_value <= 1.0
+
+
+def test_build_feature_matrix_calendar_features_match_kst_sin_cos_formula():
+    df = _make_full_df()
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    kst_time = df["candle_time"].dt.tz_convert("Asia/Seoul")
+    expected_hour_sin = np.sin(2 * np.pi * kst_time.dt.hour / 24)
+    expected_dow_cos = np.cos(2 * np.pi * kst_time.dt.dayofweek / 7)
+    expected_day_cos = np.cos(2 * np.pi * (kst_time.dt.day - 1) / 31)
+
+    pd.testing.assert_series_equal(
+        result["HOUR_SIN"].reset_index(drop=True), expected_hour_sin.reset_index(drop=True), check_names=False
+    )
+    pd.testing.assert_series_equal(
+        result["DOW_COS"].reset_index(drop=True), expected_dow_cos.reset_index(drop=True), check_names=False
+    )
+    pd.testing.assert_series_equal(
+        result["DAY_OF_MONTH_COS"].reset_index(drop=True), expected_day_cos.reset_index(drop=True), check_names=False
+    )
+
+
+def test_build_feature_matrix_hour_sin_is_continuous_across_kst_midnight():
+    """KST 23시->0시 전환처럼 raw hour 값은 23->0으로 불연속이지만, sin 인코딩은
+    실제 1시간 차이만큼만 작게 움직여야 한다."""
+    dates = pd.to_datetime(["2024-01-01 14:00", "2024-01-01 15:00"], utc=True)  # UTC 14/15시 -> KST 23시/(다음날)0시
+    df = _make_full_df().iloc[:2].copy()
+    df["candle_time"] = dates
+
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    diff_across_midnight = abs(result["HOUR_SIN"].iloc[0] - result["HOUR_SIN"].iloc[1])
+    assert diff_across_midnight < 0.3  # sin(2π*23/24)≈-0.259, sin(0)=0 -> 실제 차이≈0.259
