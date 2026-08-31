@@ -99,8 +99,19 @@ UTC 21시경)보다 최대 21시간 먼저 그날 종가가 "이미 나온 값"�
 
 ## 에러 처리
 
-- 개별 fetch 실패 시 해당 컬럼 NaN 처리 후 계속 진행 — 기존 4개 FRED/Frankfurter
-  시리즈와 동일 패턴. API 키 불필요라 키 미설정 실패 케이스 없음.
+- `_fetch_fred_csv`는 재시도(`RETRY_ATTEMPTS`) 소진 후에도 실패하면 `RuntimeError`를
+  던지고, `merge_fred_series`는 *캐시된* `series_df`가 비어있는 경우에만 해당 컬럼을
+  NaN으로 채운다 — 실제 fetch 실패(RuntimeError)를 잡아서 NaN 폴백하는 코드는 어디에도
+  없으므로, fetch가 실패하면 예외가 그대로 위로 전파된다. 이는 기존 4개 FRED/Frankfurter
+  시리즈(FEDFUNDS/T10Y2Y/한국 콜금리/USDKRW)와 완전히 동일한 기존 동작이며, 이번
+  라운드가 새로 만든 회귀는 아니다. 다만 FRED가 다운됐을 때 stale이라도 캐시된 값으로
+  대체하는 폴백은 현재 없다 — API 키 불필요라 "키 미설정" 실패 케이스만 없을 뿐, fetch
+  자체의 실패 케이스는 존재한다.
+- `/regime` ML 예측 서빙 경로는 이미 공포탐욕 CMC/바이낸스 funding rate에도 하드
+  의존하고 있었는데, 이번 라운드로 FRED/Frankfurter 계열 하드 외부 의존이 기존 4개
+  (FEDFUNDS/T10Y2Y/한국 콜금리/USDKRW)에서 SP500/DJIA/NASDAQCOM 3개가 더해져 7개로
+  늘었다 — 어느 하나만 실패해도 예측 API 전체가 500을 반환할 수 있는 지점이 그만큼
+  늘어난 셈이다. 스테일 캐시 폴백 추가는 이번 라운드 스코프 밖이며 향후 후보로 남긴다.
 
 ## 테스트
 

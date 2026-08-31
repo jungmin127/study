@@ -29,8 +29,8 @@ from macro_data_service import (
     get_kr_call_rate,
     get_nasdaq_index,
     get_sp500_index,
-    get_usdkrw_rate,
     get_us_yield_curve_spread,
+    get_usdkrw_rate,
     merge_fred_series,
     merge_usdkrw_rate,
 )

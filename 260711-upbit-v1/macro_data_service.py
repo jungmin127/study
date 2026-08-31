@@ -136,11 +136,12 @@ def get_kr_call_rate(start: datetime, end: datetime) -> pd.DataFrame:
     return _get_fred_series("fred_kr_call_rate", KR_CALL_RATE_SERIES_ID, "kr_call_rate_value", start, end)
 
 
+# S&P500/다우존스/나스닥종합 일간 종가(FRED SP500/DJIA/NASDAQCOM). 2026-08-31
+# 주가지수 수익률 피처 추가 라운드 — eta² 사전측정에서 pct_change() 형태가
+# USDKRW_RETURN과 동급으로 안전 확인됨(docs/regime-ml-backlog.md 우선순위0
+# 액션아이템 2번 참고). 레벨 그대로는 피처로 쓰지 않는다 — build_feature_matrix에서
+# pct_change만 계산.
 def get_sp500_index(start: datetime, end: datetime) -> pd.DataFrame:
-    """S&P500 일간 종가(FRED SP500). 2026-08-31 주가지수 수익률 피처 추가 라운드 —
-    eta² 사전측정에서 pct_change() 형태가 USDKRW_RETURN과 동급으로 안전 확인됨
-    (docs/regime-ml-backlog.md 우선순위0 액션아이템 2번 참고). 레벨 그대로는
-    피처로 쓰지 않는다 — build_feature_matrix에서 pct_change만 계산."""
     return _get_fred_series("fred_sp500", SP500_SERIES_ID, "sp500_close_value", start, end)
 
 
