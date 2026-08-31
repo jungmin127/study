@@ -65,10 +65,11 @@ _PERCENTILE_MIN_PERIODS = 100  # 약 4일치 이상 쌓이면 백분위 계산 �
 
 def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -> pd.DataFrame:
     """df: close/high/low/volume/trade_value + btc_close/usdt_close/binance_close/
-    fear_greed_value/funding_rate_value/korea_premium_value를 전부 포함해야 한다
-    (engine.regime_ml_data.load_market_training_data()가 반환하는 형태). 반환
-    DataFrame은 df와 같은 행 수/인덱스를 유지하며(워밍업 구간은 NaN), 원본 OHLCV
-    컬럼은 포함하지 않는다(피처 전용) — market 범주형 컬럼만 추가한다."""
+    fear_greed_value/funding_rate_value/korea_premium_value/usdkrw_rate_value를
+    전부 포함해야 한다(engine.regime_ml_data.load_market_training_data()가
+    반환하는 형태). 반환 DataFrame은 df와 같은 행 수/인덱스를 유지하며(워밍업
+    구간은 NaN), 원본 OHLCV 컬럼은 포함하지 않는다(피처 전용) — market
+    범주형 컬럼만 추가한다."""
     # OBV(create_obv)는 윈도우 없는 누적합이라 추론 시(짧은 최근 구간)와 학습
     # 시(수년치) 스케일이 어긋난다(backend/regime_ml_service.py 참고) — 피처에서
     # 제외한다. 같은 레지스트리의 OBV_ROC는 rolling window 기반 %지표라 스케일
@@ -114,6 +115,14 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     features["DOW_COS"] = np.cos(2 * np.pi * kst_time.dt.dayofweek / 7)
     features["DAY_OF_MONTH_SIN"] = np.sin(2 * np.pi * (kst_time.dt.day - 1) / 31)
     features["DAY_OF_MONTH_COS"] = np.cos(2 * np.pi * (kst_time.dt.day - 1) / 31)
+
+    # 환율 피처 재시도(2026-08-31, 우선순위0 조사 결과 반영) — 2026-08-31 첫
+    # 시도 때는 USDKRW_RETURN/USDKRW_VOLATILITY/UPBIT_FX_SPREAD 3개를 한
+    # 그룹으로 묶어 전부 폐기했었다. eta² 실측 결과 USDKRW_RETURN(진짜
+    # t 대 t-1 시간축 차분)만 0.0001로 완전히 안전했고, USDKRW_VOLATILITY(0.06)와
+    # UPBIT_FX_SPREAD(0.31, 사실상 레벨형 지표)는 fold와 얽혀 있었다 —
+    # USDKRW_RETURN만 재시도한다(docs/regime-ml-backlog.md 우선순위0 결론 참고).
+    features["USDKRW_RETURN"] = df["usdkrw_rate_value"].pct_change(fill_method=None)
 
     result = pd.DataFrame(features, index=df.index)
     result["market"] = pd.Categorical([market] * len(df))

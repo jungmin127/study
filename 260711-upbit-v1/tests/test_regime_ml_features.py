@@ -34,6 +34,7 @@ def _make_full_df() -> pd.DataFrame:
         "fear_greed_value": rng.uniform(0, 100, _N),
         "funding_rate_value": rng.uniform(-0.05, 0.05, _N),
         "korea_premium_value": rng.uniform(-2, 2, _N),
+        "usdkrw_rate_value": 1300.0 + np.cumsum(rng.normal(0, 1.0, _N)),
     })
 
 
@@ -48,6 +49,7 @@ def test_build_feature_matrix_has_one_column_per_registered_indicator_except_obv
             "RAW_SCORE", "VOLUME_CONFIRM", "VPIN_SCORE", "LEVEL_PROXIMITY", "REVERSAL_GATE",
             "VOLATILITY_PERCENTILE", "LIQUIDITY_PERCENTILE", "market",
             "HOUR_SIN", "HOUR_COS", "DOW_SIN", "DOW_COS", "DAY_OF_MONTH_SIN", "DAY_OF_MONTH_COS",
+            "USDKRW_RETURN",
         }
     )
     assert set(result.columns) == expected_columns
@@ -128,3 +130,13 @@ def test_build_feature_matrix_hour_sin_is_continuous_across_kst_midnight():
 
     diff_across_midnight = abs(result["HOUR_SIN"].iloc[0] - result["HOUR_SIN"].iloc[1])
     assert diff_across_midnight < 0.3  # sin(2π*23/24)≈-0.259, sin(0)=0 -> 실제 차이≈0.259
+
+
+def test_build_feature_matrix_usdkrw_return_matches_pct_change():
+    df = _make_full_df()
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    expected = df["usdkrw_rate_value"].pct_change(fill_method=None)
+    pd.testing.assert_series_equal(
+        result["USDKRW_RETURN"].reset_index(drop=True), expected.reset_index(drop=True), check_names=False
+    )
