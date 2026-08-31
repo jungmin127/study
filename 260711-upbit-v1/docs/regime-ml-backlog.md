@@ -1,10 +1,140 @@
-# 장세 판별 ML — 잔여 작업 백로그 (2026-08-31 갱신 3)
+# 장세 판별 ML — 잔여 작업 백로그 (2026-08-31 갱신 7)
 
 이전 라운드(2026-08-27 정리본)의 A1/A2/B/E는 전부 완료·배포됨. 2026-08-30 첫
 갱신은 그 이후 진행 상황 반영 + 사용자가 새로 제시한 4개 항목 우선순위 판별.
 같은 날 두 번째 갱신은 ①(fact 라벨 백테스트) 완료 결과 반영 + 사용자가 새로
 요청한 "코인별 fact 장세 구간 뷰어"를 ② 착수 전 선행 작업으로 삽입. 2026-08-31
-세 번째 갱신은 ②(모델 성능 개선) 세부 착수 결과 반영.
+세 번째 갱신은 ②(모델 성능 개선) 세부 착수 결과 반영. 네 번째 갱신은 c-2
+착수 전 사용자 요청으로 진행한 캘린더/환율/금리 신규 피처 라운드 중 캘린더
+그룹 결과 반영. 다섯 번째 갱신은 이 라운드 완전 종료 — 3개 그룹 전부
+폐기(순net 코드변경 0)로 확정, 구조적 원인(우선순위0) 재검토를 최우선
+후보로 추가. 여섯 번째 갱신은 우선순위0 조사 결과를 반영한 안전
+신호 재시도가 성공 — pooled weighted kappa **0.096→0.106으로 개선**,
+이 라운드에서 처음으로 baseline을 넘긴 결과. **일곱 번째 갱신(이번)은
+우선순위0 액션아이템 2번(주가지수 피처)의 S&P500/다우/나스닥 수익률
+3개를 eta² 사전측정 후 시도해 채택** — pooled weighted kappa
+**0.106→0.108로 추가 개선**. AWS 배포는 사용자 확인 대기(두 라운드 모두
+아직 미배포).
+
+## 안전 신호 재시도 (2026-08-31, 우선순위0 조사 직후) — 성공, kappa 0.096→0.106
+
+`docs/superpowers/plans/2026-08-31-regime-ml-safe-signal-retry.md`. 우선순위0
+eta² 조사에서 "개별로는 안전(eta²≈0)한데 위험 신호와 한 그룹으로 묶여서
+같이 폐기됐을 뿐"이라고 판단된 신호만 추려서 재시도했다.
+
+- **캘린더 3신호(HOUR_SIN/COS, DOW_SIN/COS, DAY_OF_MONTH_SIN/COS, MONTH 제외)
+  — 채택**: pooled weighted kappa **0.096 → 0.106으로 개선**(macro F1도 개선).
+  eta² 사전측정(HOUR/DOW/DAY_OF_MONTH 전부 ≤0.002)이 실제 kappa 개선으로
+  이어진 첫 사례 — 우선순위0 조사가 실전에서 검증됨. 커밋 `b04d940`.
+- **환율 1신호(USDKRW_RETURN만) — 채택(중립)**: pooled weighted kappa=0.106으로
+  변화 없음(feature importance top-15에도 안 잡힘). "개선/유지되면 채택"
+  규칙대로 유지했으나, 순수 이득은 없는 중립 피처 — 서빙 경로는 Task1~3에서
+  이미 무조건 fetch하던 `usdkrw_rate_value` 컬럼을 재사용할 뿐이라 신규
+  운영 리스크는 없음. 커밋 `94eceea`.
+- **최종 상태**: `MONTH_SIN`/`MONTH_COS`, `USDKRW_VOLATILITY`, `UPBIT_FX_SPREAD`,
+  금리 3종(`US_KR_RATE_SPREAD`/`YIELD_CURVE_SPREAD`/`HOURS_SINCE_RATE_DECISION`)은
+  여전히 미도입(우선순위0에서 위험 확인됨). **로컬 재학습된 모델의 pooled
+  weighted kappa=0.106, macro F1 개선 — 아직 AWS 라이브 배포 안 함, 사용자
+  확인 후 진행할 것**([[upbit-v1-deploy-check-open-positions-first]] 원칙 —
+  배포 전 오픈포지션 확인 필수).
+
+## 주가지수 수익률 피처 라운드 (2026-08-31, 안전 신호 재시도 직후) — 채택, kappa 0.106→0.108
+
+`docs/superpowers/plans/2026-08-31-regime-ml-stock-index-features.md`. 우선순위0
+액션아이템 2번(코스피/코스닥/S&P500/다우존스/나스닥 지수 피처, 사용자 제안)
+중 FRED에서 바로 가져올 수 있는 S&P500/다우존스/나스닥종합 3개만 우선
+시도했다(코스피/코스닥은 FRED에 없음, yfinance는 실제 동작 확인했으나 신규
+pip 의존성이라 이번 라운드 보류 — 데이터 소스 재조사부터 별도 세션).
+
+- **eta² 사전측정(우선순위0 방법 재사용)**: KRW-ETH 1개 마켓 5-fold 기준
+  SP500/DJIA/NASDAQCOM 종가의 `pct_change()`(순수 t 대 t-1 시간축 차분,
+  레벨이나 지수 간 스프레드는 처음부터 배제) 전부 eta²=0.0002로
+  `USDKRW_RETURN`(0.0001)과 동급 안전 판정 — 백로그가 예상했던 "환율/금리
+  중간 위험도"보다 훨씬 낮게 나왔다. 우선순위0 결론3("진짜 효과 있는 변환은
+  시간축 차분")이 그대로 재현됨.
+- **`SP500_RETURN`/`DJIA_RETURN`/`NASDAQ_RETURN` — 채택**: 실데이터 20마켓
+  walk-forward 학습에서 pooled weighted kappa **0.106(baseline) → 0.108로
+  개선**(macro F1 0.549). 결정 규칙("kappa >= baseline이면 채택")대로 유지.
+  단, 3개 피처 모두 5개 fold의 feature importance(gain) top-15 어디에도
+  등장하지 않았다 — `USDKRW_RETURN`(중립 채택)과 같은 패턴으로, 순수 이득이
+  크지는 않지만 해롭지 않은 안전한 추가. leave-one-out은 Global Constraints/
+  브리프 지시대로 생략(eta² 사전측정으로 3개 다 동급 안전 확인됨).
+- **최종 상태**: 로컬 재학습된 모델의 pooled weighted kappa=0.108(직전
+  baseline 0.106 대비 +0.002, macro F1 0.549) — 아직 AWS 라이브 배포 안 함,
+  사용자 확인 후 진행할 것([[upbit-v1-deploy-check-open-positions-first]]
+  원칙 — 배포 전 오픈포지션 확인 필수). `KOSPI`/`KOSDAQ` 2개 지수는 여전히
+  미도입(FRED 미제공, 스코프 밖).
+
+## 캘린더/환율/금리 피처 라운드 (2026-08-31, c-2 착수 전 삽입) — 종료, 3개 그룹 전부 폐기(위 재시도로 일부 회수됨)
+
+`docs/superpowers/specs/2026-08-31-regime-ml-macro-calendar-features-design.md`/
+`docs/superpowers/plans/2026-08-31-regime-ml-macro-calendar-features.md`.
+subagent-driven-development로 진행, Task 1~7 전부 완료. Task 1~3(FRED/Frankfurter
+데이터 서비스 + 학습 로더 배선)의 인프라 코드는 그대로 남아있으나(다음에 매크로
+피처를 다시 시도할 때 재사용 가능), Task 4~6(캘린더/환율/금리 3개 피처 그룹)은
+**전부 실측에서 baseline 미만으로 나와 revert** — 이 라운드의 순net 코드 변경은
+0이다(모델/서빙 로직 변경 없음, 배포 여부 결정도 필요 없음).
+
+- **캘린더 그룹(시간대/요일/월/월중, KST 기준 sin/cos 8개) — 폐기**: 구현
+  자체는 TDD 전부 통과(수식/KST변환/테스트 독립성 리뷰로 버그 없음 확인)했으나,
+  실데이터 20마켓 walk-forward 학습에서 pooled weighted kappa가 **0.096(baseline)
+  → 0.060으로 악화**, macro F1도 0.534→0.528로 하락. Feature importance(gain)
+  상위권에 `DAY_OF_MONTH_SIN`/`DAY_OF_MONTH_COS`(1~2위), `MONTH_SIN`/`MONTH_COS`,
+  `DOW_SIN`/`DOW_COS`가 모두 올라온 것이 근거 — 캘린더 값 자체는 주기적으로
+  반복되지만, 워크포워드 fold가 실제 달력 시간순으로 나뉘기 때문에 특정
+  월/월중 패턴이 특정 fold(학습구간)에만 통하는 프록시로 작동해 out-of-fold
+  일반화를 오히려 깎아먹었다 — 이미 제거된 `LISTING_AGE_BARS`/`FEAR_GREED_CMC`와
+  동일한 "fold-position leakage" 패턴(단조증가가 아니라 주기적 반복이어도
+  재현됨, 사전 예상과 다름). 결정규칙대로 `git revert HEAD`로 폐기(커밋
+  `f383608`→`a2909c2`), leave-one-out은 그룹 미채택이라 생략. **baseline은
+  0.096 그대로 유지**, 다음 그룹(환율)도 이 baseline 기준으로 평가.
+- **환율 그룹(USDKRW_RETURN/USDKRW_VOLATILITY/UPBIT_FX_SPREAD) — 폐기**:
+  구현 자체는 리뷰에서 3개 수식 전부 기존 `RAW_SCORE` 컨벤션과 byte-for-byte
+  일치 확인(버그 아님). 실데이터 20마켓 학습에서 pooled weighted kappa
+  **0.096(baseline) → 0.062로 악화**, macro F1 0.530. `UPBIT_FX_SPREAD`/
+  `USDKRW_VOLATILITY`가 전 fold gain 1~2위였는데도 out-of-fold 성능은
+  나빠졌다 — 캘린더 그룹과 동일하게 "gain 상위권 = 성능 기여 신뢰 불가"
+  패턴 반복(이제 LISTING_AGE_BARS/FEAR_GREED_CMC/캘린더/환율까지 4번째
+  사례). 결정규칙대로 `git revert HEAD`로 폐기(커밋 `2a5e57b`→`08b34cf`).
+  leave-one-out 생략. **baseline은 0.096 그대로 유지**, 다음 그룹(금리)도
+  이 baseline 기준으로 평가. 프로세스 노트: Task 3이 `tests/test_train_regime_ml.py`/
+  `tests/test_regime_ml_service.py`의 합성 fixture를 새 raw 컬럼에 맞춰
+  동기화해두지 않아서, 이 피처를 실제로 쓰는 태스크가 매번 그 fixture를
+  최소 침습으로 손대야 했다(revert되면 함께 원복). 금리 그룹(Task 6)에서도
+  재발 가능성 있음.
+- **금리 그룹(US_KR_RATE_SPREAD/YIELD_CURVE_SPREAD/HOURS_SINCE_RATE_DECISION)
+  — 폐기**: 구현 자체는 리뷰에서 `_hours_since_last_change` 헬퍼(NaN 처리,
+  두 시리즈 중 최신 변경 선택하는 `min()` 로직)를 손계산으로 직접 검증해
+  버그 없음 확인. 실데이터 20마켓 학습에서 pooled weighted kappa
+  **0.096(baseline) → 0.050으로 악화**(3개 그룹 중 가장 큰 악화폭), macro F1
+  0.525. 3개 피처 전부 gain 1~3위였는데도 out-of-fold 성능은 최악 — 이제
+  LISTING_AGE_BARS/FEAR_GREED_CMC/캘린더/환율/금리까지 **5번째** 동일 패턴
+  사례. 결정규칙대로 `git revert HEAD`로 폐기(커밋 `495e239`→`ebf79d6`).
+  leave-one-out 생략.
+- **라운드 종합 결론**: 폐기된 5개 피처(LISTING_AGE_BARS, FEAR_GREED_CMC,
+  캘린더 8개, 환율 3개, 금리 3개) 전부 "**전 마켓에 공유되는 시간축 또는
+  매크로 외부 시계열**" 성격이었다 — 반면 유지 중인 피처들(RAW_SCORE,
+  VPIN_SCORE, VOLATILITY_PERCENTILE, BETA_NEUTRAL_RETURN 등)은 각 마켓
+  자신의 OHLCV에서 파생된 자기참조적/상대적 값이다. **다음에 같은 유형의
+  피처(글로벌 주가지수 — 코스피/코스닥/S&P/다우/나스닥 등, 원자재 가격 등)를
+  또 시도하기 전에, 개별 피처 단위 ablation보다 "왜 전역 공유 시계열이 이
+  walk-forward 설정에서 구조적으로 해로운가"에 대한 근본 원인부터 조사하는
+  걸 강력 권장.**
+  - **외부 검증(사용자가 별도 세션에서 리서치, 2026-08-31)**: 시계열 이진분류
+    모델 선택 리서치 결과가 두 가지를 재확인해줬다 — (1) 우리 접근(LightGBM+
+    피처엔지니어링, walk-forward 검증)이 이 유형의 문제("원시 신호 분류"가
+    아니라 "KPI 하락 예측")에서 실무 표준과 일치, (2) **반복적으로 피처를
+    넣었다 뺐다 하며 OOF kappa로 비교하는 것 자체가 다중비교(selection
+    bias) 위험** — 하락 이벤트가 희귀하면 kappa 분산이 커서 0.02~0.05 차이는
+    노이즈일 수 있다는 경고(`docs/ML_Regime_Switching_Additional_Improvements.md`
+    1-3절 "다중 시행에 의한 selection bias — PBO"와 동일 내용, 독립 소스에서
+    재확인됨). 이번 라운드의 실측 델타(-0.034~-0.046)는 ②라운드에서 이미
+    측정된 자연변동폭(±0.005 수준, 0.092~0.097)의 7~9배라 노이즈로 보기
+    어렵고, 3개 그룹이 독립적으로 전부 같은 방향(gain 높음+kappa 나쁨)으로
+    나온 것도 노이즈 가설과 안 맞음 — 이번 폐기 결정 자체는 신뢰할 만하다.
+    다만 **앞으로 델타가 애매하게 작을 때(0.01~0.02대)는 seed/기간을 바꿔
+    재현되는지 확인하는 절차를 추가**할 필요가 있다는 점은 새 액션아이템으로
+    남긴다.
 
 ## 완료된 것 (더 이상 백로그 아님)
 
@@ -74,7 +204,104 @@
 
 ## 다음 세션 작업 후보
 
-### 우선순위 1(다음 착수 후보) — ③ 실시간 자동 장세 대응 개발
+### 우선순위 0 — "전역 공유 매크로 시계열이 왜 해로운가" 구조적 원인 — **조사 완료(2026-08-31)**
+
+**방법**: `eta² = 피처값의 fold간 분산 / 전체 분산`(one-way ANOVA 방식)으로 "이
+피처 하나만 보고 지금이 몇 번째 walk-forward fold인지 얼마나 잘 맞출 수 있는가"를
+정량화(scratchpad 1회성 스크립트, 커밋 안 함). KRW-ETH 1개 마켓, 2024-01-01~현재,
+5-fold 기준 실측.
+
+**핵심 발견 — "shared macro" 가설은 틀렸다, 진짜 원인은 "레벨 비교값"이다**:
+
+| 피처 | eta²(fold) | 판정 |
+|---|---|---|
+| `HOUR_SIN`/`DOW_SIN` | 0.0000 | 완전 안전 |
+| `USDKRW_RETURN`(진짜 1스텝 수익률) | 0.0001 | 완전 안전 |
+| `DAY_OF_MONTH_SIN` | 0.0024 | 안전 |
+| 기존 유지 피처(`VPIN_SCORE` 0.003, `RAW_SCORE` 0.004, `VOLATILITY_PERCENTILE` 0.077) | 0.003~0.08 | 기준선(안전~경계) |
+| `USDKRW_VOLATILITY`(EWM std) | 0.060 | 경계 |
+| `UPBIT_FX_SPREAD` | 0.306 | 위험 |
+| **`close_raw_level`(마켓 자기 자신의 원시가격 — 지금까지 피처로 쓴 적 없는 대조군)** | **0.479** | **위험(자기참조적인데도!)** |
+| `usdkrw_rate_value`(원시레벨) | 0.576 | 위험 |
+| `MONTH_SIN` | 0.613 | 위험 |
+| `US_KR_RATE_SPREAD` | 0.679 | 위험 |
+| `fed_funds_rate_value`(원시레벨) | 0.905 | 매우 위험 |
+| `YIELD_CURVE_SPREAD`(원시 pass-through) | 0.910 | 매우 위험 |
+
+**결론 1 — "전역 공유"가 원인이 아니다**: 대조군으로 넣은 `close_raw_level`(마켓
+자기 자신의 종가, 절대 공유값 아님, 지금까지 피처로 쓴 적도 없음)이 eta²=0.479로
+`UPBIT_FX_SPREAD`보다도 높게 나왔다. 진짜 원인은 "여러 마켓이 공유하느냐"가
+아니라 **"레벨(절대 수준) 또는 레벨끼리의 비교값이냐"**다. 기존에 유지되고
+있는 피처들이 우연히 전부 안전했던 이유는 "자기참조적이라서"가 아니라, 전부
+비율/모멘텀/백분위 등 **레벨을 이미 제거한 형태**였기 때문이다.
+
+**결론 2 — 실제 원인은 "2024~2026 표본 구간이 매크로 사이클 한 방향만 담고
+있다"는 데이터 자체의 한계**: FRED 원자료를 직접 fold별로 까보면, 미국
+기준금리(5.33→4.79→4.33→3.87→3.63), 한국 콜금리(3.52→3.29→2.68→2.53→2.53),
+미 장단기금리차(-0.35→0.08→0.43→0.60→0.46), 원/달러(1353→1385→1413→1435→1480)
+**전부 fold 경계와 거의 겹치지 않는 범위로 단조에 가깝게 한 방향 이동**했다
+(2024~2026이 마침 금리인하 사이클+달러 약세 되돌림 구간과 겹침). 이 구간
+안에서는 "금리가 낮다"와 "최근 fold다"가 통계적으로 거의 동의어라, 트리모델이
+피처를 진짜 장세 신호가 아니라 **암묵적 캘린더로 악용**한다. `YIELD_CURVE_SPREAD`를
+원시 그대로 넣은 것(pass-through, 실제로는 시간축 변환을 전혀 안 한 것과
+같음)이 eta² 0.91로 최악이었던 것도 이 때문이다.
+
+**결론 3 — "레벨→변화율/스프레드 변환"만으로는 부족하다, 어떤 변환인지가
+중요하다**:
+- **진짜 효과 있었던 변환**: `USDKRW_RETURN`(t 대 t-1 순수 수익률, eta²≈0) —
+  차분(differencing) 자체는 통한다.
+- **효과 없었던 "변환"**: `US_KR_RATE_SPREAD`/`YIELD_CURVE_SPREAD`는 시간축
+  차분이 아니라 **같은 시점 두 레벨의 횡단면 차이**다 — 양쪽 다 같은 방향으로
+  추세를 타면 차이(스프레드)도 그대로 추세를 물려받는다(실측: US_KR 스프레드도
+  eta²=0.68로 원시레벨 못지않게 높음). "스프레드"라는 이름과 별개로, 시간축
+  차분이 아니면 leakage 방지 효과가 없다.
+- **추가 검증한 가설(백분위 정규화)도 절반만 통함**: 매크로 시계열을
+  `VOLATILITY_PERCENTILE`처럼 "자기 과거 1년 대비 백분위"로 정규화해봤다.
+  `usdkrw_rate_value`는 eta² 0.576→0.049로 크게 개선됐지만, `fed_funds_rate_value`는
+  0.905→0.669로 거의 개선이 없었다. 이유: 백분위 정규화는 창(window) 안에서
+  값이 오르내려야 효과가 있는데, 기준금리는 이 구간에서 계단식으로 한 방향만
+  움직여서(국지적 되돌림이 사실상 없음) "최근 1년 대비 백분위"조차 fold와
+  강하게 얽힌다 — **되돌림이 없는 순수 단조 추세는 어떤 정규화로도 못 없앤다.**
+  원/달러는 추세는 있어도 국지적 등락(노이즈)이 더 커서 백분위 정규화가 통했다.
+
+**액션 아이템**:
+1. ~~캘린더 그룹 재검토~~ — **완료(2026-08-31, 같은 세션)**: `docs/superpowers/plans/2026-08-31-regime-ml-safe-signal-retry.md`로
+   즉시 재시도해 성공. HOUR/DOW/DAY_OF_MONTH_SIN·COS(MONTH 제외) 채택
+   +USDKRW_RETURN 채택(중립) — pooled weighted kappa **0.096→0.106**. 위
+   "안전 신호 재시도" 절 참고.
+2. ~~코스피/코스닥/S&P500/다우존스/나스닥 지수 피처(사용자 제안)~~ —
+   **부분 완료(2026-08-31, 같은 세션)**: `docs/superpowers/plans/2026-08-31-regime-ml-stock-index-features.md`로
+   S&P500/다우존스/나스닥종합 3개 수익률(`SP500_RETURN`/`DJIA_RETURN`/
+   `NASDAQ_RETURN`) 즉시 재시도해 성공. 사전 예상("환율/금리 중간 위험도")과
+   달리 eta²=0.0002로 완전 안전 판정, pooled weighted kappa **0.106→0.108**.
+   위 "주가지수 수익률 피처 라운드" 절 참고. 코스피/코스닥은 FRED에 없어
+   미도입 상태로 남음 — 필요해지면 yfinance 등 신규 데이터소스 재조사부터
+   별도 세션.
+3. **근본적 한계 인정**: 학습 구간이 최소 하나의 완전한 사이클(금리 인상+인하,
+   환율 상승+하락 등)을 담을 만큼 길어지기 전까지는, 어떤 형태로 가공해도
+   "단조 추세" 매크로 지표는 근본적으로 위험하다는 걸 인지하고 있을 것 —
+   학습 구간(`TRAIN_START`)을 과거로 더 늘리는 것도 장기적 후보지만 별도
+   브레인스토밍 필요(업비트 데이터 커버리지, 라벨링 방식 재검증 등 파급 큼).
+4. PBO(Probability of Backtest Overfitting) 같은 정식 검증 프레임워크는 여전히
+   다음 후보로 유효(`docs/ML_Regime_Switching_Additional_Improvements.md`
+   1-3절, 별도 세션 리서치로도 재확인됨) — 이번 eta² 측정은 그 정식 버전 대신
+   빠르게 쓴 근사적 진단이다.
+
+### 즉시 결정 필요 — AWS 라이브 배포 여부
+
+로컬 재학습 모델(pooled weighted kappa 0.108, 캘린더3+환율1+주가지수3 신호
+추가)이 현재 라이브 배포 모델(kappa 0.097, 20마켓/이진분류)보다 낫다. 배포하려면
+`[[upbit-v1-deploy-check-open-positions-first]]` 원칙대로 **배포 전 AWS
+서버 `trading.db`의 오픈 포지션부터 확인**할 것 — `deploy/update.sh`는
+daemon도 재시작하므로 실거래 감시가 몇 초 끊긴다.
+
+### 우선순위 1(다음 착수 후보) — c-2 로지스틱회귀 baseline + LightGBM 하이퍼파라미터 튜닝
+
+`docs/regime-ml-backlog.md`의 잔여 후보 (c) 중 미착수 항목. 우선순위 0의
+남은 항목(코스피/코스닥/S&P500 등 지수 피처, PBO 프레임워크)과 반드시
+순서를 지킬 필요는 없음(서로 다른 축) — 사용자 판단에 따라 먼저 진행해도 무방.
+
+### 우선순위 2 — ③ 실시간 자동 장세 대응 개발
 
 **전제 조건 재검토 필요**: 원래 "①②가 검증된 뒤에만 착수" 조건이었는데, ②
 결과가 "구조는 더 올바르게 개선됐지만 kappa 자체(0.097→0.096)는 사실상 정체"라
