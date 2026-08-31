@@ -32,7 +32,6 @@ ablation 실험으로 제거했다 — engine.regime_ml_data.load_market_trainin
 """
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from engine.regime_features import (
@@ -87,22 +86,6 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     features["LIQUIDITY_PERCENTILE"] = df["trade_value"].rolling(
         _PERCENTILE_WINDOW_BARS, min_periods=_PERCENTILE_MIN_PERIODS
     ).rank(pct=True)
-
-    # 캘린더 피처(2026-08-31 추가) — 업비트가 한국 거래소라 KST 기준 시간대/요일/
-    # 월/월중 패턴을 잡으려는 목적. sin/cos 주기인코딩으로 23시->0시, 12월->1월
-    # 같은 경계에서 불연속이 생기지 않게 한다. LISTING_AGE_BARS처럼 "단조증가"가
-    # 아니라 "주기적으로 반복"되는 값이라, 워크포워드 fold 위치를 암묵적으로
-    # 알려주는 캘린더 프록시 위험은 낮지만, 실데이터 ablation으로 검증 후 채택한다
-    # (docs/superpowers/specs/2026-08-31-regime-ml-macro-calendar-features-design.md).
-    kst_time = df["candle_time"].dt.tz_convert("Asia/Seoul")
-    features["HOUR_SIN"] = np.sin(2 * np.pi * kst_time.dt.hour / 24)
-    features["HOUR_COS"] = np.cos(2 * np.pi * kst_time.dt.hour / 24)
-    features["DOW_SIN"] = np.sin(2 * np.pi * kst_time.dt.dayofweek / 7)
-    features["DOW_COS"] = np.cos(2 * np.pi * kst_time.dt.dayofweek / 7)
-    features["MONTH_SIN"] = np.sin(2 * np.pi * (kst_time.dt.month - 1) / 12)
-    features["MONTH_COS"] = np.cos(2 * np.pi * (kst_time.dt.month - 1) / 12)
-    features["DAY_OF_MONTH_SIN"] = np.sin(2 * np.pi * (kst_time.dt.day - 1) / 31)
-    features["DAY_OF_MONTH_COS"] = np.cos(2 * np.pi * (kst_time.dt.day - 1) / 31)
 
     result = pd.DataFrame(features, index=df.index)
     result["market"] = pd.Categorical([market] * len(df))
