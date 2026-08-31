@@ -29,6 +29,18 @@ ablation 실험으로 제거했다 — engine.regime_ml_data.load_market_trainin
 재탐색; 4.0/4.75/5.5/6.25/7.0 그리드서치)한 것과 조합하면 kappa 0.060→0.072로
 두 효과가 거의 더해진다(상쇄되지 않음). 실험 스크립트는 커밋하지 않음(scratch,
 일회성).
+
+2026-08-31에 캘린더 8개(시간대/요일/월/월중 sin/cos)와 환율 3개, 금리 3개를
+각각 그룹으로 시도했다가 전부 폐기(revert)했다 — pooled weighted kappa가
+0.096(baseline) 대비 캘린더 0.060/환율 0.062/금리 0.050으로 전부 악화됐다.
+`eta² = 피처값의 fold간 분산 / 전체 분산`으로 원인을 조사한 결과, "전 마켓
+공유 여부"가 아니라 "레벨(절대 수준) 또는 레벨끼리의 비교값이냐"가 진짜
+원인이었다 — 캘린더 그룹은 `MONTH_SIN`/`MONTH_COS`만 eta²=0.61로 fold와
+강하게 얽혀 있었고(학습 구간이 2.6년뿐이라 fold 하나(~5개월)가 12개월 주기를
+다 못 채움), `HOUR_SIN`/`DOW_SIN`/`DAY_OF_MONTH_SIN`은 전부 eta²≤0.002로
+안전했다. `MONTH_SIN`/`MONTH_COS`만 빼고 나머지 3개 신호(시간대/요일/월중,
+KST 기준)만 재시도한 결과 pooled weighted kappa **0.096→0.106으로 개선**
+확인 — 채택. 상세: `docs/regime-ml-backlog.md` 우선순위0 절.
 """
 from __future__ import annotations
 
