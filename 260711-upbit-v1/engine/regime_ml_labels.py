@@ -22,11 +22,7 @@ CATEGORY_LABELS: list[str] = ["하락", "하락아님"]
 
 
 def compute_triple_barrier_labels(
-    df: pd.DataFrame,
-    half_life_bars: float,
-    n_bars: int,
-    k: float,
-    candle_time: pd.Series | None = None,
+    df: pd.DataFrame, half_life_bars: float, n_bars: int, k: float
 ) -> pd.Series:
     """각 시점 t에서 상단(+k*vol_t)/하단(-k*vol_t) 경계와 n_bars 만기 중 무엇이
     먼저 터치되는지로 라벨링한다. vol_t는 t까지의 과거 수익률만으로 계산한
@@ -39,12 +35,7 @@ def compute_triple_barrier_labels(
     vol_t는 t-1까지의 수익률만으로 계산한다(.shift(1)) — t 시점 자신의 수익률까지
     포함하면 급락이 일어난 바로 그 봉에서 vol이 급등해 barrier가 넓어지고, 그 결과
     "이미 크게 빠진 봉"이 역설적으로 "하락아님"으로 라벨링되는 문제가 있었다
-    (docs/regime-ml-backlog.md 기술부채 항목, 2026-08-31 KRW-SHIB 실측으로 확인).
-
-    candle_time: 제공하면(캔들 시각 Series, df와 같은 인덱스) 라벨 i의 미래
-    윈도우가 실제로 걸치는 경과시간이 n_bars * (candle_time 간 최빈 간격)의
-    1.5배를 넘는 경우(=캔들 결측 구간을 걸침) 그 라벨을 NaN 처리한다. None이면
-    (기본값) 이 검사를 생략해 기존 동작과 완전히 동일하다."""
+    (docs/regime-ml-backlog.md 기술부채 항목, 2026-08-31 KRW-SHIB 실측으로 확인)."""
     returns = df["close"].pct_change(fill_method=None)
     volatility = returns.ewm(halflife=half_life_bars).std().shift(1)
     close = df["close"].to_numpy()
@@ -69,32 +60,7 @@ def compute_triple_barrier_labels(
             labels[t] = "하락"
         else:
             labels[t] = "하락아님"
-    result = pd.Series(labels, index=df.index)
-    if candle_time is not None:
-        result = _mask_labels_spanning_gaps(result, candle_time, n_bars)
-    return result
-
-
-def _mask_labels_spanning_gaps(labels: pd.Series, candle_time: pd.Series, n_bars: int) -> pd.Series:
-    """candle_time 간 최빈 간격(median)을 "정상 간격"으로 추정하고, 라벨 i의
-    미래 윈도우 [i+1, i+1+n_bars](행 기준)가 실제로 걸치는 경과시간이
-    n_bars*정상간격*1.5를 넘으면 그 라벨을 NaN으로 덮어쓴다."""
-    intervals = candle_time.diff().dropna()
-    if intervals.empty:
-        return labels
-    normal_interval = intervals.median()
-    threshold = normal_interval * n_bars * 1.5
-
-    n = len(labels)
-    masked = labels.copy()
-    for i in range(n):
-        if pd.isna(masked.iloc[i]):
-            continue
-        window_end = min(i + n_bars, n - 1)
-        elapsed = candle_time.iloc[window_end] - candle_time.iloc[i]
-        if elapsed > threshold:
-            masked.iloc[i] = float("nan")
-    return masked
+    return pd.Series(labels, index=df.index)
 
 
 def compute_sample_uniqueness_weights(labels: pd.Series, n_bars: int) -> pd.Series:

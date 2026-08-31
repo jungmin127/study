@@ -105,9 +105,7 @@ def run_training(
         cs_df = cross_sectional[market].reindex(raw_df["candle_time"]).reset_index(drop=True)
         features_df = pd.concat([features_df.reset_index(drop=True), cs_df], axis=1)
         features_df.index = raw_df.index
-        labels = compute_triple_barrier_labels(
-            raw_df, half_life_bars, n_bars, barrier_k, candle_time=raw_df["candle_time"]
-        )
+        labels = compute_triple_barrier_labels(raw_df, half_life_bars, n_bars, barrier_k)
         # AFML sample uniqueness 가중치 — 겹치는(=동시활성) 라벨이 많은 구간을
         # LightGBM이 과도하게 반복학습하지 않도록 class_weight="balanced"와는 별개
         # 축으로 sample_weight에 곱해 함께 쓴다(engine/regime_ml_labels.py 참고).
