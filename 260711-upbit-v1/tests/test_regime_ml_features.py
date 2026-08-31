@@ -34,6 +34,7 @@ def _make_full_df() -> pd.DataFrame:
         "fear_greed_value": rng.uniform(0, 100, _N),
         "funding_rate_value": rng.uniform(-0.05, 0.05, _N),
         "korea_premium_value": rng.uniform(-2, 2, _N),
+        "usdkrw_rate_value": 1300.0 + np.cumsum(rng.normal(0, 1.0, _N)),
     })
 
 
@@ -47,6 +48,7 @@ def test_build_feature_matrix_has_one_column_per_registered_indicator_except_obv
         | {
             "RAW_SCORE", "VOLUME_CONFIRM", "VPIN_SCORE", "LEVEL_PROXIMITY", "REVERSAL_GATE",
             "VOLATILITY_PERCENTILE", "LIQUIDITY_PERCENTILE", "market",
+            "USDKRW_RETURN", "USDKRW_VOLATILITY", "UPBIT_FX_SPREAD",
         }
     )
     assert set(result.columns) == expected_columns
@@ -94,3 +96,29 @@ def test_build_feature_matrix_percentile_features_start_nan_then_bounded_zero_to
         last_value = result[column].iloc[-1]
         assert not pd.isna(last_value)
         assert 0.0 <= last_value <= 1.0
+
+
+def test_build_feature_matrix_usdkrw_return_matches_pct_change():
+    df = _make_full_df()
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    expected = df["usdkrw_rate_value"].pct_change(fill_method=None)
+    pd.testing.assert_series_equal(
+        result["USDKRW_RETURN"].reset_index(drop=True), expected.reset_index(drop=True), check_names=False
+    )
+
+
+def test_build_feature_matrix_upbit_fx_spread_is_zero_when_rates_match():
+    df = _make_full_df()
+    df["usdkrw_rate_value"] = df["usdt_close"]  # 업비트 암묵환율과 공식환율이 완전히 같다고 가정
+
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    assert (result["UPBIT_FX_SPREAD"] == 0.0).all()
+
+
+def test_build_feature_matrix_usdkrw_volatility_is_nonnegative_after_warmup():
+    df = _make_full_df()
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    assert (result["USDKRW_VOLATILITY"].iloc[2:] >= 0).all()

@@ -48,6 +48,7 @@ def _make_synthetic_ohlcv_df(n: int = 150) -> pd.DataFrame:
         "fear_greed_value": rng.uniform(0, 100, n),
         "funding_rate_value": rng.uniform(-0.05, 0.05, n),
         "korea_premium_value": rng.uniform(-2, 2, n),
+        "usdkrw_rate_value": 1300.0 + np.cumsum(rng.normal(0, 1.0, n)),
     })
 
 

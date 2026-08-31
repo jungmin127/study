@@ -52,8 +52,9 @@ _PERCENTILE_MIN_PERIODS = 100  # 약 4일치 이상 쌓이면 백분위 계산 �
 
 def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -> pd.DataFrame:
     """df: close/high/low/volume/trade_value + btc_close/usdt_close/binance_close/
-    fear_greed_value/funding_rate_value/korea_premium_value를 전부 포함해야 한다
-    (engine.regime_ml_data.load_market_training_data()가 반환하는 형태). 반환
+    fear_greed_value/funding_rate_value/korea_premium_value/usdkrw_rate_value를
+    전부 포함해야 한다(engine.regime_ml_data.load_market_training_data()가 반환하는
+    형태). 반환
     DataFrame은 df와 같은 행 수/인덱스를 유지하며(워밍업 구간은 NaN), 원본 OHLCV
     컬럼은 포함하지 않는다(피처 전용) — market 범주형 컬럼만 추가한다."""
     # OBV(create_obv)는 윈도우 없는 누적합이라 추론 시(짧은 최근 구간)와 학습
@@ -86,6 +87,16 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     features["LIQUIDITY_PERCENTILE"] = df["trade_value"].rolling(
         _PERCENTILE_WINDOW_BARS, min_periods=_PERCENTILE_MIN_PERIODS
     ).rank(pct=True)
+
+    # 환율 피처(2026-08-31 추가) — Frankfurter 공식 USD/KRW 환율의 변동률/변동성과,
+    # 업비트 암묵환율(usdt_close) 대비 괴리(자본유출입/크립토 유동성 프리미엄 신호
+    # 후보). 원시 레벨 자체는 넣지 않는다 — 2024~2026 구간에 추세적으로 움직이면
+    # LISTING_AGE_BARS처럼 fold 위치 프록시가 될 위험이 있어 변동률/스프레드처럼
+    # 상대적으로 정상성(stationary)이 높은 형태만 쓴다.
+    fx_return = df["usdkrw_rate_value"].pct_change(fill_method=None)
+    features["USDKRW_RETURN"] = fx_return
+    features["USDKRW_VOLATILITY"] = fx_return.ewm(halflife=half_life_bars).std()
+    features["UPBIT_FX_SPREAD"] = (df["usdt_close"] / df["usdkrw_rate_value"] - 1) * 100
 
     result = pd.DataFrame(features, index=df.index)
     result["market"] = pd.Categorical([market] * len(df))
