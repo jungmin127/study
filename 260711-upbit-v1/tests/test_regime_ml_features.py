@@ -35,6 +35,9 @@ def _make_full_df() -> pd.DataFrame:
         "funding_rate_value": rng.uniform(-0.05, 0.05, _N),
         "korea_premium_value": rng.uniform(-2, 2, _N),
         "usdkrw_rate_value": 1300.0 + np.cumsum(rng.normal(0, 1.0, _N)),
+        "sp500_close_value": 4700.0 + np.cumsum(rng.normal(0, 10.0, _N)),
+        "djia_close_value": 37000.0 + np.cumsum(rng.normal(0, 50.0, _N)),
+        "nasdaq_close_value": 14500.0 + np.cumsum(rng.normal(0, 30.0, _N)),
     })
 
 
@@ -50,6 +53,7 @@ def test_build_feature_matrix_has_one_column_per_registered_indicator_except_obv
             "VOLATILITY_PERCENTILE", "LIQUIDITY_PERCENTILE", "market",
             "HOUR_SIN", "HOUR_COS", "DOW_SIN", "DOW_COS", "DAY_OF_MONTH_SIN", "DAY_OF_MONTH_COS",
             "USDKRW_RETURN",
+            "SP500_RETURN", "DJIA_RETURN", "NASDAQ_RETURN",
         }
     )
     assert set(result.columns) == expected_columns
@@ -140,3 +144,18 @@ def test_build_feature_matrix_usdkrw_return_matches_pct_change():
     pd.testing.assert_series_equal(
         result["USDKRW_RETURN"].reset_index(drop=True), expected.reset_index(drop=True), check_names=False
     )
+
+
+def test_build_feature_matrix_stock_index_returns_match_pct_change():
+    df = _make_full_df()
+    result = build_feature_matrix(df, market="KRW-BTC", half_life_bars=24.0)
+
+    for column, source in [
+        ("SP500_RETURN", "sp500_close_value"),
+        ("DJIA_RETURN", "djia_close_value"),
+        ("NASDAQ_RETURN", "nasdaq_close_value"),
+    ]:
+        expected = df[source].pct_change(fill_method=None)
+        pd.testing.assert_series_equal(
+            result[column].reset_index(drop=True), expected.reset_index(drop=True), check_names=False
+        )

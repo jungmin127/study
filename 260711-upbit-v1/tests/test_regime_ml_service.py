@@ -49,6 +49,9 @@ def _make_synthetic_ohlcv_df(n: int = 150) -> pd.DataFrame:
         "funding_rate_value": rng.uniform(-0.05, 0.05, n),
         "korea_premium_value": rng.uniform(-2, 2, n),
         "usdkrw_rate_value": 1300.0 + np.cumsum(rng.normal(0, 1.0, n)),
+        "sp500_close_value": 4700.0 + np.cumsum(rng.normal(0, 10.0, n)),
+        "djia_close_value": 37000.0 + np.cumsum(rng.normal(0, 50.0, n)),
+        "nasdaq_close_value": 14500.0 + np.cumsum(rng.normal(0, 30.0, n)),
     })
 
 

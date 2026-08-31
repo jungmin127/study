@@ -65,11 +65,11 @@ _PERCENTILE_MIN_PERIODS = 100  # 약 4일치 이상 쌓이면 백분위 계산 �
 
 def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -> pd.DataFrame:
     """df: close/high/low/volume/trade_value + btc_close/usdt_close/binance_close/
-    fear_greed_value/funding_rate_value/korea_premium_value/usdkrw_rate_value를
-    전부 포함해야 한다(engine.regime_ml_data.load_market_training_data()가
-    반환하는 형태). 반환 DataFrame은 df와 같은 행 수/인덱스를 유지하며(워밍업
-    구간은 NaN), 원본 OHLCV 컬럼은 포함하지 않는다(피처 전용) — market
-    범주형 컬럼만 추가한다."""
+    fear_greed_value/funding_rate_value/korea_premium_value/usdkrw_rate_value/
+    sp500_close_value/djia_close_value/nasdaq_close_value를 전부 포함해야 한다
+    (engine.regime_ml_data.load_market_training_data()가 반환하는 형태). 반환
+    DataFrame은 df와 같은 행 수/인덱스를 유지하며(워밍업 구간은 NaN), 원본
+    OHLCV 컬럼은 포함하지 않는다(피처 전용) — market 범주형 컬럼만 추가한다."""
     # OBV(create_obv)는 윈도우 없는 누적합이라 추론 시(짧은 최근 구간)와 학습
     # 시(수년치) 스케일이 어긋난다(backend/regime_ml_service.py 참고) — 피처에서
     # 제외한다. 같은 레지스트리의 OBV_ROC는 rolling window 기반 %지표라 스케일
@@ -123,6 +123,18 @@ def build_feature_matrix(df: pd.DataFrame, market: str, half_life_bars: float) -
     # UPBIT_FX_SPREAD(0.31, 사실상 레벨형 지표)는 fold와 얽혀 있었다 —
     # USDKRW_RETURN만 재시도한다(docs/regime-ml-backlog.md 우선순위0 결론 참고).
     features["USDKRW_RETURN"] = df["usdkrw_rate_value"].pct_change(fill_method=None)
+
+    # 주가지수 수익률 피처(2026-08-31, 사용자 제안 + 우선순위0 eta² 사전측정
+    # 완료) — KRW-ETH 1개 마켓 5-fold eta² 실측 결과 SP500/DJIA/NASDAQCOM
+    # 종가의 pct_change() 전부 0.0002로 USDKRW_RETURN(0.0001)과 동급으로
+    # 안전 판정됐다 — 백로그가 예상했던 "환율/금리 중간 위험도"보다 훨씬
+    # 낮았다(순수 t 대 t-1 시간축 차분이라 우선순위0 결론3의 "진짜 효과
+    # 있는 변환" 패턴이 그대로 적용됨). 코스피/코스닥은 FRED에 없어 이번
+    # 라운드 제외(docs/superpowers/specs/2026-08-31-regime-ml-stock-index-
+    # features-design.md 참고).
+    features["SP500_RETURN"] = df["sp500_close_value"].pct_change(fill_method=None)
+    features["DJIA_RETURN"] = df["djia_close_value"].pct_change(fill_method=None)
+    features["NASDAQ_RETURN"] = df["nasdaq_close_value"].pct_change(fill_method=None)
 
     result = pd.DataFrame(features, index=df.index)
     result["market"] = pd.Categorical([market] * len(df))

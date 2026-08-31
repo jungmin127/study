@@ -44,6 +44,9 @@ def _make_synthetic_market_df(market: str, seed: int) -> pd.DataFrame:
         "funding_rate_value": rng.uniform(-0.05, 0.05, _N),
         "korea_premium_value": rng.uniform(-2, 2, _N),
         "usdkrw_rate_value": 1300.0 + np.cumsum(rng.normal(0, 1.0, _N)),
+        "sp500_close_value": 4700.0 + np.cumsum(rng.normal(0, 10.0, _N)),
+        "djia_close_value": 37000.0 + np.cumsum(rng.normal(0, 50.0, _N)),
+        "nasdaq_close_value": 14500.0 + np.cumsum(rng.normal(0, 30.0, _N)),
     })
 
 
