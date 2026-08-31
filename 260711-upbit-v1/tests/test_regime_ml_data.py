@@ -53,6 +53,10 @@ def _patch_common(monkeypatch, *, symbol_found: bool = True):
             raise BinanceSymbolNotFoundError("BTCUSDT")
         monkeypatch.setattr(regime_ml_data, "get_binance_close", _raise_symbol_not_found)
     monkeypatch.setattr(regime_ml_data, "compute_korea_premium_value", lambda df: pd.Series([float("nan")] * len(df), index=df.index))
+    monkeypatch.setattr(regime_ml_data, "get_fed_funds_rate", lambda *a, **k: pd.DataFrame(columns=["date", "fed_funds_rate_value"]))
+    monkeypatch.setattr(regime_ml_data, "get_us_yield_curve_spread", lambda *a, **k: pd.DataFrame(columns=["date", "treasury_yield_spread_value"]))
+    monkeypatch.setattr(regime_ml_data, "get_kr_call_rate", lambda *a, **k: pd.DataFrame(columns=["date", "kr_call_rate_value"]))
+    monkeypatch.setattr(regime_ml_data, "get_usdkrw_rate", lambda *a, **k: pd.DataFrame(columns=["date", "usdkrw_rate_value"]))
 
 
 def test_load_market_training_data_has_all_required_columns(monkeypatch):
@@ -65,6 +69,7 @@ def test_load_market_training_data_has_all_required_columns(monkeypatch):
         "close", "high", "low", "volume", "trade_value",
         "btc_close", "usdt_close", "binance_close",
         "fear_greed_value", "funding_rate_value", "korea_premium_value",
+        "fed_funds_rate_value", "treasury_yield_spread_value", "kr_call_rate_value", "usdkrw_rate_value",
     }
     assert required.issubset(set(df.columns))
     assert len(df) == 20

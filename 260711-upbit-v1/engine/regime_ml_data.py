@@ -23,6 +23,14 @@ from binance_data_service import (
     merge_funding_rate,
 )
 from external_data_service import get_fear_greed_cmc, merge_fear_greed
+from macro_data_service import (
+    get_fed_funds_rate,
+    get_kr_call_rate,
+    get_us_yield_curve_spread,
+    get_usdkrw_rate,
+    merge_fred_series,
+    merge_usdkrw_rate,
+)
 from trading.live_indicators import compute_korea_premium_value
 from upbit_data_service import get_candles
 
@@ -38,7 +46,12 @@ def load_market_training_data(
     """market의 캔들 + 학습에 필요한 모든 aux 컬럼을 병합해 반환한다. market 자체의
     캔들이 비어있으면 ValueError(어떤 피처도 계산할 수 없으므로). 그 외(BTC/USDT
     상관관계용 aux 마켓, 바이낸스 심볼 부재, 외부데이터 커버리지 부족)는 NaN으로
-    남기고 계속 진행한다."""
+    남기고 계속 진행한다.
+
+    2026-08-31 캘린더/거시경제 피처 추가 라운드에서 미국 기준금리/미국 장단기
+    국채금리차/한국 콜금리(기준금리 대리지표)/원-달러 공식환율 4개 원시 컬럼도
+    함께 병합한다(macro_data_service.py, FRED+Frankfurter, 둘 다 API 키 불필요).
+    """
     df = get_candles(market, timeframe, start, end)
     if df.empty:
         raise ValueError(
@@ -78,4 +91,17 @@ def load_market_training_data(
         df = merge_funding_rate(df, funding_df)
 
     df["korea_premium_value"] = compute_korea_premium_value(df)
+
+    fed_funds_df = get_fed_funds_rate(start, end)
+    df = merge_fred_series(df, fed_funds_df, "fed_funds_rate_value")
+
+    yield_curve_df = get_us_yield_curve_spread(start, end)
+    df = merge_fred_series(df, yield_curve_df, "treasury_yield_spread_value")
+
+    kr_call_rate_df = get_kr_call_rate(start, end)
+    df = merge_fred_series(df, kr_call_rate_df, "kr_call_rate_value")
+
+    usdkrw_df = get_usdkrw_rate(start, end)
+    df = merge_usdkrw_rate(df, usdkrw_df)
+
     return df
