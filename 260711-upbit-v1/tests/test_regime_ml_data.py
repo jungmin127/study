@@ -57,6 +57,9 @@ def _patch_common(monkeypatch, *, symbol_found: bool = True):
     monkeypatch.setattr(regime_ml_data, "get_us_yield_curve_spread", lambda *a, **k: pd.DataFrame(columns=["date", "treasury_yield_spread_value"]))
     monkeypatch.setattr(regime_ml_data, "get_kr_call_rate", lambda *a, **k: pd.DataFrame(columns=["date", "kr_call_rate_value"]))
     monkeypatch.setattr(regime_ml_data, "get_usdkrw_rate", lambda *a, **k: pd.DataFrame(columns=["date", "usdkrw_rate_value"]))
+    monkeypatch.setattr(regime_ml_data, "get_sp500_index", lambda *a, **k: pd.DataFrame(columns=["date", "sp500_close_value"]))
+    monkeypatch.setattr(regime_ml_data, "get_djia_index", lambda *a, **k: pd.DataFrame(columns=["date", "djia_close_value"]))
+    monkeypatch.setattr(regime_ml_data, "get_nasdaq_index", lambda *a, **k: pd.DataFrame(columns=["date", "nasdaq_close_value"]))
 
 
 def test_load_market_training_data_has_all_required_columns(monkeypatch):
@@ -70,6 +73,7 @@ def test_load_market_training_data_has_all_required_columns(monkeypatch):
         "btc_close", "usdt_close", "binance_close",
         "fear_greed_value", "funding_rate_value", "korea_premium_value",
         "fed_funds_rate_value", "treasury_yield_spread_value", "kr_call_rate_value", "usdkrw_rate_value",
+        "sp500_close_value", "djia_close_value", "nasdaq_close_value",
     }
     assert required.issubset(set(df.columns))
     assert len(df) == 20

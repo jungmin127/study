@@ -24,10 +24,13 @@ from binance_data_service import (
 )
 from external_data_service import get_fear_greed_cmc, merge_fear_greed
 from macro_data_service import (
+    get_djia_index,
     get_fed_funds_rate,
     get_kr_call_rate,
-    get_us_yield_curve_spread,
+    get_nasdaq_index,
+    get_sp500_index,
     get_usdkrw_rate,
+    get_us_yield_curve_spread,
     merge_fred_series,
     merge_usdkrw_rate,
 )
@@ -51,6 +54,8 @@ def load_market_training_data(
     2026-08-31 캘린더/거시경제 피처 추가 라운드에서 미국 기준금리/미국 장단기
     국채금리차/한국 콜금리(기준금리 대리지표)/원-달러 공식환율 4개 원시 컬럼도
     함께 병합한다(macro_data_service.py, FRED+Frankfurter, 둘 다 API 키 불필요).
+    같은 날 이어진 주가지수 라운드에서 S&P500/다우존스/나스닥종합 일간 종가
+    3개 원시 컬럼도 추가로 병합한다(전부 FRED, 신규 provider 없음).
     """
     df = get_candles(market, timeframe, start, end)
     if df.empty:
@@ -103,5 +108,14 @@ def load_market_training_data(
 
     usdkrw_df = get_usdkrw_rate(start, end)
     df = merge_usdkrw_rate(df, usdkrw_df)
+
+    sp500_df = get_sp500_index(start, end)
+    df = merge_fred_series(df, sp500_df, "sp500_close_value")
+
+    djia_df = get_djia_index(start, end)
+    df = merge_fred_series(df, djia_df, "djia_close_value")
+
+    nasdaq_df = get_nasdaq_index(start, end)
+    df = merge_fred_series(df, nasdaq_df, "nasdaq_close_value")
 
     return df
