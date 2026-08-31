@@ -2,10 +2,11 @@
 macro_data_service.py
 
 업비트/바이낸스가 아닌 거시경제 지표(미국 기준금리, 미국 장단기 국채금리차, 한국
-콜금리, 원/달러 공식환율)를 무료 공개 API에서 조회·캐싱한다. 재시도/캐싱 패턴은
-external_data_service.py(공포탐욕지수)를 그대로 따른다. 두 provider(FRED,
-Frankfurter) 모두 API 키가 필요 없다. 설계 문서:
-docs/superpowers/specs/2026-08-31-regime-ml-macro-calendar-features-design.md
+콜금리, 원/달러 공식환율, S&P500/다우존스/나스닥종합 일간 종가)를 무료 공개
+API에서 조회·캐싱한다. 재시도/캐싱 패턴은 external_data_service.py(공포탐욕지수)를
+그대로 따른다. 두 provider(FRED, Frankfurter) 모두 API 키가 필요 없다. 설계 문서:
+docs/superpowers/specs/2026-08-31-regime-ml-macro-calendar-features-design.md,
+docs/superpowers/specs/2026-08-31-regime-ml-stock-index-features-design.md
 
 한국은행 기준금리 자체를 제공하는 무료·키불필요 API가 없어, FRED의
 IRSTCI01KRM156N(한국 콜금리/은행간금리, OECD 경유)을 대리지표로 쓴다. 2008년
@@ -40,6 +41,9 @@ _HISTORY_START = datetime(2020, 1, 1, tzinfo=timezone.utc)
 FED_FUNDS_SERIES_ID = "FEDFUNDS"
 YIELD_CURVE_SERIES_ID = "T10Y2Y"
 KR_CALL_RATE_SERIES_ID = "IRSTCI01KRM156N"
+SP500_SERIES_ID = "SP500"
+DJIA_SERIES_ID = "DJIA"
+NASDAQ_SERIES_ID = "NASDAQCOM"
 
 
 def _fetch_fred_csv(client: httpx.Client, series_id: str, start: datetime, end: datetime) -> str:
@@ -132,6 +136,22 @@ def get_kr_call_rate(start: datetime, end: datetime) -> pd.DataFrame:
     return _get_fred_series("fred_kr_call_rate", KR_CALL_RATE_SERIES_ID, "kr_call_rate_value", start, end)
 
 
+def get_sp500_index(start: datetime, end: datetime) -> pd.DataFrame:
+    """S&P500 일간 종가(FRED SP500). 2026-08-31 주가지수 수익률 피처 추가 라운드 —
+    eta² 사전측정에서 pct_change() 형태가 USDKRW_RETURN과 동급으로 안전 확인됨
+    (docs/regime-ml-backlog.md 우선순위0 액션아이템 2번 참고). 레벨 그대로는
+    피처로 쓰지 않는다 — build_feature_matrix에서 pct_change만 계산."""
+    return _get_fred_series("fred_sp500", SP500_SERIES_ID, "sp500_close_value", start, end)
+
+
+def get_djia_index(start: datetime, end: datetime) -> pd.DataFrame:
+    return _get_fred_series("fred_djia", DJIA_SERIES_ID, "djia_close_value", start, end)
+
+
+def get_nasdaq_index(start: datetime, end: datetime) -> pd.DataFrame:
+    return _get_fred_series("fred_nasdaq", NASDAQ_SERIES_ID, "nasdaq_close_value", start, end)
+
+
 def merge_fred_series(df: pd.DataFrame, series_df: pd.DataFrame, value_col: str) -> pd.DataFrame:
     """대상 코인 캔들(df, candle_time 컬럼 필요)에 FRED 시계열(series_df, date 컬럼)을
     merge_asof(backward)로 병합한다 — external_data_service.merge_fear_greed와 동일한
@@ -204,4 +224,7 @@ __all__ = [
     "merge_fred_series",
     "get_usdkrw_rate",
     "merge_usdkrw_rate",
+    "get_sp500_index",
+    "get_djia_index",
+    "get_nasdaq_index",
 ]

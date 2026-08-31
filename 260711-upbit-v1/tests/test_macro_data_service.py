@@ -20,8 +20,11 @@ from macro_data_service import (
     _fetch_frankfurter_json,
     _parse_fred_csv,
     _parse_frankfurter_json,
+    get_djia_index,
     get_fed_funds_rate,
     get_kr_call_rate,
+    get_nasdaq_index,
+    get_sp500_index,
     get_usdkrw_rate,
     get_us_yield_curve_spread,
     merge_fred_series,
@@ -316,3 +319,41 @@ def test_merge_usdkrw_rate_backward_fills():
     merged = mds.merge_usdkrw_rate(df, rate_df)
 
     assert merged["usdkrw_rate_value"].tolist() == [1313.23, 1313.23]
+
+
+def test_get_stock_index_functions_use_distinct_cache_files_and_series_ids(monkeypatch, tmp_path):
+    """S&P500/다우/나스닥 3개 함수가 서로 다른 FRED series id/캐시 파일을 쓰는지
+    확인한다 - _get_fred_series 공용 헬퍼 재사용(get_us_yield_curve_spread 등과
+    동일 패턴)."""
+    monkeypatch.setattr(mds, "CACHE_DIR", tmp_path)
+    captured_ids = []
+
+    def fake_fetch(client, series_id, start, end):
+        captured_ids.append(series_id)
+        return "observation_date,TEMP\n2024-01-01,1.0\n"
+
+    monkeypatch.setattr(mds, "_fetch_fred_csv", fake_fetch)
+
+    get_sp500_index(datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 1, 2, tzinfo=timezone.utc))
+    get_djia_index(datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 1, 2, tzinfo=timezone.utc))
+    get_nasdaq_index(datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 1, 2, tzinfo=timezone.utc))
+
+    assert captured_ids == ["SP500", "DJIA", "NASDAQCOM"]
+    assert (tmp_path / "fred_sp500.parquet").exists()
+    assert (tmp_path / "fred_djia.parquet").exists()
+    assert (tmp_path / "fred_nasdaq.parquet").exists()
+
+
+def test_get_sp500_index_filters_to_requested_range(monkeypatch, tmp_path):
+    monkeypatch.setattr(mds, "CACHE_DIR", tmp_path)
+    today = datetime.now(timezone.utc)
+    cached = pd.DataFrame({
+        "date": pd.to_datetime(["2024-01-01", "2024-02-01", today.date()], utc=True),
+        "sp500_close_value": [4700.0, 4900.0, 5500.0],
+    })
+    cached.to_parquet(tmp_path / "fred_sp500.parquet", index=False)
+    monkeypatch.setattr(mds, "_fetch_fred_csv", _fail_fetch)
+
+    result = get_sp500_index(datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 2, 1, tzinfo=timezone.utc))
+
+    assert result["sp500_close_value"].tolist() == [4700.0, 4900.0]
