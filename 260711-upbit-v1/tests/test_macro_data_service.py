@@ -17,11 +17,15 @@ import pytest
 import macro_data_service as mds
 from macro_data_service import (
     _fetch_fred_csv,
+    _fetch_frankfurter_json,
     _parse_fred_csv,
+    _parse_frankfurter_json,
     get_fed_funds_rate,
     get_kr_call_rate,
+    get_usdkrw_rate,
     get_us_yield_curve_spread,
     merge_fred_series,
+    merge_usdkrw_rate,
 )
 
 
@@ -201,3 +205,96 @@ def test_merge_fred_series_returns_nan_when_series_df_is_empty():
     merged = merge_fred_series(df, series_df, "fed_funds_rate_value")
 
     assert merged["fed_funds_rate_value"].isna().all()
+
+
+def test_fetch_frankfurter_json_sends_correct_range_and_currencies():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/2024-01-01..2024-01-10"
+        assert request.url.params["from"] == "USD"
+        assert request.url.params["to"] == "KRW"
+        return httpx.Response(200, json={
+            "amount": 1.0, "base": "USD", "start_date": "2024-01-01", "end_date": "2024-01-10",
+            "rates": {"2024-01-02": {"KRW": 1313.23}},
+        })
+
+    with _mock_client(handler) as client:
+        payload = mds._fetch_frankfurter_json(
+            client, datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 1, 10, tzinfo=timezone.utc)
+        )
+
+    assert payload["rates"]["2024-01-02"]["KRW"] == 1313.23
+
+
+def test_fetch_frankfurter_json_raises_after_exhausting_retries(monkeypatch):
+    monkeypatch.setattr(mds, "RETRY_BASE_DELAY_SECONDS", 0.0)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    with _mock_client(handler) as client:
+        with pytest.raises(RuntimeError):
+            mds._fetch_frankfurter_json(client, datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 1, 2, tzinfo=timezone.utc))
+
+
+def test_parse_frankfurter_json_flattens_rates_to_dataframe():
+    payload = {
+        "amount": 1.0, "base": "USD", "start_date": "2023-12-29", "end_date": "2024-01-10",
+        "rates": {"2023-12-29": {"KRW": 1297.43}, "2024-01-02": {"KRW": 1313.23}},
+    }
+
+    df = mds._parse_frankfurter_json(payload)
+
+    assert list(df.columns) == ["date", "usdkrw_rate_value"]
+    assert df["date"].dt.unit == "us"
+    assert df.iloc[0]["usdkrw_rate_value"] == 1297.43
+    assert df.iloc[1]["usdkrw_rate_value"] == 1313.23
+
+
+def test_parse_frankfurter_json_handles_empty_rates():
+    df = mds._parse_frankfurter_json({"rates": {}})
+    assert list(df.columns) == ["date", "usdkrw_rate_value"]
+    assert df.empty
+
+
+def test_get_usdkrw_rate_skips_fetch_when_cache_is_fresh(monkeypatch, tmp_path):
+    monkeypatch.setattr(mds, "CACHE_DIR", tmp_path)
+    today = datetime.now(timezone.utc)
+    cached = pd.DataFrame({"date": pd.to_datetime([today.date()], utc=True), "usdkrw_rate_value": [1350.0]})
+    cached.to_parquet(tmp_path / "frankfurter_usdkrw.parquet", index=False)
+    monkeypatch.setattr(mds, "_fetch_frankfurter_json", _fail_fetch)
+
+    result = mds.get_usdkrw_rate(today - timedelta(days=1), today)
+
+    assert result.iloc[-1]["usdkrw_rate_value"] == 1350.0
+
+
+def test_get_usdkrw_rate_refetches_when_cache_is_stale(monkeypatch, tmp_path):
+    monkeypatch.setattr(mds, "CACHE_DIR", tmp_path)
+    stale_date = datetime.now(timezone.utc) - timedelta(days=3)
+    cached = pd.DataFrame({"date": pd.to_datetime([stale_date.date()], utc=True), "usdkrw_rate_value": [1300.0]})
+    cached.to_parquet(tmp_path / "frankfurter_usdkrw.parquet", index=False)
+
+    def fake_fetch(client, start, end):
+        today_str = datetime.now(timezone.utc).date().isoformat()
+        return {"rates": {today_str: {"KRW": 1400.0}}}
+
+    monkeypatch.setattr(mds, "_fetch_frankfurter_json", fake_fetch)
+
+    result = mds.get_usdkrw_rate(datetime.now(timezone.utc) - timedelta(days=1), datetime.now(timezone.utc))
+
+    assert result.iloc[-1]["usdkrw_rate_value"] == 1400.0
+
+
+def test_merge_usdkrw_rate_backward_fills():
+    df = pd.DataFrame({
+        "candle_time": pd.to_datetime(["2024-01-02 05:00", "2024-01-03 05:00"], utc=True),
+        "close": [100.0, 101.0],
+    })
+    rate_df = pd.DataFrame({
+        "date": pd.to_datetime(["2024-01-02"], utc=True),
+        "usdkrw_rate_value": [1313.23],
+    })
+
+    merged = mds.merge_usdkrw_rate(df, rate_df)
+
+    assert merged["usdkrw_rate_value"].tolist() == [1313.23, 1313.23]

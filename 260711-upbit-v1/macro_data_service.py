@@ -24,6 +24,7 @@ import httpx
 import pandas as pd
 
 FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
+FRANKFURTER_URL = "https://api.frankfurter.dev/v1"
 
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
@@ -148,9 +149,59 @@ def merge_fred_series(df: pd.DataFrame, series_df: pd.DataFrame, value_col: str)
     return merged.drop(columns="date")
 
 
+def _fetch_frankfurter_json(client: httpx.Client, start: datetime, end: datetime) -> dict:
+    last_exc: Exception | None = None
+    url = f"{FRANKFURTER_URL}/{start.date().isoformat()}..{end.date().isoformat()}"
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            resp = client.get(url, params={"from": "USD", "to": "KRW"})
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            time.sleep(RETRY_BASE_DELAY_SECONDS * (2**attempt))
+    raise RuntimeError(f"Frankfurter USD/KRW 환율 호출 실패: {last_exc}")
+
+
+def _parse_frankfurter_json(payload: dict) -> pd.DataFrame:
+    """Frankfurter 응답의 rates 딕셔너리({"YYYY-MM-DD": {"KRW": value}, ...})를
+    평평한 DataFrame으로 변환한다. 영업일 기준 갱신이라 주말/공휴일은 키 자체가
+    없다(merge_asof가 자연스럽게 직전 영업일 값으로 backward-fill)."""
+    rates = payload.get("rates", {})
+    if not rates:
+        return pd.DataFrame(columns=["date", "usdkrw_rate_value"])
+
+    records = [{"date": date_str, "usdkrw_rate_value": values["KRW"]} for date_str, values in rates.items()]
+    df = pd.DataFrame(records)
+    df["date"] = pd.to_datetime(df["date"], utc=True).dt.as_unit("us")
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def get_usdkrw_rate(start: datetime, end: datetime) -> pd.DataFrame:
+    """캐시가 오늘(UTC)을 포함하지 않으면 히스토리 전체를 재조회해 덮어쓴다 —
+    _get_fred_series와 동일한 패턴(provider가 달라 공용 헬퍼로 묶지는 않음)."""
+    cached = _load_cache("frankfurter_usdkrw", "usdkrw_rate_value")
+    today = datetime.now(timezone.utc).date()
+
+    if cached.empty or cached["date"].max().date() < today:
+        with httpx.Client(timeout=15) as client:
+            payload = _fetch_frankfurter_json(client, _HISTORY_START, datetime.now(timezone.utc))
+        cached = _parse_frankfurter_json(payload)
+        _save_cache("frankfurter_usdkrw", cached)
+
+    mask = (cached["date"].dt.date >= start.date()) & (cached["date"].dt.date <= end.date())
+    return cached[mask].reset_index(drop=True)
+
+
+def merge_usdkrw_rate(df: pd.DataFrame, rate_df: pd.DataFrame) -> pd.DataFrame:
+    return merge_fred_series(df, rate_df, "usdkrw_rate_value")
+
+
 __all__ = [
     "get_fed_funds_rate",
     "get_us_yield_curve_spread",
     "get_kr_call_rate",
     "merge_fred_series",
+    "get_usdkrw_rate",
+    "merge_usdkrw_rate",
 ]
