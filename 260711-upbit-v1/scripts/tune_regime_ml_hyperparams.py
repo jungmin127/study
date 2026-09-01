@@ -11,9 +11,17 @@ min_child_samples, 27조합)로 큰 지렛대를 먼저 찾고, 2단계(reg_alph
 생성 코드를 수동으로 갱신한다(이 스크립트가 자동으로 반영하지 않음).
 
 Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/tune_regime_ml_hyperparams.py
-(baseline 포함 총 37회 재학습 — 시작 시 baseline 1회를 먼저 재고 예상 총
+(baseline 포함 총 11회 재학습 — 시작 시 baseline 1회를 먼저 재고 예상 총
 소요시간을 출력한다. 이 값이 과도하게 크면(예: 60분 초과) 그리드를 줄이라는
 안내만 출력하고 자동으로 중단하지는 않는다 — 백그라운드 실행 가능하므로.)
+
+2026-09-01 실행 전 그리드 축소: 과거 모델 파일 타임스탬프로 역산한 단일 학습
+(5-fold, 20마켓) 소요시간이 15~30분이라, 원래 그리드(27+9=36조합)는 baseline
+포함 총 9~12시간이 걸릴 것으로 추정됐다(설계 문서의 "20~30분" 추정은 과소평가).
+"kappa 신호의 잡음/못 잡음을 확인하는 진단"이라는 목적에 비해 과한 규모라
+사용자 확인 후 1단계는 num_leaves x learning_rate 6조합(min_child_samples는
+기본값 20으로 고정), 2단계는 reg_alpha/reg_lambda 각 2개 4조합으로 축소했다
+(baseline+10조합=11회, 예상 2~4시간).
 """
 from __future__ import annotations
 
@@ -36,10 +44,10 @@ from scripts.train_regime_ml import (
 )
 
 _STAGE1_NUM_LEAVES = [15, 31, 63]
-_STAGE1_LEARNING_RATE = [0.01, 0.05, 0.1]
-_STAGE1_MIN_CHILD_SAMPLES = [10, 20, 50]
-_STAGE2_REG_ALPHA = [0.0, 0.1, 1.0]
-_STAGE2_REG_LAMBDA = [0.0, 0.1, 1.0]
+_STAGE1_LEARNING_RATE = [0.05, 0.1]
+_STAGE1_MIN_CHILD_SAMPLES = [20]  # 기본값 고정 — 2026-09-01 그리드 축소로 이번엔 탐색하지 않음
+_STAGE2_REG_ALPHA = [0.0, 0.5]
+_STAGE2_REG_LAMBDA = [0.0, 0.5]
 _SLOW_TOTAL_MINUTES_WARNING = 60.0
 
 _COMMON_KWARGS = dict(
@@ -78,6 +86,9 @@ def main() -> None:
     start_time = time.monotonic()
     baseline_kappa = _evaluate({})
     elapsed = time.monotonic() - start_time
+    if baseline_kappa is None:
+        print("baseline 실행이 pooled kappa를 계산하지 못했습니다(표본 부족 또는 단일 클래스만 존재) — 중단합니다.")
+        return
     total_combos = (
         len(_STAGE1_NUM_LEAVES) * len(_STAGE1_LEARNING_RATE) * len(_STAGE1_MIN_CHILD_SAMPLES)
         + len(_STAGE2_REG_ALPHA) * len(_STAGE2_REG_LAMBDA)

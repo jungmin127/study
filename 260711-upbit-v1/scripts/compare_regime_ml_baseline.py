@@ -70,6 +70,16 @@ def _print_comparison(lightgbm_result: TrainingResult, lr_result: TrainingResult
     lgb_pooled = lightgbm_result.pooled
     lr_pooled = lr_result.pooled
 
+    # pooled 표본이 0이거나(전 fold 스킵) 단일 클래스만 존재하면 weighted_kappa/
+    # macro_f1이 None이다(engine/regime_ml_metrics.py) — 이 경우 비교 자체가
+    # 무의미하므로 포맷팅 크래시 대신 이유를 밝히고 중단한다.
+    if lgb_pooled["weighted_kappa"] is None or lr_pooled["weighted_kappa"] is None:
+        print(
+            "\n비교 불가: LightGBM 또는 LogisticRegression의 pooled kappa를 "
+            f"계산하지 못했습니다(LightGBM n={lgb_pooled['n']}, LR n={lr_pooled['n']})."
+        )
+        return
+
     print("\n=== LightGBM vs LogisticRegression(L2) — pooled walk-forward 비교 ===")
     print(f"{'모델':<20}{'n':>8}{'macro F1':>12}{'weighted kappa':>18}")
     print(
