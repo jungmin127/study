@@ -208,14 +208,18 @@ def run_training(
             train_w_parts.append(weights[train_mask])
             test_X_parts.append(features_df[test_mask])
             test_y_parts.append(labels[test_mask])
-            test_time_parts.append(candle_time[test_mask])
+            if collect_oof:
+                test_time_parts.append(candle_time[test_mask])
 
         train_X = pd.concat(train_X_parts)
         train_y = pd.concat(train_y_parts)
         train_w = pd.concat(train_w_parts)
         test_X = pd.concat(test_X_parts)
         test_y = pd.concat(test_y_parts)
-        test_time = pd.concat(test_time_parts)
+        # collect_oof=False(기본값)면 test_time을 아예 만들지 않는다 — 기존
+        # 호출부가 이 파라미터로 인한 추가 연산 비용을 전혀 지지 않게 하기 위함
+        # (2026-09-01 태스크 리뷰 Important 지적).
+        test_time = pd.concat(test_time_parts) if collect_oof else None
 
         if len(train_y) < min_train_samples or test_y.empty:
             print(f"[fold {fold.fold_index}] 표본 부족(train={len(train_y)}, test={len(test_y)}) — 건너뜀")
