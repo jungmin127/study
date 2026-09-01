@@ -65,10 +65,13 @@ MODEL_OUTPUT_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
 class TrainingResult:
     """run_training()의 반환값. reports는 기존 fold별 리포트 리스트와 완전히
     동일하다 — pooled/per_market은 원래 함수 내부에서만 계산되고 sidecar JSON에만
-    남던 값을 호출자가 직접 접근할 수 있게 노출한 것(비교/튜닝 스크립트가 필요)."""
+    남던 값을 호출자가 직접 접근할 수 있게 노출한 것(비교/튜닝 스크립트가 필요).
+    oof는 collect_oof=True일 때만 채워지는 원본 out-of-fold 예측 데이터프레임
+    (메타 레이블링 스크립트가 소비, scripts/train_regime_ml_meta_label.py 참고)."""
     reports: list[dict]
     pooled: dict
     per_market: dict[str, dict]
+    oof: pd.DataFrame | None = None
 
 
 def _default_lgbm_factory() -> lgb.LGBMClassifier:
@@ -99,6 +102,7 @@ def run_training(
     preprocess_fold: Callable[[pd.DataFrame, pd.DataFrame], tuple[pd.DataFrame, pd.DataFrame]] | None = None,
     save_model: bool = True,
     n_multiplier: float = N_MULTIPLIER,
+    collect_oof: bool = False,
 ) -> TrainingResult:
     """마켓별로 데이터를 한 번씩만 로드/피처화(fold마다 반복하지 않음)하고, 워크포워드
     fold 루프를 돌며 모델을 학습·평가한다(기본은 LightGBM, model_factory로 교체
@@ -122,7 +126,13 @@ def run_training(
     중 하나라도 바뀐 실험용 모델이 data/regime_ml_models/에 저장되면
     backend/regime_ml_service.py가 파일명 정렬로 최신 모델을 서빙 모델로 골라
     실서비스에 실험 결과가 섞여 들어갈 수 있다(2026-09-01 최종 리뷰 Important
-    지적, ValueError로 가드)."""
+    지적, ValueError로 가드).
+
+    collect_oof=True면 fold 루프의 테스트 구간 원본 행(74개 피처+candle_time/
+    market/true_label/proba_down)을 모아 TrainingResult.oof에 담는다(메타
+    레이블링 스크립트가 소비, scripts/train_regime_ml_meta_label.py 참고).
+    모델 자체를 바꾸지 않으므로 save_model 가드와 무관하다. 기본값(False)이면
+    oof=None이고 추가 연산/메모리 비용이 없다."""
     if save_model and (
         model_factory is not _default_lgbm_factory
         or preprocess_fold is not None
@@ -184,9 +194,11 @@ def run_training(
     all_pred: list[str] = []
     all_markets: list[str] = []
     all_proba_down: list[float] = []
+    oof_records: list[pd.DataFrame] = []
 
     for fold in folds:
         train_X_parts, train_y_parts, train_w_parts, test_X_parts, test_y_parts = [], [], [], [], []
+        test_time_parts = []
         for candle_time, features_df, labels, weights in market_frames.values():
             valid = labels.notna()
             train_mask = valid & (candle_time <= fold.train_end)
@@ -196,12 +208,14 @@ def run_training(
             train_w_parts.append(weights[train_mask])
             test_X_parts.append(features_df[test_mask])
             test_y_parts.append(labels[test_mask])
+            test_time_parts.append(candle_time[test_mask])
 
         train_X = pd.concat(train_X_parts)
         train_y = pd.concat(train_y_parts)
         train_w = pd.concat(train_w_parts)
         test_X = pd.concat(test_X_parts)
         test_y = pd.concat(test_y_parts)
+        test_time = pd.concat(test_time_parts)
 
         if len(train_y) < min_train_samples or test_y.empty:
             print(f"[fold {fold.fold_index}] 표본 부족(train={len(train_y)}, test={len(test_y)}) — 건너뜀")
@@ -241,6 +255,13 @@ def run_training(
         }
         reports.append(report)
         _print_fold_report(report)
+
+        if collect_oof:
+            oof_chunk = test_X_fit.copy()
+            oof_chunk["candle_time"] = test_time.to_numpy()
+            oof_chunk["true_label"] = true_values
+            oof_chunk["proba_down"] = proba_down
+            oof_records.append(oof_chunk)
 
         all_true.extend(true_values)
         all_pred.extend(predictions)
@@ -307,7 +328,8 @@ def run_training(
         with open(model_output_dir / f"{base_name}.json", "w", encoding="utf-8") as f:
             json.dump(sidecar, f, ensure_ascii=False, indent=2)
 
-    return TrainingResult(reports=reports, pooled=pooled_metrics, per_market=per_market_metrics)
+    oof = pd.concat(oof_records, ignore_index=True) if oof_records else None
+    return TrainingResult(reports=reports, pooled=pooled_metrics, per_market=per_market_metrics, oof=oof)
 
 
 def _print_metrics_block(metrics: dict) -> None:

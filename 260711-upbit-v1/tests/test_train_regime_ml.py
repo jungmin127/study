@@ -626,3 +626,59 @@ def test_run_training_rejects_save_model_true_with_custom_preprocess_fold(tmp_pa
             model_output_dir=tmp_path,
             preprocess_fold=lambda train_X, test_X: (train_X, test_X),
         )
+
+
+def test_run_training_collect_oof_returns_dataframe_with_expected_columns(tmp_path, monkeypatch):
+    """collect_oof=True면 result.oof가 74개 피처+candle_time/market/true_label/
+    proba_down 컬럼을 가진 DataFrame이고, 행 수가 pooled 표본 수와 일치하는지
+    확인한다(메타 레이블링 스크립트가 이 데이터프레임에 의존)."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    result = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+        save_model=False,
+        collect_oof=True,
+    )
+
+    assert result.oof is not None
+    assert len(result.oof) == result.pooled["n"]
+    for column in ("candle_time", "market", "true_label", "proba_down"):
+        assert column in result.oof.columns
+    assert "RAW_SCORE" in result.oof.columns  # 74개 피처 중 하나 대표 확인
+    assert set(result.oof["true_label"].unique()) <= set(train_regime_ml.CATEGORY_LABELS)
+    assert result.oof["proba_down"].between(0.0, 1.0).all()
+
+
+def test_run_training_collect_oof_false_returns_none(tmp_path, monkeypatch):
+    """collect_oof을 생략(기본값 False)하면 result.oof가 None이고 기존 동작에
+    영향이 없는지 확인한다(회귀 안전장치)."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    result = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+        save_model=False,
+    )
+
+    assert result.oof is None
