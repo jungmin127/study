@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import scripts.train_regime_ml as train_regime_ml
 from scripts.train_regime_ml import run_training
@@ -189,12 +190,17 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
         sidecar = json.load(f)
 
     assert set(sidecar.keys()) == {
-        "markets", "labeling_method", "barrier_k", "classes", "fold_index", "performance",
-        "decision_threshold", "calibration_breakpoints", "threshold_table",
+        "markets", "labeling_method", "barrier_k", "n_multiplier", "n_bars", "classes",
+        "fold_index", "performance", "decision_threshold", "calibration_breakpoints",
+        "threshold_table",
     }
     assert sidecar["markets"] == list(seeds.keys())
     assert sidecar["labeling_method"] == "triple_barrier"
     assert sidecar["barrier_k"] == _BARRIER_K
+    assert sidecar["n_multiplier"] == train_regime_ml.N_MULTIPLIER
+    assert sidecar["n_bars"] == round(
+        train_regime_ml.half_life_bars_for_timeframe("minutes60") * train_regime_ml.N_MULTIPLIER
+    )
     # set()이 아니라 순서를 그대로 비교한다 — LightGBM의 model.classes_는 이
     # 한국어 레이블들을 유니코드 코드포인트 순으로 정렬하는데(실측: sorted(['하락',
     # '하락아님']) == ['하락', '하락아님']), 이 값이 마침 sorted(CATEGORY_LABELS)와
@@ -550,3 +556,73 @@ def test_run_training_custom_n_multiplier_changes_n_bars(tmp_path, monkeypatch):
     )
     assert all(n == expected_n_bars for n in captured_n_bars)
     assert expected_n_bars != default_n_bars  # 실제로 다른 값이어야 의미있는 테스트
+
+
+def test_run_training_rejects_save_model_true_with_custom_model_factory(tmp_path, monkeypatch):
+    """save_model=True(기본값)와 커스텀 model_factory를 함께 쓰면 실험용 모델이
+    data/regime_ml_models/에 저장돼 서빙 모델로 오인될 위험이 있어 ValueError를
+    낸다(2026-09-01 최종 리뷰 Important 지적)."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    with pytest.raises(ValueError):
+        run_training(
+            markets=list(seeds.keys()),
+            timeframe="minutes60",
+            start=START,
+            end=START + pd.Timedelta(hours=_N),
+            n_folds=2,
+            min_train_samples=50,
+            barrier_k=_BARRIER_K,
+            model_output_dir=tmp_path,
+            model_factory=lambda: train_regime_ml.lgb.LGBMClassifier(),
+        )
+
+
+def test_run_training_rejects_save_model_true_with_custom_n_multiplier(tmp_path, monkeypatch):
+    """save_model=True(기본값)와 기본값이 아닌 n_multiplier를 함께 쓰면 마찬가지로
+    ValueError를 낸다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    with pytest.raises(ValueError):
+        run_training(
+            markets=list(seeds.keys()),
+            timeframe="minutes60",
+            start=START,
+            end=START + pd.Timedelta(hours=_N),
+            n_folds=2,
+            min_train_samples=50,
+            barrier_k=_BARRIER_K,
+            model_output_dir=tmp_path,
+            n_multiplier=1.0,
+        )
+
+
+def test_run_training_rejects_save_model_true_with_custom_preprocess_fold(tmp_path, monkeypatch):
+    """save_model=True(기본값)와 커스텀 preprocess_fold를 함께 쓰면 마찬가지로
+    ValueError를 낸다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    with pytest.raises(ValueError):
+        run_training(
+            markets=list(seeds.keys()),
+            timeframe="minutes60",
+            start=START,
+            end=START + pd.Timedelta(hours=_N),
+            n_folds=2,
+            min_train_samples=50,
+            barrier_k=_BARRIER_K,
+            model_output_dir=tmp_path,
+            preprocess_fold=lambda train_X, test_X: (train_X, test_X),
+        )

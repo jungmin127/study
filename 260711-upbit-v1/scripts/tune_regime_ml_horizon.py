@@ -24,6 +24,7 @@ Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/tune_regime_ml_horizon.p
 """
 from __future__ import annotations
 
+from engine.regime_math import N_MULTIPLIER
 from engine.regime_ml_constants import TRAINING_MARKETS
 from scripts.train_regime_ml import (
     BARRIER_K,
@@ -36,8 +37,16 @@ from scripts.train_regime_ml import (
     run_training,
 )
 
-_CANDIDATES = [0.5, 1.0, 1.5, 2.5, 4.0]  # 2.5 = 현재 프로덕션 값(N_MULTIPLIER)
-_CURRENT_PRODUCTION_VALUE = 2.5
+# N_MULTIPLIER를 하드코딩하지 않고 import해서 쓴다 — 이 상수가 실제로 바뀌면
+# "<- 현재 프로덕션 값" 표시와 델타 비교 기준이 자동으로 따라가야 하므로
+# (2026-09-01 최종 리뷰 Minor 지적).
+_CANDIDATES = [0.5, 1.0, 1.5, N_MULTIPLIER, 4.0]
+_CURRENT_PRODUCTION_VALUE = N_MULTIPLIER
+# 2026-09-01 실측은 전체 5개를 한 번에 돌리지 않고 0.5/4.0만 개별 실행했다
+# (단일 학습 실측 소요시간이 설계 추정보다 훨씬 길어 사용자 판단으로 조기 종료
+# — docs/regime-ml-backlog.md "horizon(N_MULTIPLIER) 그리드서치" 절 참고).
+# 이 파일 그대로(_CANDIDATES 5개 전부) 재실행하면 그 시점 실측 기준 총
+# ~10시간 규모 작업이니, 재실행 전 후보 목록을 먼저 줄이는 것을 고려할 것.
 
 _COMMON_KWARGS = dict(
     markets=TRAINING_MARKETS,

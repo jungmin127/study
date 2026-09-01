@@ -5,15 +5,17 @@ LightGBM 하이퍼파라미터 축소 그리드서치. docs/ML_Regime_Switching_
 Improvements.md 4절 우선순위 5번 — 지금 학습(scripts/train_regime_ml.py)은
 objective/class_weight/importance_type/random_state 외 전부 sklearn 기본값을
 쓴다. 2단계로 나눠 조합 폭발을 억제한다: 1단계(num_leaves/learning_rate/
-min_child_samples, 27조합)로 큰 지렛대를 먼저 찾고, 2단계(reg_alpha/reg_lambda,
-9조합)로 1단계 최적값 위에 정규화를 추가 탐색한다. select_barrier_k.py와 같은
-성격의 1회성 진단 스크립트 — 결과가 채택되면 train_regime_ml.py의 LightGBM
-생성 코드를 수동으로 갱신한다(이 스크립트가 자동으로 반영하지 않음).
+min_child_samples)로 큰 지렛대를 먼저 찾고, 2단계(reg_alpha/reg_lambda)로
+1단계 최적값 위에 정규화를 추가 탐색한다. 실제 그리드 크기(원래 27+9조합 →
+두 차례 축소돼 지금은 2+1조합)는 아래 "실행 전/중 그리드 축소" 이력 참고 —
+select_barrier_k.py와 같은 성격의 1회성 진단 스크립트로, 결과가 채택되면
+train_regime_ml.py의 LightGBM 생성 코드를 수동으로 갱신한다(이 스크립트가
+자동으로 반영하지 않음).
 
 Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/tune_regime_ml_hyperparams.py
-(baseline 포함 총 11회 재학습 — 시작 시 baseline 1회를 먼저 재고 예상 총
-소요시간을 출력한다. 이 값이 과도하게 크면(예: 60분 초과) 그리드를 줄이라는
-안내만 출력하고 자동으로 중단하지는 않는다 — 백그라운드 실행 가능하므로.)
+(현재 그리드 기준 baseline 포함 총 4회 재학습 — 시작 시 baseline 1회를 먼저
+재고 예상 총 소요시간을 출력한다. 이 값이 과도하게 크면(예: 60분 초과) 그리드를
+줄이라는 안내만 출력하고 자동으로 중단하지는 않는다 — 백그라운드 실행 가능하므로.)
 
 2026-09-01 실행 전 그리드 축소(1차): 과거 모델 파일 타임스탬프로 역산한 단일 학습
 (5-fold, 20마켓) 소요시간이 15~30분이라, 원래 그리드(27+9=36조합)는 baseline
@@ -125,6 +127,10 @@ def main() -> None:
         if kappa is not None and kappa > best_stage1_kappa:
             best_stage1_kappa = kappa
             best_stage1_params = params
+
+    if best_stage1_kappa == float("-inf"):
+        print("\n1단계 모든 조합이 pooled kappa를 계산하지 못했습니다(표본 부족 또는 단일 클래스만 존재) — 중단합니다.")
+        return
 
     print(f"\n1단계 최적: {best_stage1_params} (kappa={best_stage1_kappa:.3f})")
 

@@ -101,11 +101,12 @@ def run_training(
     n_multiplier: float = N_MULTIPLIER,
 ) -> TrainingResult:
     """마켓별로 데이터를 한 번씩만 로드/피처화(fold마다 반복하지 않음)하고, 워크포워드
-    fold 루프를 돌며 LightGBM을 학습·평가한다. Triple Barrier 레이블(하락 vs 하락아님
-    이진분류)로 학습하고, fold별 + 전체 풀링 + 마켓별 분류지표(macro F1/weighted kappa/confusion/
-    precision·recall)를 계산한다. fold별 리포트 리스트를 반환하고, 마지막으로 성공한
-    fold의 모델을 model_output_dir에 저장한다. 표본이 min_train_samples 미만이거나
-    테스트 표본이 없는 fold는 건너뛴다.
+    fold 루프를 돌며 모델을 학습·평가한다(기본은 LightGBM, model_factory로 교체
+    가능). Triple Barrier 레이블(하락 vs 하락아님 이진분류)로 학습하고, fold별 +
+    전체 풀링 + 마켓별 분류지표(macro F1/weighted kappa/confusion/precision·recall)를
+    계산해 TrainingResult(reports/pooled/per_market)로 반환한다. save_model=True
+    (기본값)이면 마지막으로 성공한 fold의 모델을 model_output_dir에 저장한다.
+    표본이 min_train_samples 미만이거나 테스트 표본이 없는 fold는 건너뛴다.
 
     model_factory/preprocess_fold로 LightGBM 대신 다른 분류기를 끼워 비교/튜닝
     스크립트에서 재사용할 수 있다(scripts/compare_regime_ml_baseline.py,
@@ -114,7 +115,24 @@ def run_training(
 
     n_multiplier로 라벨 horizon(n_bars = half_life_bars * n_multiplier)을 바꿔
     scripts/tune_regime_ml_horizon.py에서 재사용할 수 있다. half_life_bars(피처
-    EWM 윈도우)는 영향받지 않는다."""
+    EWM 윈도우)는 영향받지 않는다.
+
+    save_model=True는 모든 파라미터가 기본값(기본 LightGBM 팩토리, 기본 전처리,
+    기본 n_multiplier)일 때만 허용한다 — model_factory/preprocess_fold/n_multiplier
+    중 하나라도 바뀐 실험용 모델이 data/regime_ml_models/에 저장되면
+    backend/regime_ml_service.py가 파일명 정렬로 최신 모델을 서빙 모델로 골라
+    실서비스에 실험 결과가 섞여 들어갈 수 있다(2026-09-01 최종 리뷰 Important
+    지적, ValueError로 가드)."""
+    if save_model and (
+        model_factory is not _default_lgbm_factory
+        or preprocess_fold is not None
+        or n_multiplier != N_MULTIPLIER
+    ):
+        raise ValueError(
+            "save_model=True는 model_factory/preprocess_fold/n_multiplier가 전부 기본값일 "
+            "때만 허용됩니다 — 실험용 설정을 쓸 때는 save_model=False를 명시하세요(실험용 "
+            "모델이 data/regime_ml_models/에 저장돼 서빙 모델로 오인되는 걸 막기 위함)."
+        )
     half_life_bars = half_life_bars_for_timeframe(timeframe)
     n_bars = round(half_life_bars * n_multiplier)
     embargo = timeframe_duration(timeframe) * n_bars
@@ -264,6 +282,8 @@ def run_training(
             "markets": markets,
             "labeling_method": "triple_barrier",
             "barrier_k": barrier_k,
+            "n_multiplier": n_multiplier,
+            "n_bars": n_bars,
             "classes": last_class_order,
             "fold_index": last_fold_index,
             "decision_threshold": decision_threshold,
