@@ -469,3 +469,84 @@ def test_run_training_respects_save_model_false(tmp_path, monkeypatch):
     assert len(result.reports) >= 1
     assert list(tmp_path.glob("*.txt")) == []
     assert list(tmp_path.glob("*.json")) == []
+
+
+def test_run_training_default_n_multiplier_matches_module_constant(tmp_path, monkeypatch):
+    """n_multiplier를 생략하면 지금까지와 동일하게 모듈 상수 N_MULTIPLIER로
+    n_bars가 계산되는지 확인한다(회귀 안전장치) — compute_triple_barrier_labels
+    호출 인자를 가로챈다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    captured_n_bars = []
+    original_labels = train_regime_ml.compute_triple_barrier_labels
+
+    def _capturing_labels(df, half_life_bars, n_bars, k):
+        captured_n_bars.append(n_bars)
+        return original_labels(df, half_life_bars, n_bars, k)
+
+    monkeypatch.setattr(train_regime_ml, "compute_triple_barrier_labels", _capturing_labels)
+
+    result = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+        save_model=False,
+    )
+
+    assert len(result.reports) >= 1
+    assert len(captured_n_bars) == len(seeds)  # 마켓별로 한 번씩 호출됨
+    expected_n_bars = round(
+        train_regime_ml.half_life_bars_for_timeframe("minutes60") * train_regime_ml.N_MULTIPLIER
+    )
+    assert all(n == expected_n_bars for n in captured_n_bars)
+
+
+def test_run_training_custom_n_multiplier_changes_n_bars(tmp_path, monkeypatch):
+    """n_multiplier를 다르게 넘기면 실제로 다른 n_bars가 라벨링에 쓰이는지
+    확인한다 — 기본값(N_MULTIPLIER=2.5, minutes60 기준 n_bars=60)과 다른
+    n_multiplier=1.0(n_bars=24)을 넘겨 값이 바뀌는지 검증."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    captured_n_bars = []
+    original_labels = train_regime_ml.compute_triple_barrier_labels
+
+    def _capturing_labels(df, half_life_bars, n_bars, k):
+        captured_n_bars.append(n_bars)
+        return original_labels(df, half_life_bars, n_bars, k)
+
+    monkeypatch.setattr(train_regime_ml, "compute_triple_barrier_labels", _capturing_labels)
+
+    result = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+        n_multiplier=1.0,
+        save_model=False,
+    )
+
+    assert len(result.reports) >= 1
+    assert len(captured_n_bars) == len(seeds)
+    expected_n_bars = round(train_regime_ml.half_life_bars_for_timeframe("minutes60") * 1.0)
+    default_n_bars = round(
+        train_regime_ml.half_life_bars_for_timeframe("minutes60") * train_regime_ml.N_MULTIPLIER
+    )
+    assert all(n == expected_n_bars for n in captured_n_bars)
+    assert expected_n_bars != default_n_bars  # 실제로 다른 값이어야 의미있는 테스트

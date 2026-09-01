@@ -98,6 +98,7 @@ def run_training(
     model_factory: Callable[[], Any] = _default_lgbm_factory,
     preprocess_fold: Callable[[pd.DataFrame, pd.DataFrame], tuple[pd.DataFrame, pd.DataFrame]] | None = None,
     save_model: bool = True,
+    n_multiplier: float = N_MULTIPLIER,
 ) -> TrainingResult:
     """마켓별로 데이터를 한 번씩만 로드/피처화(fold마다 반복하지 않음)하고, 워크포워드
     fold 루프를 돌며 LightGBM을 학습·평가한다. Triple Barrier 레이블(하락 vs 하락아님
@@ -109,9 +110,13 @@ def run_training(
     model_factory/preprocess_fold로 LightGBM 대신 다른 분류기를 끼워 비교/튜닝
     스크립트에서 재사용할 수 있다(scripts/compare_regime_ml_baseline.py,
     scripts/tune_regime_ml_hyperparams.py 참고). save_model=False면 모델 파일/
-    JSON 사이드카를 저장하지 않는다(data/regime_ml_models/ 오염 방지)."""
+    JSON 사이드카를 저장하지 않는다(data/regime_ml_models/ 오염 방지).
+
+    n_multiplier로 라벨 horizon(n_bars = half_life_bars * n_multiplier)을 바꿔
+    scripts/tune_regime_ml_horizon.py에서 재사용할 수 있다. half_life_bars(피처
+    EWM 윈도우)는 영향받지 않는다."""
     half_life_bars = half_life_bars_for_timeframe(timeframe)
-    n_bars = round(half_life_bars * N_MULTIPLIER)
+    n_bars = round(half_life_bars * n_multiplier)
     embargo = timeframe_duration(timeframe) * n_bars
 
     print(f"half_life_bars={half_life_bars:.1f}, n_bars={n_bars}, timeframe={timeframe}, barrier_k={barrier_k}")
