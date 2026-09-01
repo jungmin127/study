@@ -659,6 +659,16 @@ def test_run_training_collect_oof_returns_dataframe_with_expected_columns(tmp_pa
     assert set(result.oof["true_label"].unique()) <= set(train_regime_ml.CATEGORY_LABELS)
     assert result.oof["proba_down"].between(0.0, 1.0).all()
 
+    # 행 정렬 검증(2026-09-01 최종 리뷰 지적) — candle_time/true_label/proba_down이
+    # 피처 행과 뒤섞이면 위 컬럼/행수 검증만으로는 못 잡는다. 마켓별 행 수가
+    # per_market 지표의 표본 수와 일치하는지(마켓 뒤섞임 감지), 마켓 안에서
+    # candle_time이 fold 순서대로 단조증가하는지(시간 뒤섞임 감지)로 보강한다.
+    counts = result.oof.groupby("market", observed=True).size().to_dict()
+    for market in seeds:
+        assert counts[market] == result.per_market[market]["n"]
+    for _, group in result.oof.groupby("market", observed=True):
+        assert group["candle_time"].is_monotonic_increasing
+
 
 def test_run_training_collect_oof_false_returns_none(tmp_path, monkeypatch):
     """collect_oof을 생략(기본값 False)하면 result.oof가 None이고 기존 동작에

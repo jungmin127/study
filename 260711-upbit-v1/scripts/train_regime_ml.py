@@ -198,7 +198,7 @@ def run_training(
 
     for fold in folds:
         train_X_parts, train_y_parts, train_w_parts, test_X_parts, test_y_parts = [], [], [], [], []
-        test_time_parts = []
+        test_time_parts: list[pd.Series] = []
         for candle_time, features_df, labels, weights in market_frames.values():
             valid = labels.notna()
             train_mask = valid & (candle_time <= fold.train_end)
