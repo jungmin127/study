@@ -214,8 +214,10 @@ subagent-driven-development로 진행, Task 1~7 전부 완료. Task 1~3(FRED/Fra
     선택 로직에 최소 표본수 필터를 추가하는 게 다음 후보.
   - **남은 후보(다음 세션)**: (c-1) CUSUM 이벤트 샘플링(sample uniqueness가
     kappa를 거의 못 올려서 재고 대상), (c-2) 로지스틱회귀 baseline 비교 +
-    LightGBM 하이퍼파라미터 튜닝(문서 우선순위 5번, 미착수), (c-3) 메타 레이블링
-    (문서 우선순위 6번, 미착수), (c-4) threshold 튜닝 실효성 개선(위 참고).
+    LightGBM 하이퍼파라미터 튜닝 — **완료(2026-09-01)**, baseline 비교 결과
+    LR과 거의 동급(아래 "c-2" 절 참고), 튜닝은 낮은 기대효과 판단으로 중단,
+    (c-3) 메타 레이블링(문서 우선순위 6번, 미착수), (c-4) threshold 튜닝
+    실효성 개선(위 참고).
 
 ## 다음 세션 작업 후보
 
@@ -329,11 +331,45 @@ push_regime_ml_model.sh`는 모델만** 배포한다. 코드와 모델은 반드
 탭에서 최소 1개 마켓의 ML 예측이 500이 아니라 200으로 정상 응답하는지
 확인**할 것.
 
-### 우선순위 1(다음 착수 후보) — c-2 로지스틱회귀 baseline + LightGBM 하이퍼파라미터 튜닝
+### c-2 로지스틱회귀 baseline + LightGBM 하이퍼파라미터 튜닝 — 완료(2026-09-01, baseline 비교만)
 
-`docs/regime-ml-backlog.md`의 잔여 후보 (c) 중 미착수 항목. 우선순위 0의
-남은 항목(코스피/코스닥/S&P500 등 지수 피처, PBO 프레임워크)과 반드시
-순서를 지킬 필요는 없음(서로 다른 축) — 사용자 판단에 따라 먼저 진행해도 무방.
+설계: `docs/superpowers/specs/2026-09-01-regime-ml-baseline-and-tuning-design.md`.
+계획: `docs/superpowers/plans/2026-09-01-regime-ml-baseline-and-tuning.md`. 구현:
+`scripts/train_regime_ml.py`(model_factory/preprocess_fold/save_model 확장,
+`TrainingResult` 반환), `scripts/compare_regime_ml_baseline.py`,
+`scripts/tune_regime_ml_hyperparams.py`.
+
+**baseline 비교 실측 결과(20마켓 실데이터, pooled n=387,610)**:
+
+| 모델 | macro F1 | weighted kappa |
+|---|---|---|
+| LightGBM(현재 기본 하이퍼파라미터) | 0.547 | 0.105 |
+| LogisticRegression(L2) | 0.542 | **0.115** |
+
+kappa(1순위 지표) 기준으로는 LogisticRegression이 +0.010 근소 우세, macro F1(2순위)
+기준으로는 LightGBM이 +0.005 근소 우세 — **두 지표가 서로 다른 방향을 가리켜
+어느 한쪽의 명확한 승리로 보기 어렵다.** 델타 크기(0.010)도 이 프로젝트가
+과거 실측한 자연변동폭(±0.005, 동일 코드 재실행 시 `TRAIN_END=datetime.now()`
+드리프트로 생기는 변동)의 2배 수준이라 애매한 구간. 다만 **"단순 선형모델이
+LightGBM과 거의 동급"이라는 사실 자체가 중요한 신호** — 병목이 트리모델의
+표현력 부족/과잉이 아니라 피처에 담긴 신호 자체가 약하다는 뜻에 가깝다는
+해석을 뒷받침한다.
+
+**하이퍼파라미터 튜닝은 사용자 판단으로 실행 도중 중단, 미완료**: 실행시간이
+설계 단계 추정(20~30분)을 크게 초과해(baseline 1회 재학습이 40분+, 축소 그리드로
+두 차례 더 줄인 뒤에도 실측 기준 2.5~3시간 규모) 실행 중이던 프로세스를 중단했다.
+근본 이유는 시간이 아니라 **"위 baseline 비교 결과(LR과 거의 동급)가 이미
+하이퍼파라미터 튜닝의 기대 효과가 낮다는 걸 시사한다"**는 판단 — 이 스크립트도
+`docs/ML_Regime_Switching_Additional_Improvements.md` 우선순위 6개 중 5순위(가장
+낮은 축)로 이미 분류돼 있었다. 스크립트(`scripts/tune_regime_ml_hyperparams.py`)는
+코드로 남겨두되(재실행 가능), 이번 세션에서는 결과 없이 종료.
+
+**결정**: 하이퍼파라미터 미세조정보다 **더 근본적인 빅스텝**(문제 재정의/피처
+구조/레이블링 자체 재검토)이 우선순위가 높다고 판단 — 다음 세션에서 브레인스토밍
+필요. 후보: 메타 레이블링(c-3), CUSUM 이벤트 샘플링(c-1), 또는
+`docs/ML_Regime_Switching_Improvement_Plan.md`의 더 큰 구조적 제안들(문제 재정의
+2~3단계 단순화, HMM 비지도 장세 클러스터링, 전략별 기대수익 직접예측 등,
+2026-08-29 커밋 안 된 상태로 남아있던 문서).
 
 ### 우선순위 2 — ③ 실시간 자동 장세 대응 개발
 
