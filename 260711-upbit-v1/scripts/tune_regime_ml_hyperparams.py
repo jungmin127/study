@@ -15,13 +15,17 @@ Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/tune_regime_ml_hyperpara
 소요시간을 출력한다. 이 값이 과도하게 크면(예: 60분 초과) 그리드를 줄이라는
 안내만 출력하고 자동으로 중단하지는 않는다 — 백그라운드 실행 가능하므로.)
 
-2026-09-01 실행 전 그리드 축소: 과거 모델 파일 타임스탬프로 역산한 단일 학습
+2026-09-01 실행 전 그리드 축소(1차): 과거 모델 파일 타임스탬프로 역산한 단일 학습
 (5-fold, 20마켓) 소요시간이 15~30분이라, 원래 그리드(27+9=36조합)는 baseline
 포함 총 9~12시간이 걸릴 것으로 추정됐다(설계 문서의 "20~30분" 추정은 과소평가).
-"kappa 신호의 잡음/못 잡음을 확인하는 진단"이라는 목적에 비해 과한 규모라
-사용자 확인 후 1단계는 num_leaves x learning_rate 6조합(min_child_samples는
-기본값 20으로 고정), 2단계는 reg_alpha/reg_lambda 각 2개 4조합으로 축소했다
-(baseline+10조합=11회, 예상 2~4시간).
+1차로 1단계 num_leaves x learning_rate 6조합(min_child_samples 기본값 20 고정),
+2단계 reg_alpha/reg_lambda 각 2개 4조합으로 축소(baseline+10조합=11회, 예상 2~4시간).
+
+2026-09-01 실행 중 2차 축소: 실제 baseline 1회 실행이 40분을 넘겨 총 예상이
+6~8시간으로 늘어나(1차 추정도 과소평가였음), 실행 중이던 프로세스를 중단하고
+1단계를 num_leaves=31(기본값) 고정 x learning_rate(0.05/0.1) 2조합으로, 2단계를
+reg_alpha=0.5/reg_lambda=0.5 1조합으로 재축소했다(baseline+3조합=4회, 예상
+2.5~3시간, 실측 단일 학습 시간 ~40분 기준).
 """
 from __future__ import annotations
 
@@ -43,11 +47,11 @@ from scripts.train_regime_ml import (
     run_training,
 )
 
-_STAGE1_NUM_LEAVES = [15, 31, 63]
+_STAGE1_NUM_LEAVES = [31]  # 기본값 고정 — 2026-09-01 2차 그리드 축소로 이번엔 탐색하지 않음
 _STAGE1_LEARNING_RATE = [0.05, 0.1]
-_STAGE1_MIN_CHILD_SAMPLES = [20]  # 기본값 고정 — 2026-09-01 그리드 축소로 이번엔 탐색하지 않음
-_STAGE2_REG_ALPHA = [0.0, 0.5]
-_STAGE2_REG_LAMBDA = [0.0, 0.5]
+_STAGE1_MIN_CHILD_SAMPLES = [20]  # 기본값 고정 — 1차 그리드 축소로 탐색하지 않음
+_STAGE2_REG_ALPHA = [0.5]  # 2차 그리드 축소로 단일값만 추가 확인
+_STAGE2_REG_LAMBDA = [0.5]
 _SLOW_TOTAL_MINUTES_WARNING = 60.0
 
 _COMMON_KWARGS = dict(
