@@ -57,7 +57,7 @@ def test_run_training_completes_and_saves_model(tmp_path, monkeypatch):
         lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
     )
 
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -67,6 +67,7 @@ def test_run_training_completes_and_saves_model(tmp_path, monkeypatch):
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
 
     assert len(reports) >= 1
     for report in reports:
@@ -86,7 +87,7 @@ def test_run_training_skips_folds_below_min_train_samples(tmp_path, monkeypatch)
         lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
     )
 
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -96,6 +97,7 @@ def test_run_training_skips_folds_below_min_train_samples(tmp_path, monkeypatch)
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
 
     assert reports == []
     assert list(tmp_path.glob("*.txt")) == []
@@ -108,7 +110,7 @@ def test_run_training_prints_aggregate_summary_after_folds(tmp_path, monkeypatch
         lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
     )
 
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -118,6 +120,7 @@ def test_run_training_prints_aggregate_summary_after_folds(tmp_path, monkeypatch
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
     assert len(reports) >= 1
 
     captured = capsys.readouterr().out
@@ -140,7 +143,7 @@ def test_run_training_covers_all_requested_folds(tmp_path, monkeypatch):
     )
 
     n_folds = 3
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -150,6 +153,7 @@ def test_run_training_covers_all_requested_folds(tmp_path, monkeypatch):
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
 
     assert len(reports) == n_folds
     assert sorted(r["fold_index"] for r in reports) == list(range(1, n_folds + 1))
@@ -162,7 +166,7 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
         lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
     )
 
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -172,6 +176,7 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
     assert len(reports) >= 1
 
     txt_files = list(tmp_path.glob("*.txt"))
@@ -219,6 +224,11 @@ def test_run_training_saves_json_sidecar_alongside_model(tmp_path, monkeypatch):
     assert set(per_market.keys()) == set(seeds.keys())
     assert sum(m["n"] for m in per_market.values()) == pooled["n"]
 
+    # TrainingResult가 sidecar와 동일한 pooled/per_market을 노출하는지 확인
+    # (비교/튜닝 스크립트가 sidecar 없이 result.pooled만으로 판단하므로 필수).
+    assert result.pooled == pooled
+    assert result.per_market == per_market
+
 
 def test_run_training_performance_folds_excludes_skipped_folds(tmp_path, monkeypatch):
     """fold 하나가 표본 부족으로 스킵됐을 때, 사이드카 performance.folds가 실제로
@@ -230,7 +240,7 @@ def test_run_training_performance_folds_excludes_skipped_folds(tmp_path, monkeyp
         lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
     )
 
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -240,6 +250,7 @@ def test_run_training_performance_folds_excludes_skipped_folds(tmp_path, monkeyp
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
 
     assert [r["fold_index"] for r in reports] == [2, 3]
 
@@ -273,7 +284,7 @@ def test_run_training_passes_sample_weight_to_fit(tmp_path, monkeypatch):
 
     monkeypatch.setattr(train_regime_ml.lgb.LGBMClassifier, "fit", _capturing_fit)
 
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -283,6 +294,7 @@ def test_run_training_passes_sample_weight_to_fit(tmp_path, monkeypatch):
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
     assert len(reports) >= 1
     assert len(captured_calls) == len(reports)
     for call in captured_calls:
@@ -298,7 +310,7 @@ def test_run_training_saves_calibration_fields_in_sidecar(tmp_path, monkeypatch)
         lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
     )
 
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -308,6 +320,7 @@ def test_run_training_saves_calibration_fields_in_sidecar(tmp_path, monkeypatch)
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
     assert len(reports) >= 1
 
     json_files = list(tmp_path.glob("*.json"))
@@ -345,7 +358,7 @@ def test_run_training_features_include_cross_sectional_columns(tmp_path, monkeyp
 
     monkeypatch.setattr(train_regime_ml.lgb.LGBMClassifier, "fit", _capturing_fit)
 
-    reports = run_training(
+    result = run_training(
         markets=list(seeds.keys()),
         timeframe="minutes60",
         start=START,
@@ -355,7 +368,104 @@ def test_run_training_features_include_cross_sectional_columns(tmp_path, monkeyp
         barrier_k=_BARRIER_K,
         model_output_dir=tmp_path,
     )
+    reports = result.reports
     assert len(reports) >= 1
     for columns in captured_columns:
         assert "BETA_NEUTRAL_RETURN" in columns
         assert "CROSS_SECTIONAL_RANK" in columns
+
+
+def test_run_training_uses_custom_model_factory(tmp_path, monkeypatch):
+    """model_factory로 넘긴 모델이 실제로 fit/predict에 쓰이는지 확인한다.
+    DummyClassifier는 feature_importances_가 없어 top_features 가드(빈 리스트)도
+    함께 검증한다."""
+    from sklearn.dummy import DummyClassifier
+
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    result = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+        model_factory=lambda: DummyClassifier(strategy="most_frequent"),
+        save_model=False,
+    )
+
+    assert len(result.reports) >= 1
+    for report in result.reports:
+        assert report["top_features"] == []
+    assert list(tmp_path.glob("*.txt")) == []
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_run_training_applies_custom_preprocess_fold(tmp_path, monkeypatch):
+    """preprocess_fold가 반환한 (train_X, test_X)가 그대로 model.fit에 쓰이는지
+    컬럼 변형(market 컬럼 제거)으로 확인한다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    captured_columns = []
+    original_fit = train_regime_ml.lgb.LGBMClassifier.fit
+
+    def _capturing_fit(self, X, y, **kwargs):
+        captured_columns.append(list(X.columns))
+        return original_fit(self, X, y, **kwargs)
+
+    monkeypatch.setattr(train_regime_ml.lgb.LGBMClassifier, "fit", _capturing_fit)
+
+    def _drop_market_column(train_X, test_X):
+        return train_X.drop(columns=["market"]), test_X.drop(columns=["market"])
+
+    result = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+        preprocess_fold=_drop_market_column,
+        save_model=False,
+    )
+
+    assert len(result.reports) >= 1
+    for columns in captured_columns:
+        assert "market" not in columns
+
+
+def test_run_training_respects_save_model_false(tmp_path, monkeypatch):
+    """save_model=False면 학습이 성공해도 .txt/.json을 저장하지 않는다."""
+    seeds = {"KRW-BTC": 1, "KRW-ETH": 2, "KRW-XRP": 3}
+    monkeypatch.setattr(
+        train_regime_ml, "load_market_training_data",
+        lambda market, timeframe, start, end: _make_synthetic_market_df(market, seeds[market]),
+    )
+
+    result = run_training(
+        markets=list(seeds.keys()),
+        timeframe="minutes60",
+        start=START,
+        end=START + pd.Timedelta(hours=_N),
+        n_folds=2,
+        min_train_samples=50,
+        barrier_k=_BARRIER_K,
+        model_output_dir=tmp_path,
+        save_model=False,
+    )
+
+    assert len(result.reports) >= 1
+    assert list(tmp_path.glob("*.txt")) == []
+    assert list(tmp_path.glob("*.json")) == []

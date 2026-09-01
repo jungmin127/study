@@ -14,8 +14,10 @@ Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/train_regime_ml.py
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable
 
 import lightgbm as lgb
 import numpy as np
@@ -59,6 +61,31 @@ _THRESHOLD_GRID = [round(0.30 + 0.05 * i, 2) for i in range(13)]  # 0.30~0.90
 MODEL_OUTPUT_DIR = Path(__file__).parent.parent / "data" / "regime_ml_models"
 
 
+@dataclass
+class TrainingResult:
+    """run_training()의 반환값. reports는 기존 fold별 리포트 리스트와 완전히
+    동일하다 — pooled/per_market은 원래 함수 내부에서만 계산되고 sidecar JSON에만
+    남던 값을 호출자가 직접 접근할 수 있게 노출한 것(비교/튜닝 스크립트가 필요)."""
+    reports: list[dict]
+    pooled: dict
+    per_market: dict[str, dict]
+
+
+def _default_lgbm_factory() -> lgb.LGBMClassifier:
+    return lgb.LGBMClassifier(
+        objective="binary", class_weight="balanced", importance_type="gain", random_state=42
+    )
+
+
+def _default_preprocess(train_X: pd.DataFrame, test_X: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """LightGBM 네이티브 카테고리 지원을 쓰기 위한 기본 전처리 — market 컬럼만
+    category dtype으로 cast한다(다른 피처는 그대로 통과, NaN도 LightGBM이 직접
+    처리하므로 별도 대치 없음)."""
+    train_X_fit = train_X.assign(market=train_X["market"].astype("category"))
+    test_X_fit = test_X.assign(market=test_X["market"].astype("category"))
+    return train_X_fit, test_X_fit
+
+
 def run_training(
     markets: list[str],
     timeframe: str,
@@ -68,13 +95,21 @@ def run_training(
     min_train_samples: int,
     barrier_k: float,
     model_output_dir: Path,
-) -> list[dict]:
+    model_factory: Callable[[], Any] = _default_lgbm_factory,
+    preprocess_fold: Callable[[pd.DataFrame, pd.DataFrame], tuple[pd.DataFrame, pd.DataFrame]] | None = None,
+    save_model: bool = True,
+) -> TrainingResult:
     """마켓별로 데이터를 한 번씩만 로드/피처화(fold마다 반복하지 않음)하고, 워크포워드
     fold 루프를 돌며 LightGBM을 학습·평가한다. Triple Barrier 레이블(하락 vs 하락아님
     이진분류)로 학습하고, fold별 + 전체 풀링 + 마켓별 분류지표(macro F1/weighted kappa/confusion/
     precision·recall)를 계산한다. fold별 리포트 리스트를 반환하고, 마지막으로 성공한
     fold의 모델을 model_output_dir에 저장한다. 표본이 min_train_samples 미만이거나
-    테스트 표본이 없는 fold는 건너뛴다."""
+    테스트 표본이 없는 fold는 건너뛴다.
+
+    model_factory/preprocess_fold로 LightGBM 대신 다른 분류기를 끼워 비교/튜닝
+    스크립트에서 재사용할 수 있다(scripts/compare_regime_ml_baseline.py,
+    scripts/tune_regime_ml_hyperparams.py 참고). save_model=False면 모델 파일/
+    JSON 사이드카를 저장하지 않는다(data/regime_ml_models/ 오염 방지)."""
     half_life_bars = half_life_bars_for_timeframe(timeframe)
     n_bars = round(half_life_bars * N_MULTIPLIER)
     embargo = timeframe_duration(timeframe) * n_bars
@@ -149,26 +184,28 @@ def run_training(
             print(f"[fold {fold.fold_index}] 표본 부족(train={len(train_y)}, test={len(test_y)}) — 건너뜀")
             continue
 
-        train_X_fit = train_X.assign(market=train_X["market"].astype("category"))
-        test_X_fit = test_X.assign(market=test_X["market"].astype("category"))
+        test_markets = test_X["market"].astype(str).to_numpy()
 
-        model = lgb.LGBMClassifier(
-            objective="binary", class_weight="balanced", importance_type="gain", random_state=42
-        )
+        preprocess = preprocess_fold or _default_preprocess
+        train_X_fit, test_X_fit = preprocess(train_X, test_X)
+
+        model = model_factory()
         model.fit(train_X_fit, train_y, sample_weight=train_w.to_numpy())
         last_model = model
         last_class_order = [str(c) for c in model.classes_]
         last_fold_index = fold.fold_index
 
-        importances = dict(zip(train_X_fit.columns, model.feature_importances_))
-        top_features = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:15]
+        if hasattr(model, "feature_importances_"):
+            importances = dict(zip(train_X_fit.columns, model.feature_importances_))
+            top_features = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:15]
+        else:
+            top_features = []
 
         predictions = model.predict(test_X_fit)
         proba_matrix = model.predict_proba(test_X_fit)
         down_col = list(model.classes_).index("하락")
         proba_down = proba_matrix[:, down_col].tolist()
         true_values = test_y.to_numpy()
-        test_markets = test_X_fit["market"].astype(str).to_numpy()
 
         fold_metrics = compute_classification_metrics(list(true_values), list(predictions))
 
@@ -212,7 +249,7 @@ def run_training(
 
     _print_aggregate_summary(reports, pooled_metrics, per_market_metrics)
 
-    if last_model is not None:
+    if last_model is not None and save_model:
         model_output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         base_name = f"regime_ml_{timestamp}"
@@ -245,7 +282,7 @@ def run_training(
         with open(model_output_dir / f"{base_name}.json", "w", encoding="utf-8") as f:
             json.dump(sidecar, f, ensure_ascii=False, indent=2)
 
-    return reports
+    return TrainingResult(reports=reports, pooled=pooled_metrics, per_market=per_market_metrics)
 
 
 def _print_metrics_block(metrics: dict) -> None:
@@ -306,7 +343,7 @@ def _print_aggregate_summary(
 
 
 def main() -> None:
-    reports = run_training(
+    result = run_training(
         markets=TRAINING_MARKETS,
         timeframe=TIMEFRAME,
         start=TRAIN_START,
@@ -316,7 +353,7 @@ def main() -> None:
         barrier_k=BARRIER_K,
         model_output_dir=MODEL_OUTPUT_DIR,
     )
-    print(f"\n총 {len(reports)}개 fold 평가 완료(요청 n_folds={N_FOLDS})")
+    print(f"\n총 {len(result.reports)}개 fold 평가 완료(요청 n_folds={N_FOLDS})")
 
 
 if __name__ == "__main__":
