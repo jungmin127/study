@@ -84,6 +84,8 @@ def test_compute_adx_regime_history_merges_consecutive_same_label_into_one_segme
     assert second["bar_count"] == 3
     assert second["start"] == df["candle_time"].iloc[3].isoformat()
     assert second["end"] == df["candle_time"].iloc[5].isoformat()
+    assert first["in_progress"] is False
+    assert second["in_progress"] is True
 
 
 def test_compute_adx_regime_history_excludes_runs_shorter_than_min_bars(monkeypatch):
@@ -98,6 +100,7 @@ def test_compute_adx_regime_history_excludes_runs_shorter_than_min_bars(monkeypa
     assert len(result["segments"]) == 1
     assert result["segments"][0]["label"] == "상승"
     assert result["segments"][0]["bar_count"] == 4
+    assert result["segments"][0]["in_progress"] is True
 
 
 def test_compute_adx_regime_history_excludes_none_runs_from_segments(monkeypatch):
@@ -117,6 +120,9 @@ def test_compute_adx_regime_history_excludes_none_runs_from_segments(monkeypatch
     assert len(result["segments"]) == 1
     assert result["segments"][0]["label"] == "상승"
     assert result["segments"][0]["bar_count"] == 2
+    # trailing run은 None(워밍업/미분류)이라 in_progress 대상이 아니고, 이
+    # 구간은 trailing이 아니므로 in_progress=False.
+    assert result["segments"][0]["in_progress"] is False
 
 
 def test_compute_adx_regime_history_includes_run_exactly_at_min_segment_bars(monkeypatch):
@@ -133,6 +139,30 @@ def test_compute_adx_regime_history_includes_run_exactly_at_min_segment_bars(mon
     assert len(result["segments"]) == 1
     assert result["segments"][0]["label"] == "상승"
     assert result["segments"][0]["bar_count"] == 3
+    assert result["segments"][0]["in_progress"] is True
+
+
+def test_compute_adx_regime_history_surfaces_short_trailing_run_as_in_progress(monkeypatch):
+    """가장 최근 구간(마지막 봉을 포함)이 MIN_SEGMENT_BARS 미만이어도, 현재
+    장세를 표에서 항상 보여주기 위해 in_progress=True로 포함돼야 한다.
+    trailing이 아닌 다른 짧은 구간(첫 3봉 상승)은 여전히 제외된다."""
+    df = _make_df(5)
+    adx_di = _make_adx_di(
+        5,
+        [30, 30, 30, 30, 30],
+        [40, 40, 40, 10, 10],
+        [10, 10, 10, 40, 40],
+    )
+    monkeypatch.setattr(regime_adx_service, "get_candles", lambda *a, **k: df)
+    monkeypatch.setattr(regime_adx_service, "compute_adx_di", lambda *a, **k: adx_di)
+    monkeypatch.setattr(regime_adx_service, "MIN_SEGMENT_BARS", 24)
+
+    result = compute_adx_regime_history("KRW-BTC", "minutes60")
+
+    assert len(result["segments"]) == 1
+    assert result["segments"][0]["label"] == "하락"
+    assert result["segments"][0]["bar_count"] == 2
+    assert result["segments"][0]["in_progress"] is True
 
 
 def test_compute_adx_regime_history_handles_empty_candles(monkeypatch):

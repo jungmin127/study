@@ -41,7 +41,11 @@ def compute_adx_regime_history(market: str, timeframe: str) -> dict:
     배열과, 최소 지속봉수 이상인 연속 구간 목록으로 반환한다. 반환값:
     {market, timeframe, bars, segments}. bars의 각 원소는
     {time, open, high, low, close, label}(label은 "상승"/"하락"/"횡보"/None).
-    segments의 각 원소는 {start, end, label, bar_count}."""
+    segments의 각 원소는 {start, end, label, bar_count, in_progress} — 가장
+    최근(마지막 봉을 포함하는) 구간은 MIN_SEGMENT_BARS 미만이어도
+    in_progress=True로 항상 포함된다(현재 장세가 무엇인지는 지속 여부와
+    무관하게 표에서 항상 보여야 하므로). 그 외 구간은 in_progress=False이며
+    MIN_SEGMENT_BARS 미만이면 제외된다."""
     df = get_candles(market, timeframe, HISTORY_START, datetime.now(timezone.utc))
     adx_di = compute_adx_di(df)
     labels = [
@@ -63,20 +67,30 @@ def compute_adx_regime_history(market: str, timeframe: str) -> dict:
     if labels:
         run_start_idx = 0
         run_label = labels[0]
+        trailing_run: dict | None = None
         for i in range(1, len(labels) + 1):
             at_end = i == len(labels)
             cur_label = None if at_end else labels[i]
             if at_end or not _same_label(cur_label, run_label):
                 bar_count = i - run_start_idx
-                if run_label is not None and bar_count >= MIN_SEGMENT_BARS:
-                    segments.append({
+                trailing_run = None
+                if run_label is not None:
+                    trailing_run = {
                         "start": _to_iso(df["candle_time"].iloc[run_start_idx]),
                         "end": _to_iso(df["candle_time"].iloc[i - 1]),
                         "label": run_label,
                         "bar_count": bar_count,
-                    })
+                    }
+                    if bar_count >= MIN_SEGMENT_BARS:
+                        segments.append({**trailing_run, "in_progress": False})
                 run_start_idx = i
                 run_label = cur_label
+
+        if trailing_run is not None:
+            if segments and segments[-1]["start"] == trailing_run["start"]:
+                segments[-1]["in_progress"] = True
+            else:
+                segments.append({**trailing_run, "in_progress": True})
 
     return {"market": market, "timeframe": timeframe, "bars": bars, "segments": segments}
 

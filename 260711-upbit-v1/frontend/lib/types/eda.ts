@@ -228,6 +228,7 @@ export interface RegimeAdxSegment {
   end: string;
   label: RegimeAdxLabel;
   bar_count: number;
+  in_progress: boolean;
 }
 
 export interface RegimeAdxHistory {

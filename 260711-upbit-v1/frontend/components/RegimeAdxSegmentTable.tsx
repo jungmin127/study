@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowDown, ArrowUp, ArrowUpDown, Copy } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import type { RegimeAdxSegment } from '@/lib/types/eda';
 import { formatDateTimeShort } from '@/lib/format';
 
@@ -57,21 +58,58 @@ function buildGridSearchHref(market: string, timeframe: string, seg: RegimeAdxSe
 type SortKey = 'start' | 'bar_count';
 type SortDir = 'asc' | 'desc';
 
+function SegmentRow({
+  seg, market, timeframe,
+}: { seg: RegimeAdxSegment; market: string; timeframe: string }) {
+  return (
+    <TableRow className={seg.in_progress ? 'bg-muted/40' : undefined}>
+      <TableCell className="whitespace-nowrap">
+        {formatDateTimeShort(seg.start)} ~ {seg.in_progress ? '현재' : formatDateTimeShort(seg.end)}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">{seg.bar_count}봉</TableCell>
+      <TableCell>
+        <span className="flex items-center gap-1.5">
+          <span className={LABEL_TEXT_CLASS[seg.label]}>{seg.label}</span>
+          {seg.in_progress && <Badge variant="secondary">진행중</Badge>}
+        </span>
+      </TableCell>
+      <TableCell>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          nativeButton={false}
+          role="link"
+          aria-label="그리드서치로 복사"
+          title="그리드서치로 복사"
+          render={<Link href={buildGridSearchHref(market, timeframe, seg)} />}
+        >
+          <Copy className="size-3.5" />
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 export default function RegimeAdxSegmentTable({
   segments, market, timeframe,
 }: { segments: RegimeAdxSegment[]; market: string; timeframe: string }) {
   const [sortKey, setSortKey] = useState<SortKey>('start');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
+  // 진행중(가장 최근, 아직 24봉 미만일 수 있는) 구간은 정렬 대상에서 빼고
+  // 표 맨 위에 항상 고정해, 표를 보면 언제나 현재 장세를 알 수 있게 한다.
+  const inProgress = segments.find((s) => s.in_progress);
+  const historical = segments.filter((s) => !s.in_progress);
+
   const sorted = useMemo(() => {
     const factor = sortDir === 'asc' ? 1 : -1;
-    return [...segments].sort((a, b) => {
+    return [...historical].sort((a, b) => {
       if (sortKey === 'start') {
         return a.start < b.start ? -factor : a.start > b.start ? factor : 0;
       }
       return (a.bar_count - b.bar_count) * factor;
     });
-  }, [segments, sortKey, sortDir]);
+  }, [historical, sortKey, sortDir]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -119,28 +157,20 @@ export default function RegimeAdxSegmentTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sorted.map((seg) => (
-            <TableRow key={`${seg.start}-${seg.end}`}>
-              <TableCell className="whitespace-nowrap">
-                {formatDateTimeShort(seg.start)} ~ {formatDateTimeShort(seg.end)}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">{seg.bar_count}봉</TableCell>
-              <TableCell className={LABEL_TEXT_CLASS[seg.label]}>{seg.label}</TableCell>
-              <TableCell>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  nativeButton={false}
-                  role="link"
-                  aria-label="그리드서치로 복사"
-                  title="그리드서치로 복사"
-                  render={<Link href={buildGridSearchHref(market, timeframe, seg)} />}
-                >
-                  <Copy className="size-3.5" />
-                </Button>
+          {inProgress && (
+            <SegmentRow key={`${inProgress.start}-in-progress`} seg={inProgress} market={market} timeframe={timeframe} />
+          )}
+          {sorted.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={4} className="text-muted-foreground">
+                최소 지속봉수를 넘는 과거 구간이 없습니다.
               </TableCell>
             </TableRow>
-          ))}
+          ) : (
+            sorted.map((seg) => (
+              <SegmentRow key={`${seg.start}-${seg.end}`} seg={seg} market={market} timeframe={timeframe} />
+            ))
+          )}
         </TableBody>
       </Table>
     </div>
