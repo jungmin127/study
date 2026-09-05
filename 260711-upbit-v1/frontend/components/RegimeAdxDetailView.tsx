@@ -42,11 +42,18 @@ export default function RegimeAdxDetailView({
         <h2 className="flex items-center gap-1 text-sm font-semibold">
           ADX 장세 구간 (상승/하락/횡보)
           <InfoPopover>
-            1시간봉마다 최근 14봉 기준 ADX(추세 강도)와 +DI/-DI(상승·하락 방향성
-            우위)를 계산합니다. ADX가 25 이하면 뚜렷한 추세가 없다고 보고
-            횡보로, 25를 넘으면 +DI와 -DI 중 더 큰 쪽 방향(상승/하락)으로
-            판정합니다. 라벨이 바뀌는 지점은 ADX가 25선을 넘나들거나, 추세
-            중 +DI·-DI 우위가 뒤바뀌는 순간입니다.
+            <p>
+              1시간봉마다 최근 14봉 기준 ADX(추세 강도)와 +DI/-DI(상승·하락 방향성
+              우위)를 계산합니다. ADX가 25 이하면 뚜렷한 추세가 없다고 보고
+              횡보로, 25를 넘으면 +DI와 -DI 중 더 큰 쪽 방향(상승/하락)으로
+              판정합니다. 라벨이 바뀌는 지점은 ADX가 25선을 넘나들거나, 추세
+              중 +DI·-DI 우위가 뒤바뀌는 순간입니다.
+            </p>
+            <p className="mt-2">
+              예: 이번 봉만 보면 +DM 6,000·-DM 0으로 상승 쪽이어도, 최근 14봉
+              누적 평활값 기준 +DI 21.7·-DI 20.8로 차이가 작고 ADX도
+              15.3(25 미만)이면 방향 판단 없이 횡보로 분류됩니다.
+            </p>
           </InfoPopover>
         </h2>
         <select
