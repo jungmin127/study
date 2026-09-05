@@ -12,7 +12,7 @@ export default function RegimeAdxDetailView({
   market, onMarketChange,
 }: { market: string; onMarketChange: (market: string) => void }) {
   const [data, setData] = useState<RegimeAdxHistory | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {

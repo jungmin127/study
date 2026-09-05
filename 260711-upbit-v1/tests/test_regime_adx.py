@@ -8,11 +8,8 @@ DirectionalMovementIndex(같은 Wilder 공식의 검증된 구현)를 golden-tes
 """
 from __future__ import annotations
 
-import math
-
 import backtrader as bt
 import pandas as pd
-import pytest
 
 from engine.regime_adx import ADX_TREND_THRESHOLD, PERIOD, classify_regime, compute_adx_di
 from tests.signal_fixtures import make_oscillating_df
@@ -45,7 +42,19 @@ def test_compute_adx_di_matches_backtrader_directional_movement_index():
     pandas_plus = result["plus_di"].dropna().tolist()
     pandas_minus = result["minus_di"].dropna().tolist()
 
+    # compute_adx_di가 회귀해서 전부 NaN을 반환하면 dropna() 이후 리스트가
+    # 비어, 아래 zip 기반 허용오차 루프가 0회 반복돼 아무것도 검증하지 않고
+    # 통과(vacuous pass)해버린다. plus_di/minus_di는 1차 스무딩만 거쳐 adx
+    # (2차 스무딩 추가)보다 워밍업이 짧으므로(약 PERIOD-1봉) 서로 dropna
+    # 길이가 다른 게 정상 — 그래서 6개를 서로 동일 길이로 비교하지 않고,
+    # 각 시퀀스가 최소 tail개 이상의 유효값을 갖는지만 확인한다.
     tail = 50
+    for name, seq in (
+        ("pandas_adx", pandas_adx), ("bt_adx", bt_adx),
+        ("pandas_plus", pandas_plus), ("bt_plus", bt_plus),
+        ("pandas_minus", pandas_minus), ("bt_minus", bt_minus),
+    ):
+        assert len(seq) >= tail, f"{name} has only {len(seq)} values, expected at least {tail}"
     for bt_v, pd_v in zip(bt_adx[-tail:], pandas_adx[-tail:]):
         assert abs(bt_v - pd_v) < 0.5, f"adx mismatch: bt={bt_v} pandas={pd_v}"
     for bt_v, pd_v in zip(bt_plus[-tail:], pandas_plus[-tail:]):

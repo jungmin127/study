@@ -90,6 +90,14 @@ def compute_adx_regime_overview(timeframe: str) -> list[dict]:
     for market in MAJOR_MARKETS:
         df = get_candles(market, timeframe, start, datetime.now(timezone.utc))
         adx_di = compute_adx_di(df)
+        if adx_di.empty:
+            # 조회 기간에 캔들이 하나도 없는 마켓(상장폐지/거래정지 등) — 이
+            # 한 마켓만 미분류로 남기고, 오버뷰 전체를 500으로 죽이지 않는다.
+            results.append({
+                "market": market, "label": None,
+                "adx": None, "plus_di": None, "minus_di": None,
+            })
+            continue
         last = adx_di.iloc[-1]
         label = classify_regime(last.adx, last.plus_di, last.minus_di)
         results.append({

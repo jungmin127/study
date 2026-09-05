@@ -19,7 +19,15 @@ ADX_TREND_THRESHOLD = 25.0
 def compute_adx_di(df: pd.DataFrame, period: int = PERIOD) -> pd.DataFrame:
     """df는 high/low/close 컬럼을 포함해야 한다. Wilder 스무딩(alpha=1/period)으로
     ADX/plus_di/minus_di 3개 컬럼을 가진 DataFrame을 df와 같은 인덱스로 반환한다.
-    앞쪽 워밍업 구간(대략 2*period봉)은 NaN이다."""
+    앞쪽 워밍업 구간(대략 2*period봉)은 NaN이다.
+
+    참고: 여기서 쓰는 ewm(adjust=False)는 첫 관측값에서부터 스무딩을 시작하는
+    반면 Wilder 원 공식은 첫 period개 값의 단순평균(SMA)으로 시드값을 잡는다 —
+    그래서 워밍업 경계 바로 근처에서는 두 방식이 ADX 기준 몇 포인트까지 벌어질
+    수 있고, 대략 100봉 이내로 그 차이가 거의 0에 수렴한다. 즉
+    backend/regime_adx_service.py의 OVERVIEW_LOOKBACK_BARS는 이 수렴을
+    보장할 만큼 2*period보다 충분히 커야 오버뷰의 단일 시점 판독이
+    신뢰할 수 있다 — 나중에 lookback을 줄이려는 사람은 이 점을 알아야 한다."""
     high, low, close = df["high"], df["low"], df["close"]
     prev_close = close.shift(1)
     prev_high = high.shift(1)

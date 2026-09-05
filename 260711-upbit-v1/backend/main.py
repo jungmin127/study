@@ -74,6 +74,7 @@ import httpx
 import trading.db as trading_db
 from backend.trading_analytics_service import get_journal_summary, get_market_journal
 from backend.regime_adx_service import compute_adx_regime_history, compute_adx_regime_overview
+from engine.regime_adx_constants import MAJOR_MARKETS
 import trading.position_manager as position_manager
 import trading.upbit_client as upbit_client
 from trading.upbit_client import UpbitCredentialsError, UpbitRateLimitError
@@ -566,16 +567,29 @@ def get_markets() -> list[dict]:
     return get_krw_markets_with_ticker()
 
 
+def _validate_regime_adx_params(market: str | None, timeframe: str) -> None:
+    """ADX 장세판별 엔드포인트 공통 입력 검증. market은 필터시스템 캐시 경로에
+    그대로 흘러가므로(upbit_data_service._cache_path) 검증 없이 통과시키면
+    인증 없는 GET 라우트에 경로 조작 표면이 생긴다. timeframe도 플랜의
+    Global Constraints(minutes60 고정)를 서버 쪽에서 강제한다."""
+    if market is not None and market not in MAJOR_MARKETS:
+        raise HTTPException(status_code=400, detail=f"{market}은(는) 지원하지 않는 마켓입니다.")
+    if timeframe != "minutes60":
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 봉데이터입니다: {timeframe}")
+
+
 @app.get("/api/v1/regime/adx-segments")
 def get_regime_adx_segments_endpoint(
     market: str = Query(...),
     timeframe: str = Query(...),
 ) -> dict:
+    _validate_regime_adx_params(market, timeframe)
     return compute_adx_regime_history(market, timeframe)
 
 
 @app.get("/api/v1/regime/adx-overview")
 def get_regime_adx_overview_endpoint(timeframe: str = Query(...)) -> list[dict]:
+    _validate_regime_adx_params(None, timeframe)
     return compute_adx_regime_overview(timeframe)
 
 

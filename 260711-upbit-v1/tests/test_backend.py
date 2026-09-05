@@ -2861,3 +2861,33 @@ def test_regime_adx_overview_endpoint_calls_service(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.json() == fake_result
+
+
+def test_regime_adx_segments_endpoint_rejects_market_outside_major_markets(monkeypatch, tmp_path):
+    """market이 필터시스템 캐시 경로에 그대로 흘러가므로(경로 조작 표면),
+    MAJOR_MARKETS 밖의 값은 서비스 함수를 호출하기 전에 400으로 거부해야 한다."""
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/api/v1/regime/adx-segments", params={"market": "KRW-NOTREAL", "timeframe": "minutes60"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_regime_adx_segments_endpoint_rejects_non_minutes60_timeframe(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/api/v1/regime/adx-segments", params={"market": "KRW-BTC", "timeframe": "minutes15"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_regime_adx_overview_endpoint_rejects_non_minutes60_timeframe(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/api/v1/regime/adx-overview", params={"timeframe": "days"})
+
+    assert response.status_code == 400
