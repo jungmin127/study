@@ -43,7 +43,7 @@ def create_market_trend_pct(data: bt.feeds.PandasData, **params) -> bt.Indicator
 class RollingCorrelation(bt.Indicator):
     """두 종가 라인의 봉 대비 등락률(bt.indicators.ROC100, period=1)을 최근 period봉 모아
     Pearson 상관계수를 계산한다. 등락률·롤링 윈도우 방식은
-    docs/superpowers/specs/2026-07-27-strategy-source-classification.md의 "상관계수 계산
+    docs/superpowers/specs_v1/2026-07-27-strategy-source-classification.md의 "상관계수 계산
     방법론" 절에서 합의된 정의를 그대로 따른다."""
 
     lines = ("corr",)

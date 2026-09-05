@@ -166,7 +166,7 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
     리셋을 수행한다(예전엔 action=="nothing_to_sell"로 아무 것도 안 하고 포지션을
     방치해 reconciler가 "설명 안 됨"으로 오분류했었다 — 잔여주문 정리분을
     positions 테이블에 영구 기록하는 구조로 바뀌면서 해소됨, 상세는
-    docs/superpowers/specs/2026-08-09-live-trading-risk-exit-backlog-fix-design.md).
+    docs/superpowers/specs_v1/2026-08-09-live-trading-risk-exit-backlog-fix-design.md).
     이 가드를 지우고도
     쿨다운(_RISK_EXIT_RETRY_COOLDOWN_SEC)은 그대로 남긴다 — 이건 정합성 가드가 아니라
     처리량 제어다. 손절/익절 임계치 바로 위에서 가격이 tick마다(초당 여러 번) 오르내리면

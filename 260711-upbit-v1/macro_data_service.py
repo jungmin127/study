@@ -5,8 +5,8 @@ macro_data_service.py
 콜금리, 원/달러 공식환율, S&P500/다우존스/나스닥종합 일간 종가)를 무료 공개
 API에서 조회·캐싱한다. 재시도/캐싱 패턴은 external_data_service.py(공포탐욕지수)를
 그대로 따른다. 두 provider(FRED, Frankfurter) 모두 API 키가 필요 없다. 설계 문서:
-docs/superpowers/specs/2026-08-31-regime-ml-macro-calendar-features-design.md,
-docs/superpowers/specs/2026-08-31-regime-ml-stock-index-features-design.md
+docs/superpowers/specs_v1/2026-08-31-regime-ml-macro-calendar-features-design.md,
+docs/superpowers/specs_v1/2026-08-31-regime-ml-stock-index-features-design.md
 
 한국은행 기준금리 자체를 제공하는 무료·키불필요 API가 없어, FRED의
 IRSTCI01KRM156N(한국 콜금리/은행간금리, OECD 경유)을 대리지표로 쓴다. 2008년

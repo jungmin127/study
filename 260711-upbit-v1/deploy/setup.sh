@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 4단계 배포 스펙(docs/superpowers/specs/2026-08-14-live-trading-server-deployment-design.md)
+# 4단계 배포 스펙(docs/superpowers/specs_v1/2026-08-14-live-trading-server-deployment-design.md)
 # 결정5 — Oracle Cloud든 다른 우분투 VPS든 이 스크립트를 그대로 실행하면 동일하게
 # 동작하도록, 클라우드 제공자 고유 API를 전혀 쓰지 않는다.
 

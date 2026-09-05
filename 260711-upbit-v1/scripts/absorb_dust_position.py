@@ -2,7 +2,7 @@
 scripts/absorb_dust_position.py
 
 1회성 정리 스크립트(설계 문서
-docs/superpowers/specs/2026-08-21-live-trading-dust-position-auto-recovery-design.md
+docs/superpowers/specs_v1/2026-08-21-live-trading-dust-position-auto-recovery-design.md
 Part 3): reconciler가 최소주문금액 미만 잔고 불일치를 "설명 안 됨"으로 오인해 재오픈한
 더스트 포지션을 안전하게 종결하고 baseline_qty에 흡수한다. Part 1(reconciler.py 수정)이
 배포된 뒤 앞으로 재발하는 건은 자동으로 처리되므로, 이 스크립트는 그 수정 이전에 이미

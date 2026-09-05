@@ -7,7 +7,7 @@ engine/segment_analysis.py
 업비트 API는 시가총액(유통량 x 가격)을 제공하지 않으므로, 거래대금을 규모의
 대리지표로 쓴다. 변동성이 높을수록, 거래대금이 낮을수록 "잡주"에 가깝다고 보는
 분류 규칙은 도메인 설계 문서
-docs/superpowers/specs/2026-07-25-segment-size-analysis-design.md 참고.
+docs/superpowers/specs_v1/2026-07-25-segment-size-analysis-design.md 참고.
 """
 from __future__ import annotations
 

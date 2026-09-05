@@ -328,7 +328,7 @@ async def _reconcile_position(
         return {"balance_mismatch": True, "action": action, "paused": paused}
 
     # 포지션이 없는데 실제 잔고가 최소주문금액 미만으로 남는 경우(설계 문서
-    # docs/superpowers/specs/2026-08-21-live-trading-dust-position-auto-recovery-design.md
+    # docs/superpowers/specs_v1/2026-08-21-live-trading-dust-position-auto-recovery-design.md
     # Part 1) — order_executor._run_limit_timeout()의 _finalize_first_leg()가 최소주문금액
     # 미만 잔량을 의도적으로 매도하지 않고 포지션만 종료했을 때 이 경로를 탄다. 그 잔량은
     # 어차피 거래소가 매도를 거부해 봇이 다룰 수 없으므로, 포지션을 재오픈하고 전략을
