@@ -98,13 +98,6 @@ bash deploy/setup.sh
 Tailscale 주소는 3절을 먼저 진행해(`sudo tailscale up` 로그인 후 Tailscale 관리
 콘솔에서 MagicDNS 이름을 확인) 얻은 뒤 이 단계로 돌아온다.
 
-**주의**: `.env`에 `ENABLE_ML_TRAINING_UI=true`를 추가하지 않는다. 이 플래그는
-로컬 개발 환경에서 `/regime` 탭의 ML 재학습/배포 버튼을 켜는 용도이며, AWS
-서버에서 켜면 재학습(3마켓 walk-forward)이 daemon/backend와 함께 2GB RAM을
-두고 경합해 OOM 위험이 있다(grid search가 과거 겪은 것과 같은 유형의 사고,
-`docs/regime-ml-backlog.md` 참고). 학습은 항상 로컬 PC에서만 실행하고,
-결과 모델만 `scripts/push_regime_ml_model.sh`로 서버에 올린다.
-
 ## 3. Tailscale 연결
 
 `deploy/setup.sh`가 Tailscale을 설치한다. 로그인이 아직이면, 먼저 호스트명을

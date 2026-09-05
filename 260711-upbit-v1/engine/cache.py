@@ -96,7 +96,6 @@ CREATE TABLE IF NOT EXISTS grid_search_jobs (
 """
 
 
-
 _JSON_PRIMITIVES = (str, int, float, bool, type(None))
 
 
@@ -642,8 +641,6 @@ def list_segment_classification() -> list[dict]:
     ]
 
 
-
-
 def create_grid_search_job(
     job_id: str, market: str, timeframe: str, capital: float,
     start: str, end: str, top_n: int,
@@ -791,5 +788,3 @@ def list_grid_search_jobs() -> list[dict]:
     finally:
         conn.close()
     return [_row_to_grid_search_job_dict(r) for r in rows]
-
-
