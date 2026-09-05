@@ -9,7 +9,7 @@
 세그먼트(`/analysis` 탭의 "추세 기반" 섹션)를 백엔드/엔진/스크립트/
 테스트/프론트엔드/의존성(`lightgbm`/`scikit-learn`/`hmmlearn`)까지 전부
 삭제했다. 설계 스펙:
-[2026-09-05-regime-legacy-removal-design.md](superpowers/specs/2026-09-05-regime-legacy-removal-design.md).
+[2026-09-05-regime-legacy-removal-design.md](superpowers/specs_v1/2026-09-05-regime-legacy-removal-design.md).
 
 아래는 이 폐기 이전까지의 라운드 기록(이력으로 보존).
 
@@ -56,8 +56,8 @@ GaussianHMM 적합이 민감해 서로 다른 로컬 최적해로 수렴한 것�
 
 ## HMM 비지도 클러스터링 대안 검증 (2026-09-05, 메타 레이블링 미채택 직후) — 완료
 
-설계: `docs/superpowers/specs/2026-09-05-regime-hmm-unsupervised-clustering-design.md`.
-계획: `docs/superpowers/plans/2026-09-05-regime-hmm-unsupervised-clustering.md`. 구현:
+설계: `docs/superpowers/specs_v1/2026-09-05-regime-hmm-unsupervised-clustering-design.md`.
+계획: `docs/superpowers/plans_v1/2026-09-05-regime-hmm-unsupervised-clustering.md`. 구현:
 `engine/regime_ml_hmm.py`(`compute_dominant_state` 추가),
 `scripts/analyze_regime_hmm_fact_performance.py`(마켓별 분리 비교
 `print_per_market_comparison` 포함, 최종리뷰 대응으로 추가).
@@ -218,8 +218,8 @@ HMM 상태확률을 라벨 대체가 아니라 LightGBM 피처로 추가하는 �
 
 ## 메타 레이블링(c-3) 학습+측정 (2026-09-01, horizon 그리드서치 직후) — 완료
 
-설계: `docs/superpowers/specs/2026-09-01-regime-ml-meta-labeling-design.md`.
-계획: `docs/superpowers/plans/2026-09-01-regime-ml-meta-labeling.md`. 구현:
+설계: `docs/superpowers/specs_v1/2026-09-01-regime-ml-meta-labeling-design.md`.
+계획: `docs/superpowers/plans_v1/2026-09-01-regime-ml-meta-labeling.md`. 구현:
 `scripts/train_regime_ml.py`(`collect_oof` 확장), `scripts/train_regime_ml_meta_label.py`.
 
 1차 모델(하락/하락아님)이 이미 "하락"이라 분류한 케이스 중 실제로 믿을만한
@@ -291,8 +291,8 @@ AWS 배포·실전 활용으로 전환.
 
 ## c-2 로지스틱회귀 baseline + LightGBM 하이퍼파라미터 튜닝 (2026-09-01, 주가지수 라운드 직후) — 완료(baseline 비교만)
 
-설계: `docs/superpowers/specs/2026-09-01-regime-ml-baseline-and-tuning-design.md`.
-계획: `docs/superpowers/plans/2026-09-01-regime-ml-baseline-and-tuning.md`. 구현:
+설계: `docs/superpowers/specs_v1/2026-09-01-regime-ml-baseline-and-tuning-design.md`.
+계획: `docs/superpowers/plans_v1/2026-09-01-regime-ml-baseline-and-tuning.md`. 구현:
 `scripts/train_regime_ml.py`(model_factory/preprocess_fold/save_model 확장,
 `TrainingResult` 반환), `scripts/compare_regime_ml_baseline.py`,
 `scripts/tune_regime_ml_hyperparams.py`.
@@ -334,8 +334,8 @@ kappa(1순위 지표) 기준으로는 LogisticRegression이 +0.010 근소 우세
 
 ## horizon(N_MULTIPLIER) 그리드서치 (2026-09-01, c-2 직후) — 완료(3개 후보만)
 
-설계: `docs/superpowers/specs/2026-09-01-regime-ml-horizon-tuning-design.md`.
-계획: `docs/superpowers/plans/2026-09-01-regime-ml-horizon-tuning.md`. 구현:
+설계: `docs/superpowers/specs_v1/2026-09-01-regime-ml-horizon-tuning-design.md`.
+계획: `docs/superpowers/plans_v1/2026-09-01-regime-ml-horizon-tuning.md`. 구현:
 `scripts/train_regime_ml.py`(`n_multiplier` 확장), `scripts/tune_regime_ml_horizon.py`.
 
 위 c-2 결과("LightGBM이 LR과 거의 동급")를 본 사용자가 "horizon(예측 기간)을
@@ -389,7 +389,7 @@ kappa 0.107로 현재값(0.105) 대비 +0.002 — 이 프로젝트가 실측한 
 
 ## 안전 신호 재시도 (2026-08-31, 우선순위0 조사 직후) — 성공, kappa 0.096→0.106
 
-`docs/superpowers/plans/2026-08-31-regime-ml-safe-signal-retry.md`. 우선순위0
+`docs/superpowers/plans_v1/2026-08-31-regime-ml-safe-signal-retry.md`. 우선순위0
 eta² 조사에서 "개별로는 안전(eta²≈0)한데 위험 신호와 한 그룹으로 묶여서
 같이 폐기됐을 뿐"이라고 판단된 신호만 추려서 재시도했다.
 
@@ -411,7 +411,7 @@ eta² 조사에서 "개별로는 안전(eta²≈0)한데 위험 신호와 한 �
 
 ## 주가지수 수익률 피처 라운드 (2026-08-31, 안전 신호 재시도 직후) — 채택(중립), kappa 0.106→0.108(노이즈 범위)
 
-`docs/superpowers/plans/2026-08-31-regime-ml-stock-index-features.md`. 우선순위0
+`docs/superpowers/plans_v1/2026-08-31-regime-ml-stock-index-features.md`. 우선순위0
 액션아이템 2번(코스피/코스닥/S&P500/다우존스/나스닥 지수 피처, 사용자 제안)
 중 FRED에서 바로 가져올 수 있는 S&P500/다우존스/나스닥종합 3개만 우선
 시도했다(코스피/코스닥은 FRED에 없음, yfinance는 실제 동작 확인했으나 신규
@@ -452,8 +452,8 @@ pip 의존성이라 이번 라운드 보류 — 데이터 소스 재조사부터
 
 ## 캘린더/환율/금리 피처 라운드 (2026-08-31, c-2 착수 전 삽입) — 종료, 3개 그룹 전부 폐기(위 재시도로 일부 회수됨)
 
-`docs/superpowers/specs/2026-08-31-regime-ml-macro-calendar-features-design.md`/
-`docs/superpowers/plans/2026-08-31-regime-ml-macro-calendar-features.md`.
+`docs/superpowers/specs_v1/2026-08-31-regime-ml-macro-calendar-features-design.md`/
+`docs/superpowers/plans_v1/2026-08-31-regime-ml-macro-calendar-features.md`.
 subagent-driven-development로 진행, Task 1~7 전부 완료. Task 1~3(FRED/Frankfurter
 데이터 서비스 + 학습 로더 배선)의 인프라 코드는 그대로 남아있으나(다음에 매크로
 피처를 다시 시도할 때 재사용 가능), Task 4~6(캘린더/환율/금리 3개 피처 그룹)은
@@ -548,15 +548,15 @@ subagent-driven-development로 진행, Task 1~7 전부 완료. Task 1~3(FRED/Fra
   피하면 이득"은 확인되지만, "하락 구간에서 다른 전략으로 갈아 끼우면 정확히
   얼마나 더 버는가"는 run당 표본이 5~11건으로 얕아 미확정). 정확한 기대수익
   크기가 필요해지면 그때 Phase 2(오라클 전환 백테스트)를 별도 세션에서
-  브레인스토밍. 설계: `docs/superpowers/specs/2026-08-30-regime-fact-label-backtest-analysis-design.md`
+  브레인스토밍. 설계: `docs/superpowers/specs_v1/2026-08-30-regime-fact-label-backtest-analysis-design.md`
 - **선행 작업 — 코인별 fact 장세 구간 뷰어** — SHIPPED 2026-08-30(bb482a9), 2태스크
   플랜(백엔드 `/api/v1/regime/fact-segments` + 프론트 `/regime` 탭 카드). 코인별로
   fact 기준 "하락"/"하락아님" 구간을 캔들 색칠 차트+표로 직접 확인 가능, 표에서
   그리드서치 폼으로 구간 프리필 복사도 지원. `/analysis` 탭의 추세 구간 차트/표
   패턴 재사용.
 - **② 모델 성능 개선 착수** — SHIPPED 2026-08-31(설계:
-  `docs/superpowers/specs/2026-08-31-regime-ml-performance-improvement-design.md`,
-  플랜: `docs/superpowers/plans/2026-08-31-regime-ml-performance-improvement.md`).
+  `docs/superpowers/specs_v1/2026-08-31-regime-ml-performance-improvement-design.md`,
+  플랜: `docs/superpowers/plans_v1/2026-08-31-regime-ml-performance-improvement.md`).
   `docs/ML_Regime_Switching_Additional_Improvements.md` 우선순위 1~4번을 순차
   ablation. **pooled weighted kappa 0.097(세션 시작 baseline) → 0.096(최종)**,
   macro F1 0.538→0.534. **결론: kappa 자체는 거의 안 움직였다** — 세션 내
@@ -654,12 +654,12 @@ subagent-driven-development로 진행, Task 1~7 전부 완료. Task 1~3(FRED/Fra
   원/달러는 추세는 있어도 국지적 등락(노이즈)이 더 커서 백분위 정규화가 통했다.
 
 **액션 아이템**:
-1. ~~캘린더 그룹 재검토~~ — **완료(2026-08-31, 같은 세션)**: `docs/superpowers/plans/2026-08-31-regime-ml-safe-signal-retry.md`로
+1. ~~캘린더 그룹 재검토~~ — **완료(2026-08-31, 같은 세션)**: `docs/superpowers/plans_v1/2026-08-31-regime-ml-safe-signal-retry.md`로
    즉시 재시도해 성공. HOUR/DOW/DAY_OF_MONTH_SIN·COS(MONTH 제외) 채택
    +USDKRW_RETURN 채택(중립) — pooled weighted kappa **0.096→0.106**. 위
    "안전 신호 재시도" 절 참고.
 2. ~~코스피/코스닥/S&P500/다우존스/나스닥 지수 피처(사용자 제안)~~ —
-   **부분 완료(2026-08-31, 같은 세션)**: `docs/superpowers/plans/2026-08-31-regime-ml-stock-index-features.md`로
+   **부분 완료(2026-08-31, 같은 세션)**: `docs/superpowers/plans_v1/2026-08-31-regime-ml-stock-index-features.md`로
    S&P500/다우존스/나스닥종합 3개 수익률(`SP500_RETURN`/`DJIA_RETURN`/
    `NASDAQ_RETURN`) 즉시 재시도해 성공. 사전 예상("환율/금리 중간 위험도")과
    달리 eta²=0.0002로 완전 안전 판정, pooled weighted kappa **0.106→0.108**.

@@ -2,9 +2,9 @@
 
 이 문서는 AWS EC2 인스턴스 하나를 만들어 daemon/backend/frontend를 24/7 가동시키는
 전체 순서다. 설계 배경은
-`docs/superpowers/specs/2026-08-14-live-trading-server-deployment-design.md`(systemd/
+`docs/superpowers/specs_v1/2026-08-14-live-trading-server-deployment-design.md`(systemd/
 Tailscale 등 클라우드 무관 결정)와
-`docs/superpowers/specs/2026-08-15-aws-deployment-migration-design.md`(AWS 인스턴스
+`docs/superpowers/specs_v1/2026-08-15-aws-deployment-migration-design.md`(AWS 인스턴스
 프로비저닝 결정) 참고.
 
 ## 1. AWS EC2 인스턴스 생성
