@@ -53,3 +53,21 @@ def score_hmm_state_probabilities(model: GaussianHMM, observations: pd.DataFrame
     if valid.any():
         result.loc[valid, HMM_STATE_COLUMNS] = model.predict_proba(observations.loc[valid].to_numpy())
     return result
+
+
+def compute_dominant_state(
+    df: pd.DataFrame, half_life_bars: float, n_states: int = N_STATES, random_state: int = _RANDOM_STATE
+) -> pd.Series:
+    """df 전체 구간에서 한 번 fit한 뒤(사후 분석 전용 — 워크포워드 fold 분리 없음,
+    scripts/analyze_regime_hmm_fact_performance.py가 유일한 호출자) 바별
+    지배적 상태(상태확률 argmax)를 반환한다. 반환: df와 같은 인덱스의
+    pd.Series(float64) — 유효한 바는 0.0~n_states-1.0, 워밍업 구간은 NaN."""
+    observations = build_hmm_observations(df, half_life_bars)
+    valid_observations = observations.dropna()
+    model = fit_hmm(valid_observations, n_states=n_states, random_state=random_state)
+    probabilities = score_hmm_state_probabilities(model, observations)
+
+    states = pd.Series(np.nan, index=probabilities.index, dtype="float64")
+    valid_rows = probabilities.notna().all(axis=1)
+    states.loc[valid_rows] = probabilities.loc[valid_rows].to_numpy().argmax(axis=1).astype("float64")
+    return states

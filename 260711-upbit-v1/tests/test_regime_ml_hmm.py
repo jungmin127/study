@@ -14,6 +14,7 @@ from engine.regime_ml_hmm import (
     HMM_STATE_COLUMNS,
     N_STATES,
     build_hmm_observations,
+    compute_dominant_state,
     fit_hmm,
     score_hmm_state_probabilities,
 )
@@ -70,3 +71,28 @@ def test_score_hmm_state_probabilities_preserves_index():
     result = score_hmm_state_probabilities(model, observations)
 
     assert list(result.index) == list(observations.index)
+
+
+def test_compute_dominant_state_matches_df_length_with_warmup_nan():
+    df = _make_close_df(500, seed=5)
+    result = compute_dominant_state(df, _HALF_LIFE_BARS)
+
+    assert len(result) == len(df)
+    assert pd.isna(result.iloc[0])
+
+
+def test_compute_dominant_state_values_are_valid_state_indices():
+    df = _make_close_df(500, seed=6)
+    result = compute_dominant_state(df, _HALF_LIFE_BARS, n_states=N_STATES)
+
+    valid = result.dropna()
+    assert len(valid) > 0
+    assert set(valid.unique()).issubset({float(i) for i in range(N_STATES)})
+
+
+def test_compute_dominant_state_is_deterministic_with_same_random_state():
+    df = _make_close_df(500, seed=7)
+    first = compute_dominant_state(df, _HALF_LIFE_BARS, random_state=42)
+    second = compute_dominant_state(df, _HALF_LIFE_BARS, random_state=42)
+
+    pd.testing.assert_series_equal(first, second)
