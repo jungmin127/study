@@ -73,6 +73,7 @@ import httpx
 
 import trading.db as trading_db
 from backend.trading_analytics_service import get_journal_summary, get_market_journal
+from backend.regime_adx_service import compute_adx_regime_history, compute_adx_regime_overview
 import trading.position_manager as position_manager
 import trading.upbit_client as upbit_client
 from trading.upbit_client import UpbitCredentialsError, UpbitRateLimitError
@@ -563,6 +564,19 @@ def get_signals() -> list[str]:
 @app.get("/api/v1/markets")
 def get_markets() -> list[dict]:
     return get_krw_markets_with_ticker()
+
+
+@app.get("/api/v1/regime/adx-segments")
+def get_regime_adx_segments_endpoint(
+    market: str = Query(...),
+    timeframe: str = Query(...),
+) -> dict:
+    return compute_adx_regime_history(market, timeframe)
+
+
+@app.get("/api/v1/regime/adx-overview")
+def get_regime_adx_overview_endpoint(timeframe: str = Query(...)) -> list[dict]:
+    return compute_adx_regime_overview(timeframe)
 
 
 @app.get("/api/v1/analysis/segments/size")

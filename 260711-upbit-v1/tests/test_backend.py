@@ -2835,3 +2835,29 @@ def test_replace_live_strategy_returns_409_when_position_open(monkeypatch, tmp_p
     )
 
     assert resp.status_code == 409
+
+
+def test_regime_adx_segments_endpoint_calls_service(monkeypatch, tmp_path):
+    import backend.main as main_module
+
+    client = _client(monkeypatch, tmp_path)
+    fake_result = {"market": "KRW-BTC", "timeframe": "minutes60", "bars": [], "segments": []}
+    monkeypatch.setattr(main_module, "compute_adx_regime_history", lambda market, timeframe: fake_result)
+
+    response = client.get("/api/v1/regime/adx-segments", params={"market": "KRW-BTC", "timeframe": "minutes60"})
+
+    assert response.status_code == 200
+    assert response.json() == fake_result
+
+
+def test_regime_adx_overview_endpoint_calls_service(monkeypatch, tmp_path):
+    import backend.main as main_module
+
+    client = _client(monkeypatch, tmp_path)
+    fake_result = [{"market": "KRW-BTC", "label": "상승", "adx": 30.0, "plus_di": 40.0, "minus_di": 10.0}]
+    monkeypatch.setattr(main_module, "compute_adx_regime_overview", lambda timeframe: fake_result)
+
+    response = client.get("/api/v1/regime/adx-overview", params={"timeframe": "minutes60"})
+
+    assert response.status_code == 200
+    assert response.json() == fake_result
