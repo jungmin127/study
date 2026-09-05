@@ -10,15 +10,10 @@ import type {
   IndicatorCatalogItem,
   IndicatorPool,
   Market,
-  MlCurrentPrediction,
-  RegimeFactAnalysis,
-  RegimeMlJob,
-  RegimeMlModelSummary,
   RunBacktestRequest,
   RunBacktestResponse,
   SegmentSizeEntry,
   SweepResult,
-  TrendSegmentAnalysis,
   ValidateBacktestResponse,
 } from '@/lib/types/eda';
 
@@ -101,16 +96,6 @@ export function getSegmentSizeAnalysis(): Promise<SegmentSizeEntry[]> {
   return apiFetch<SegmentSizeEntry[]>('/api/v1/analysis/segments/size');
 }
 
-export function getTrendSegments(market: string): Promise<TrendSegmentAnalysis> {
-  return apiFetch<TrendSegmentAnalysis>(`/api/v1/analysis/trend-segments/${market}`);
-}
-
-export function refreshTrendSegments(market: string): Promise<TrendSegmentAnalysis> {
-  return apiFetch<TrendSegmentAnalysis>(`/api/v1/analysis/trend-segments/${market}/refresh`, {
-    method: 'POST',
-  });
-}
-
 export function createGridSearchJob(req: GridSearchJobRequest): Promise<GridSearchJob> {
   return apiFetch<GridSearchJob>('/api/v1/grid-search/jobs', {
     method: 'POST',
@@ -152,46 +137,5 @@ export function deleteGridSearchResult(jobId: string, runId: string): Promise<{ 
 export function deleteGridSearchJob(jobId: string): Promise<{ deleted: boolean }> {
   return apiFetch<{ deleted: boolean }>(`/api/v1/grid-search/jobs/${jobId}`, {
     method: 'DELETE',
-  });
-}
-
-export function getRegimeMlCurrentPrediction(params: {
-  market: string;
-  timeframe: string;
-}): Promise<MlCurrentPrediction> {
-  const query = new URLSearchParams(params);
-  return apiFetch<MlCurrentPrediction>(`/api/v1/regime/ml-current-prediction?${query.toString()}`);
-}
-
-export function getRegimeFactSegments(params: {
-  market: string;
-  timeframe: string;
-}): Promise<RegimeFactAnalysis> {
-  const query = new URLSearchParams(params);
-  return apiFetch<RegimeFactAnalysis>(`/api/v1/regime/fact-segments?${query.toString()}`);
-}
-
-export function getRegimeMlTrainEnabled(): Promise<{ enabled: boolean }> {
-  return apiFetch<{ enabled: boolean }>('/api/v1/regime/ml-train-enabled');
-}
-
-export function startRegimeMlTrainJob(): Promise<RegimeMlJob> {
-  return apiFetch<RegimeMlJob>('/api/v1/regime/ml-train', { method: 'POST' });
-}
-
-export function getRegimeMlTrainJobs(): Promise<RegimeMlJob[]> {
-  return apiFetch<RegimeMlJob[]>('/api/v1/regime/ml-train/jobs');
-}
-
-export function getRegimeMlModels(): Promise<RegimeMlModelSummary[]> {
-  return apiFetch<RegimeMlModelSummary[]>('/api/v1/regime/ml-models');
-}
-
-export function deployRegimeMlModel(
-  modelTimestamp: string,
-): Promise<{ deployed: boolean; model_timestamp: string }> {
-  return apiFetch('/api/v1/regime/ml-deploy', {
-    method: 'POST',
-    body: JSON.stringify({ model_timestamp: modelTimestamp }),
   });
 }
