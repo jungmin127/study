@@ -16,23 +16,19 @@ from typing import Literal, Union
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from engine.cache import (
-    create_regime_ml_job,
     delete_backtest_run,
     delete_grid_search_job,
     finish_grid_search_job,
-    finish_regime_ml_job,
     get_grid_search_job,
-    get_regime_ml_job,
     get_run_config,
     list_backtest_runs,
     list_combined_ranking,
     list_distinct_combos,
     list_grid_search_jobs,
     list_latest_sweep_results,
-    list_regime_ml_jobs,
     list_segment_classification,
     list_sweep_history,
     load_result,
@@ -61,7 +57,6 @@ from external_data_service import get_fear_greed_cmc, merge_fear_greed
 from engine.live_valuation import has_revaluable_open_trade, revalue_open_trades
 from engine.metrics import VALID_TIMEFRAMES, calculate_metrics, top_trade_contribution_pct
 from engine.segment_analysis import run_segment_batch
-from engine.trend_segments import EARLIEST_CANDLE_START, get_or_compute_trend_segments
 from engine.strategies import SignalStrategy
 from engine.sweep import DEFAULT_RISK_CONFIG
 from signals import SIGNAL_REGISTRY
@@ -72,16 +67,6 @@ from backend.grid_search_service import (
     cancel_job,
     reset_active_job,
     start_job,
-)
-from backend.regime_ml_service import (
-    deploy_model,
-    list_trained_models,
-    predict_current_ml_regime,
-)
-from backend.regime_fact_service import compute_fact_regime_segments
-from backend.regime_ml_training_service import (
-    JobAlreadyRunningError as RegimeMlJobAlreadyRunningError,
-    start_job as start_regime_ml_training_job,
 )
 from engine.grid_search_pool import INDICATOR_POOL_SPECS, build_condition_grid
 import httpx
@@ -169,38 +154,6 @@ def _fail_orphaned_grid_search_jobs() -> None:
 @app.on_event("startup")
 def _cleanup_orphaned_grid_search_jobs() -> None:
     _fail_orphaned_grid_search_jobs()
-
-
-def _ml_training_ui_enabled() -> bool:
-    """ENABLE_ML_TRAINING_UI가 로컬 .env에만 true로 설정되어 있어야 한다 — AWS에
-    실수로 재학습이 실행되는 사고(과거 grid search가 실제로 겪은 OOM 사고와 같은
-    유형)를 막기 위한 게이트. _resolve_allowed_origin()과 같은 이유로 빈 문자열도
-    미설정과 동일하게 취급한다."""
-    return (os.environ.get("ENABLE_ML_TRAINING_UI") or "").strip().lower() == "true"
-
-
-def _fail_orphaned_regime_ml_jobs() -> None:
-    """백엔드가 재시작되면 서브프로세스 stdout 리더 스레드도 함께 사라진다 —
-    재기동 시 남아 있는 running 행은 추적 불가능한 고아이므로 실패로 정리한다."""
-    for job in list_regime_ml_jobs():
-        if job["status"] == "running":
-            finish_regime_ml_job(
-                job["id"], status="failed",
-                error_message="백엔드가 재시작되어 진행률 추적이 끊겼습니다. 모델 목록에서 결과를 확인하세요.",
-            )
-
-
-@app.on_event("startup")
-def _cleanup_orphaned_regime_ml_jobs() -> None:
-    _fail_orphaned_regime_ml_jobs()
-
-
-def _regime_ml_job_response(job: dict) -> dict:
-    return {
-        **job,
-        "started_at": _to_utc_iso(job["started_at"]),
-        "finished_at": _to_utc_iso(job["finished_at"]) if job["finished_at"] else None,
-    }
 
 INDICATOR_CATALOG: list[dict] = [
     {
@@ -615,100 +568,6 @@ def get_markets() -> list[dict]:
 @app.get("/api/v1/analysis/segments/size")
 def get_segment_size_analysis() -> list[dict]:
     return list_segment_classification()
-
-
-def _trend_segment_ohlcv(market: str) -> list[dict]:
-    df = get_candles(market, "days", EARLIEST_CANDLE_START, datetime.now(timezone.utc))
-    return [
-        {
-            "time": _to_utc_iso(row.candle_time.isoformat()),
-            "open": float(row.open), "high": float(row.high),
-            "low": float(row.low), "close": float(row.close),
-        }
-        for row in df.itertuples()
-    ]
-
-
-@app.get("/api/v1/analysis/trend-segments/{market}")
-def get_trend_segments_endpoint(market: str) -> dict:
-    result = get_or_compute_trend_segments(market)
-    return {**result, "ohlcv": _trend_segment_ohlcv(market)}
-
-
-@app.post("/api/v1/analysis/trend-segments/{market}/refresh")
-def refresh_trend_segments_endpoint(market: str) -> dict:
-    result = get_or_compute_trend_segments(market, force_refresh=True)
-    return {**result, "ohlcv": _trend_segment_ohlcv(market)}
-
-
-@app.get("/api/v1/regime/fact-segments")
-def get_regime_fact_segments_endpoint(
-    market: str = Query(...),
-    timeframe: str = Query(...),
-) -> dict:
-    return compute_fact_regime_segments(market, timeframe)
-
-
-@app.get("/api/v1/regime/ml-current-prediction")
-def get_regime_ml_current_prediction_endpoint(
-    market: str = Query(...),
-    timeframe: str = Query(...),
-) -> dict:
-    try:
-        return predict_current_ml_regime(market, timeframe)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.get("/api/v1/regime/ml-train-enabled")
-def get_regime_ml_train_enabled_endpoint() -> dict:
-    return {"enabled": _ml_training_ui_enabled()}
-
-
-@app.post("/api/v1/regime/ml-train")
-def start_regime_ml_train_job_endpoint() -> dict:
-    if not _ml_training_ui_enabled():
-        raise HTTPException(status_code=403, detail="이 환경에서는 ML 재학습이 비활성화되어 있습니다.")
-    try:
-        job_id = start_regime_ml_training_job()
-    except RegimeMlJobAlreadyRunningError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    job = get_regime_ml_job(job_id)
-    assert job is not None
-    return _regime_ml_job_response(job)
-
-
-@app.get("/api/v1/regime/ml-train/jobs")
-def list_regime_ml_train_jobs_endpoint() -> list[dict]:
-    return [_regime_ml_job_response(j) for j in list_regime_ml_jobs()]
-
-
-@app.get("/api/v1/regime/ml-models")
-def list_regime_ml_models_endpoint() -> list[dict]:
-    return list_trained_models()
-
-
-class DeployRegimeMlModelRequest(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-    model_timestamp: str = Field(pattern=r"^regime_ml_\d{8}T\d{6}Z$")
-
-
-@app.post("/api/v1/regime/ml-deploy")
-def deploy_regime_ml_model_endpoint(req: DeployRegimeMlModelRequest) -> dict:
-    if not _ml_training_ui_enabled():
-        raise HTTPException(status_code=403, detail="이 환경에서는 ML 모델 배포가 비활성화되어 있습니다.")
-    try:
-        deploy_model(req.model_timestamp)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"deployed": True, "model_timestamp": req.model_timestamp}
 
 
 @app.get("/api/v1/indicators/catalog")
