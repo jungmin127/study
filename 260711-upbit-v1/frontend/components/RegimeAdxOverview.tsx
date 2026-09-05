@@ -9,8 +9,10 @@ import { MAJOR_MARKETS, TIMEFRAME } from '@/lib/constants/regime';
 const LABEL_BG_CLASS: Record<string, string> = {
   상승: 'bg-[color:var(--regime-surge-up)]/15 border-[color:var(--regime-surge-up)]/40',
   하락: 'bg-[color:var(--regime-surge-down)]/15 border-[color:var(--regime-surge-down)]/40',
-  횡보: 'bg-muted border-border',
+  횡보: 'bg-[color:var(--marker-boundary)]/15 border-[color:var(--marker-boundary)]/40',
 };
+
+const UNCLASSIFIED_BG_CLASS = 'bg-[color:var(--trend-unclassified)]/15 border-[color:var(--trend-unclassified)]/40';
 
 export default function RegimeAdxOverview({
   selectedMarket, onSelectMarket,
@@ -54,7 +56,7 @@ export default function RegimeAdxOverview({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
           {MAJOR_MARKETS.map((market) => {
             const label = labelFor(market);
-            const bgClass = label ? LABEL_BG_CLASS[label] : 'bg-muted border-border';
+            const bgClass = label ? LABEL_BG_CLASS[label] : UNCLASSIFIED_BG_CLASS;
             const isSelected = market === selectedMarket;
             return (
               <button
