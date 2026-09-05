@@ -22,7 +22,7 @@ export default async function AnalysisPage() {
   return (
     <div>
       <h1 className="mb-4 text-lg font-semibold">세그먼트</h1>
-      <AnalysisSidebarView segmentSizeRows={segmentSizeRows} markets={markets} />
+      <AnalysisSidebarView segmentSizeRows={segmentSizeRows} />
     </div>
   );
 }

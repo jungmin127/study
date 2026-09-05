@@ -1,26 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { BarChart3, PieChart, TrendingUp } from 'lucide-react';
+import { BarChart3, PieChart } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import SegmentSizeTable, { type SegmentRow } from '@/components/SegmentSizeTable';
-import TrendSegmentView from '@/components/TrendSegmentView';
-import type { Market } from '@/lib/types/eda';
 
-type Section = 'size' | 'sector' | 'trend';
+type Section = 'size' | 'sector';
 
 const SECTIONS: { key: Section; label: string; icon: typeof BarChart3 }[] = [
   { key: 'size', label: '세그먼트(규모)', icon: BarChart3 },
   { key: 'sector', label: '세그먼트(섹터)', icon: PieChart },
-  { key: 'trend', label: '추세 기반', icon: TrendingUp },
 ];
 
 export default function AnalysisSidebarView({
   segmentSizeRows,
-  markets,
 }: {
   segmentSizeRows: SegmentRow[];
-  markets: Market[];
 }) {
   const [section, setSection] = useState<Section>('size');
 
@@ -47,8 +42,6 @@ export default function AnalysisSidebarView({
       <div className="min-w-0 flex-1">
         {section === 'size' ? (
           <SegmentSizeTable rows={segmentSizeRows} />
-        ) : section === 'trend' ? (
-          <TrendSegmentView markets={markets} />
         ) : (
           <Card>
             <CardContent className="pt-4">
