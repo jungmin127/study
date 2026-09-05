@@ -88,6 +88,10 @@ def test_compute_dominant_state_values_are_valid_state_indices():
     valid = result.dropna()
     assert len(valid) > 0
     assert set(valid.unique()).issubset({float(i) for i in range(N_STATES)})
+    # state starvation(모든 바가 단일 상태로 붕괴하는 GaussianHMM/EM 실패 모드) 감지:
+    # 위 assert는 전부 하나의 상태로 collapse해도 통과하므로, 상태가 실제로 2개
+    # 이상 나타나는지 별도로 확인해야 한다.
+    assert len(valid.unique()) > 1
 
 
 def test_compute_dominant_state_is_deterministic_with_same_random_state():

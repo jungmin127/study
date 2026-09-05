@@ -14,6 +14,14 @@ analyze_regime_fact_performance에서 그대로 재사용한다(중복 없음). 
 TIMEFRAME/START/END도 같은 마켓·기간을 봐야 두 결과가 비교 가능하므로 같은
 값을 그대로 가져온다.
 
+주의(전역 조회 함정): load_labeled_trades(및 그 내부에서 쓰는 label_for_entry)는
+이 스크립트가 아니라 **정의부 모듈(scripts.analyze_regime_fact_performance)
+자신의 전역** MARKETS/TIMEFRAME/list_backtest_runs를 참조한다(파이썬 클로저
+규칙 — 호출자의 지역/전역이 아니라 함수가 정의된 모듈의 전역을 본다). 따라서
+synthetic 데이터로 마켓 목록을 줄이는 등 이 값들을 패치하려면 이 스크립트
+모듈과 scripts.analyze_regime_fact_performance 모듈 둘 다 패치해야 한다
+(계획 문서 Task 2 Step 2 참고).
+
 Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/analyze_regime_hmm_fact_performance.py
 """
 from __future__ import annotations
@@ -27,7 +35,6 @@ from scripts.analyze_regime_fact_performance import (
     MARKETS,
     START,
     TIMEFRAME,
-    label_for_entry,
     load_labeled_trades,
     print_pooled_comparison,
     print_run_ranking,
@@ -76,6 +83,27 @@ def print_state_profile(profiles_by_market: dict[str, pd.DataFrame]) -> None:
             print(f"  state {int(state)}: 평균 수익률={row['returns']:+.5f}  평균 변동성={row['volatility']:.5f}")
 
 
+def print_per_market_comparison(rows: list[dict]) -> None:
+    """풀링 비교(print_pooled_comparison)는 상태 정수만으로 그룹핑해 마켓별로
+    독립적으로 학습된 HMM의 상태 번호가 서로 대응한다고 암묵적으로 가정한다 —
+    하지만 각 마켓의 HMM은 별도로 fit되므로 "state 0"이 두 마켓에서 같은
+    장세를 가리킨다는 보장이 없다(print_state_profile의 상태 프로파일 표로
+    사후에만 확인 가능). 이 함수는 (market, state) 조합별로 승률/평균수익률/
+    총수익기여/거래수를 따로 보여줘 풀링 결과가 마켓 간 우연한 뒤섞임이
+    아닌지 판단할 수 있게 한다."""
+    df = pd.DataFrame(rows)
+    print("\n=== 마켓별 상태 비교 ===")
+    print(f"{'마켓':>8} | {'state':>5} | {'거래수':>6} | {'승률':>7} | {'평균수익률':>10} | {'총수익기여':>10}")
+    for (market, label), group in df.groupby(["market", "label"]):
+        win_rate = (group["return_rate"] > 0).mean() * 100
+        avg_return = group["return_rate"].mean()
+        total_return = group["return_rate"].sum()
+        print(
+            f"{market:>8} | {label:>5} | {len(group):>6} | {win_rate:6.1f}% | "
+            f"{avg_return:9.2f}% | {total_return:9.1f}%"
+        )
+
+
 def main() -> None:
     lookup_by_market: dict[str, pd.Series] = {}
     profiles_by_market: dict[str, pd.DataFrame] = {}
@@ -87,6 +115,7 @@ def main() -> None:
     print_state_profile(profiles_by_market)
     rows = load_labeled_trades(lookup_by_market)
     print_pooled_comparison(rows)
+    print_per_market_comparison(rows)
     print_run_ranking(rows)
 
 

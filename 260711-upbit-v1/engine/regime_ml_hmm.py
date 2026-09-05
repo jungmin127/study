@@ -14,6 +14,15 @@ fold 경계를 모르므로(순수 함수), fold 루프는 scripts/train_regime_
 학습되므로 train->test 누출은 없음). 완전한 실시간 인과적 필터링이 필요하면
 hmmlearn의 저수준 forward-pass를 직접 호출해야 한다(비범위, 설계 문서 참고).
 
+예외: compute_dominant_state()는 위 "워크포워드 fold의 train 구간에서만 fit"
+원칙을 따르지 않고 df 전체 구간을 한 번에 fit한다 — 이는 버그가 아니라
+사후(ex-post) 분석 전용이라는 용도 차이다(scripts/analyze_regime_hmm_fact_performance.py
+가 하는 것처럼 "이미 지나간 기간의 장세가 매매 성과와 상관있는가"를 사후에
+확인하는 목적이라 라이브 예측에 쓰지 않으므로 미래 정보 유출을 걱정할 필요가
+없다). 다른 호출자(scripts/validate_hmm_feature.py)처럼 fit_hmm/
+score_hmm_state_probabilities를 직접 라이브 예측용으로 쓸 때는 여전히 fold
+분리가 필수다.
+
 설계 문서: docs/superpowers/specs/2026-08-30-regime-ml-hmm-feature-design.md
 """
 from __future__ import annotations
@@ -58,9 +67,8 @@ def score_hmm_state_probabilities(model: GaussianHMM, observations: pd.DataFrame
 def compute_dominant_state(
     df: pd.DataFrame, half_life_bars: float, n_states: int = N_STATES, random_state: int = _RANDOM_STATE
 ) -> pd.Series:
-    """df 전체 구간에서 한 번 fit한 뒤(사후 분석 전용 — 워크포워드 fold 분리 없음,
-    scripts/analyze_regime_hmm_fact_performance.py가 유일한 호출자) 바별
-    지배적 상태(상태확률 argmax)를 반환한다. 반환: df와 같은 인덱스의
+    """df 전체 구간에서 한 번 fit한 뒤(사후 분석 전용 — 워크포워드 fold 분리 없음)
+    바별 지배적 상태(상태확률 argmax)를 반환한다. 반환: df와 같은 인덱스의
     pd.Series(float64) — 유효한 바는 0.0~n_states-1.0, 워밍업 구간은 NaN."""
     observations = build_hmm_observations(df, half_life_bars)
     valid_observations = observations.dropna()
