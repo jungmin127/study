@@ -216,3 +216,31 @@ export interface GridSearchPoolIndicator {
 }
 
 export type GridSearchIndicatorPoolCatalog = Record<string, GridSearchPoolIndicator[]>;
+
+export type RegimeAdxLabel = '상승' | '하락' | '횡보';
+
+export interface RegimeAdxBar extends OhlcvPoint {
+  label: RegimeAdxLabel | null;
+}
+
+export interface RegimeAdxSegment {
+  start: string;
+  end: string;
+  label: RegimeAdxLabel;
+  bar_count: number;
+}
+
+export interface RegimeAdxHistory {
+  market: string;
+  timeframe: string;
+  bars: RegimeAdxBar[];
+  segments: RegimeAdxSegment[];
+}
+
+export interface RegimeAdxOverviewItem {
+  market: string;
+  label: RegimeAdxLabel | null;
+  adx: number | null;
+  plus_di: number | null;
+  minus_di: number | null;
+}

@@ -10,6 +10,8 @@ import type {
   IndicatorCatalogItem,
   IndicatorPool,
   Market,
+  RegimeAdxHistory,
+  RegimeAdxOverviewItem,
   RunBacktestRequest,
   RunBacktestResponse,
   SegmentSizeEntry,
@@ -138,4 +140,17 @@ export function deleteGridSearchJob(jobId: string): Promise<{ deleted: boolean }
   return apiFetch<{ deleted: boolean }>(`/api/v1/grid-search/jobs/${jobId}`, {
     method: 'DELETE',
   });
+}
+
+export function getRegimeAdxHistory(params: {
+  market: string;
+  timeframe: string;
+}): Promise<RegimeAdxHistory> {
+  const query = new URLSearchParams(params);
+  return apiFetch<RegimeAdxHistory>(`/api/v1/regime/adx-segments?${query.toString()}`);
+}
+
+export function getRegimeAdxOverview(timeframe: string): Promise<RegimeAdxOverviewItem[]> {
+  const query = new URLSearchParams({ timeframe });
+  return apiFetch<RegimeAdxOverviewItem[]>(`/api/v1/regime/adx-overview?${query.toString()}`);
 }
