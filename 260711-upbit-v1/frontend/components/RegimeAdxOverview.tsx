@@ -61,7 +61,7 @@ export default function RegimeAdxOverview({
       ) : !overview ? (
         <p className="text-sm text-muted-foreground">불러오는 중...</p>
       ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+        <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
           {MAJOR_MARKETS.map((market) => {
             const label = labelFor(market);
             const bgClass = label ? LABEL_BG_CLASS[label] : UNCLASSIFIED_BG_CLASS;
@@ -71,11 +71,13 @@ export default function RegimeAdxOverview({
                 key={market}
                 type="button"
                 onClick={() => onSelectMarket(market)}
-                className={`rounded-lg border p-3 text-left transition ${bgClass} ${isSelected ? 'ring-2 ring-primary' : ''}`}
+                className={`rounded-md border px-2 py-1.5 text-left transition ${bgClass} ${isSelected ? 'ring-2 ring-primary' : ''}`}
               >
-                <div className="text-xs font-medium">{koreanNameFor(market)}</div>
-                <div className="text-xs text-muted-foreground">{market.replace('KRW-', '')}</div>
-                <div className="mt-1 text-sm font-semibold">{label ?? '미분류'}</div>
+                <div className="truncate text-[11px] font-medium leading-tight">{koreanNameFor(market)}</div>
+                <div className="mt-0.5 flex items-center justify-between gap-1">
+                  <span className="text-[10px] text-muted-foreground">{market.replace('KRW-', '')}</span>
+                  <span className="text-[11px] font-semibold">{label ?? '미분류'}</span>
+                </div>
               </button>
             );
           })}
