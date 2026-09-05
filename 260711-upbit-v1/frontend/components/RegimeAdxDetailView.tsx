@@ -5,6 +5,7 @@ import { ApiError } from '@/lib/api/client';
 import { getRegimeAdxHistory } from '@/lib/api/eda';
 import RegimeAdxChart from '@/components/RegimeAdxChart';
 import RegimeAdxSegmentTable from '@/components/RegimeAdxSegmentTable';
+import { InfoPopover } from '@/components/ui/info-popover';
 import type { RegimeAdxHistory } from '@/lib/types/eda';
 import { MAJOR_MARKETS, TIMEFRAME } from '@/lib/constants/regime';
 
@@ -38,7 +39,16 @@ export default function RegimeAdxDetailView({
   return (
     <div className="rounded-xl border p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">ADX 장세 구간 (상승/하락/횡보)</h2>
+        <h2 className="flex items-center gap-1 text-sm font-semibold">
+          ADX 장세 구간 (상승/하락/횡보)
+          <InfoPopover>
+            1시간봉마다 최근 14봉 기준 ADX(추세 강도)와 +DI/-DI(상승·하락 방향성
+            우위)를 계산합니다. ADX가 25 이하면 뚜렷한 추세가 없다고 보고
+            횡보로, 25를 넘으면 +DI와 -DI 중 더 큰 쪽 방향(상승/하락)으로
+            판정합니다. 라벨이 바뀌는 지점은 ADX가 25선을 넘나들거나, 추세
+            중 +DI·-DI 우위가 뒤바뀌는 순간입니다.
+          </InfoPopover>
+        </h2>
         <select
           value={market}
           onChange={(e) => onMarketChange(e.target.value)}
