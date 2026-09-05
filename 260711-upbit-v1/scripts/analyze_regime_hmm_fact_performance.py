@@ -105,6 +105,12 @@ def print_per_market_comparison(rows: list[dict]) -> None:
 
 
 def main() -> None:
+    # END=datetime.now(timezone.utc)라 실행마다 캔들 데이터 창이 조금씩
+    # 달라진다 — 재현 안 되는 결과를 나중에 원인 추적하려 해도 그 실행의
+    # END가 기록돼 있지 않으면 불가능하다(2026-09-05 최종리뷰 대응 때 실제로
+    # 겪음, docs/regime-ml-backlog.md "재현성 문제" 참고). 앞으로는 최소한
+    # 이 창을 출력에 남겨 self-documenting하게 만든다.
+    print(f"데이터 창: {START} ~ {END}")
     lookup_by_market: dict[str, pd.Series] = {}
     profiles_by_market: dict[str, pd.DataFrame] = {}
     for market in MARKETS:
