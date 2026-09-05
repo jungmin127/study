@@ -20,8 +20,6 @@ from engine.cache import (
     save_segment_classification,
     save_sweep_result,
     set_candle_count,
-    list_trend_segments,
-    save_trend_segments,
 )
 from engine.cache import (
     create_grid_search_job,
@@ -871,80 +869,6 @@ def test_create_grid_search_job_without_chaining_fields_defaults_to_none(monkeyp
     assert job["combinator"] is None
 
 
-def test_save_and_list_trend_segments_round_trips(monkeypatch, tmp_path):
-    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
-
-    rows = [
-        {
-            "market": "KRW-BTC",
-            "start_date": "2026-01-05",
-            "end_date": "2026-03-20",
-            "days": 75,
-            "return_pct": 42.3,
-            "trend": "up",
-            "first_half_trend": "up",
-            "second_half_trend": "up",
-            "pattern_label": "지속형 상승",
-            "threshold_pct": 8.5,
-            "computed_at": "2026-08-16T00:00:00+00:00",
-        },
-        {
-            "market": "KRW-BTC",
-            "start_date": "2026-03-21",
-            "end_date": "2026-04-10",
-            "days": 20,
-            "return_pct": 8.1,
-            "trend": "up",
-            "first_half_trend": "up",
-            "second_half_trend": "sideways",
-            "pattern_label": "상승 후 둔화",
-            "threshold_pct": 8.5,
-            "computed_at": "2026-08-16T00:00:00+00:00",
-        },
-    ]
-
-    save_trend_segments("KRW-BTC", rows)
-    result = list_trend_segments("KRW-BTC")
-
-    assert len(result) == 2
-    assert result[0]["start_date"] == "2026-01-05"
-    assert result[0]["pattern_label"] == "지속형 상승"
-    assert result[1]["pattern_label"] == "상승 후 둔화"
-
-
-def test_save_trend_segments_replaces_only_that_market(monkeypatch, tmp_path):
-    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
-
-    save_trend_segments("KRW-BTC", [{
-        "market": "KRW-BTC", "start_date": "2026-01-01", "end_date": "2026-02-01",
-        "days": 31, "return_pct": 10.0, "trend": "up", "first_half_trend": "up",
-        "second_half_trend": "up", "pattern_label": "지속형 상승",
-        "threshold_pct": 8.0, "computed_at": "2026-08-16T00:00:00+00:00",
-    }])
-    save_trend_segments("KRW-ETH", [{
-        "market": "KRW-ETH", "start_date": "2026-01-01", "end_date": "2026-02-01",
-        "days": 31, "return_pct": -10.0, "trend": "down", "first_half_trend": "down",
-        "second_half_trend": "down", "pattern_label": "지속형 하락",
-        "threshold_pct": 9.0, "computed_at": "2026-08-16T00:00:00+00:00",
-    }])
-    # KRW-BTC를 다시 저장하면 KRW-ETH 행은 그대로 남아 있어야 한다.
-    save_trend_segments("KRW-BTC", [{
-        "market": "KRW-BTC", "start_date": "2026-02-01", "end_date": "2026-03-01",
-        "days": 28, "return_pct": 5.0, "trend": "sideways", "first_half_trend": "sideways",
-        "second_half_trend": "sideways", "pattern_label": "지속형 횡보",
-        "threshold_pct": 8.0, "computed_at": "2026-08-16T01:00:00+00:00",
-    }])
-
-    assert len(list_trend_segments("KRW-BTC")) == 1
-    assert list_trend_segments("KRW-BTC")[0]["start_date"] == "2026-02-01"
-    assert len(list_trend_segments("KRW-ETH")) == 1
-
-
-def test_list_trend_segments_returns_empty_list_when_not_computed(monkeypatch, tmp_path):
-    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
-    assert list_trend_segments("KRW-XRP") == []
-
-
 def test_list_backtest_runs_filters_by_market(monkeypatch, tmp_path):
     _save_condition_tree_run(monkeypatch, tmp_path, "btc-run", title="BTC", description=None, market="KRW-BTC")
     _save_condition_tree_run(monkeypatch, tmp_path, "eth-run", title="ETH", description=None, market="KRW-ETH")
@@ -1040,45 +964,3 @@ def test_set_candle_count_updates_existing_row(monkeypatch, tmp_path):
     assert list_runs_missing_candle_count() == []
 
 
-def test_create_and_get_regime_ml_job(tmp_path, monkeypatch):
-    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
-    from engine.cache import create_regime_ml_job, get_regime_ml_job
-
-    create_regime_ml_job("job-1")
-    job = get_regime_ml_job("job-1")
-
-    assert job["id"] == "job-1"
-    assert job["status"] == "running"
-    assert job["finished_at"] is None
-    assert job["error_message"] is None
-
-
-def test_finish_regime_ml_job_updates_status_and_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
-    from engine.cache import create_regime_ml_job, finish_regime_ml_job, get_regime_ml_job
-
-    create_regime_ml_job("job-1")
-    finish_regime_ml_job("job-1", status="failed", error_message="boom")
-
-    job = get_regime_ml_job("job-1")
-    assert job["status"] == "failed"
-    assert job["error_message"] == "boom"
-    assert job["finished_at"] is not None
-
-
-def test_get_regime_ml_job_returns_none_when_missing(tmp_path, monkeypatch):
-    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
-    from engine.cache import get_regime_ml_job
-
-    assert get_regime_ml_job("does-not-exist") is None
-
-
-def test_list_regime_ml_jobs_orders_newest_first(tmp_path, monkeypatch):
-    monkeypatch.setattr(cache_module, "DB_PATH", tmp_path / "results.db")
-    from engine.cache import create_regime_ml_job, list_regime_ml_jobs
-
-    create_regime_ml_job("job-1")
-    create_regime_ml_job("job-2")
-
-    jobs = list_regime_ml_jobs()
-    assert [j["id"] for j in jobs] == ["job-2", "job-1"]

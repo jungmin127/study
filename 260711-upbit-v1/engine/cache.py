@@ -95,33 +95,6 @@ CREATE TABLE IF NOT EXISTS grid_search_jobs (
 );
 """
 
-_SCHEMA += """
-CREATE TABLE IF NOT EXISTS trend_segments (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    market            TEXT NOT NULL,
-    start_date        TEXT NOT NULL,
-    end_date          TEXT NOT NULL,
-    days              INTEGER NOT NULL,
-    return_pct        REAL NOT NULL,
-    trend             TEXT NOT NULL,
-    first_half_trend  TEXT NOT NULL,
-    second_half_trend TEXT NOT NULL,
-    pattern_label     TEXT NOT NULL,
-    threshold_pct     REAL NOT NULL,
-    computed_at       TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_trend_segments_market ON trend_segments(market);
-"""
-
-_SCHEMA += """
-CREATE TABLE IF NOT EXISTS regime_ml_jobs (
-    id            TEXT PRIMARY KEY,
-    status        TEXT NOT NULL,
-    started_at    TEXT NOT NULL,
-    finished_at   TEXT,
-    error_message TEXT
-);
-"""
 
 
 _JSON_PRIMITIVES = (str, int, float, bool, type(None))
@@ -669,45 +642,6 @@ def list_segment_classification() -> list[dict]:
     ]
 
 
-def save_trend_segments(market: str, rows: list[dict]) -> None:
-    """추세 구간 분류 결과를 market 단위로 교체 저장한다. 히스토리는 보관하지
-    않고 해당 market의 최신 1회분만 유지한다."""
-    conn = _connect()
-    try:
-        conn.execute("DELETE FROM trend_segments WHERE market = ?", (market,))
-        conn.executemany(
-            "INSERT INTO trend_segments "
-            "(market, start_date, end_date, days, return_pct, trend, first_half_trend, "
-            " second_half_trend, pattern_label, threshold_pct, computed_at) "
-            "VALUES (:market, :start_date, :end_date, :days, :return_pct, :trend, "
-            " :first_half_trend, :second_half_trend, :pattern_label, :threshold_pct, :computed_at)",
-            rows,
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def list_trend_segments(market: str) -> list[dict]:
-    conn = _connect()
-    try:
-        rows = conn.execute(
-            "SELECT market, start_date, end_date, days, return_pct, trend, first_half_trend, "
-            "       second_half_trend, pattern_label, threshold_pct, computed_at "
-            "FROM trend_segments WHERE market = ? ORDER BY start_date",
-            (market,),
-        ).fetchall()
-    finally:
-        conn.close()
-    return [
-        {
-            "market": r[0], "start_date": r[1], "end_date": r[2], "days": r[3],
-            "return_pct": r[4], "trend": r[5], "first_half_trend": r[6],
-            "second_half_trend": r[7], "pattern_label": r[8],
-            "threshold_pct": r[9], "computed_at": r[10],
-        }
-        for r in rows
-    ]
 
 
 def create_grid_search_job(
@@ -859,64 +793,3 @@ def list_grid_search_jobs() -> list[dict]:
     return [_row_to_grid_search_job_dict(r) for r in rows]
 
 
-def create_regime_ml_job(job_id: str) -> None:
-    conn = _connect()
-    try:
-        conn.execute(
-            "INSERT INTO regime_ml_jobs (id, status, started_at) "
-            "VALUES (?, 'running', datetime('now'))",
-            (job_id,),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def finish_regime_ml_job(job_id: str, status: str, error_message: str | None = None) -> None:
-    conn = _connect()
-    try:
-        conn.execute(
-            "UPDATE regime_ml_jobs "
-            "SET status = ?, finished_at = datetime('now'), error_message = ? "
-            "WHERE id = ?",
-            (status, error_message, job_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _row_to_regime_ml_job_dict(row: tuple) -> dict:
-    job_id, status, started_at, finished_at, error_message = row
-    return {
-        "id": job_id,
-        "status": status,
-        "started_at": started_at,
-        "finished_at": finished_at,
-        "error_message": error_message,
-    }
-
-
-def get_regime_ml_job(job_id: str) -> dict | None:
-    conn = _connect()
-    try:
-        row = conn.execute(
-            "SELECT id, status, started_at, finished_at, error_message "
-            "FROM regime_ml_jobs WHERE id = ?",
-            (job_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    return _row_to_regime_ml_job_dict(row) if row else None
-
-
-def list_regime_ml_jobs() -> list[dict]:
-    conn = _connect()
-    try:
-        rows = conn.execute(
-            "SELECT id, status, started_at, finished_at, error_message "
-            "FROM regime_ml_jobs ORDER BY started_at DESC, rowid DESC"
-        ).fetchall()
-    finally:
-        conn.close()
-    return [_row_to_regime_ml_job_dict(r) for r in rows]
