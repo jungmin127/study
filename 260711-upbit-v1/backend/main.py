@@ -72,6 +72,7 @@ from engine.grid_search_pool import INDICATOR_POOL_SPECS, build_condition_grid
 import httpx
 
 import trading.db as trading_db
+import trading.regime_autoswap as regime_autoswap
 from backend.trading_analytics_service import get_journal_summary, get_market_journal
 from backend.regime_adx_service import compute_adx_regime_history, compute_adx_regime_overview
 from engine.regime_adx_constants import MAJOR_MARKETS
@@ -1382,6 +1383,8 @@ def _live_strategy_response(strategy: dict, position: dict | None, current_price
             }
             for adj in trading_db.list_capital_adjustments(strategy["id"])
         ],
+        "auto_swap_enabled": bool(strategy["auto_swap_enabled"]),
+        "active_regime": strategy["active_regime"],
     }
 
 
@@ -1615,7 +1618,35 @@ def replace_live_strategy_endpoint(strategy_id: str, req: ReplaceLiveStrategyReq
     )
     if not replaced:
         raise HTTPException(status_code=409, detail="포지션이 열려 있어 교체할 수 없습니다")
+
+    if strategy["auto_swap_enabled"]:
+        target_regime = regime_autoswap.determine_target_regime(strategy["market"])
+        trading_db.set_active_regime(strategy_id, target_regime)
+        trading_db.insert_regime_swap_log(
+            strategy_id, strategy["market"], "manual_override_ack",
+            strategy["active_regime"], target_regime,
+            detail="수동 전략 교체로 인한 자동스왑 상태 동기화",
+        )
     return _full_live_strategy_response(strategy_id)
+
+
+class SetAutoSwapRequest(BaseModel):
+    enabled: bool
+
+
+@app.patch("/api/v1/live-strategies/{strategy_id}/auto-swap")
+def set_auto_swap_endpoint(strategy_id: str, req: SetAutoSwapRequest) -> dict:
+    if trading_db.get_live_strategy(strategy_id) is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    trading_db.set_auto_swap_enabled(strategy_id, req.enabled)
+    return _full_live_strategy_response(strategy_id)
+
+
+@app.get("/api/v1/live-strategies/{strategy_id}/regime-swap-log")
+def get_regime_swap_log_endpoint(strategy_id: str) -> list[dict]:
+    if trading_db.get_live_strategy(strategy_id) is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    return trading_db.list_regime_swap_log(strategy_id)
 
 
 REGIME_LIBRARY_SLOTS = ("하락", "횡보", "상승", "기본")

@@ -3004,3 +3004,98 @@ def test_delete_regime_strategy_mapping_is_idempotent_when_missing(monkeypatch, 
 
     assert resp.status_code == 200
     assert resp.json() == {"deleted": True}
+
+
+import trading.regime_autoswap as regime_autoswap
+
+
+def test_live_strategy_response_includes_autoswap_defaults(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+
+    resp = client.post("/api/v1/live-strategies", json=_live_strategy_request())
+
+    body = resp.json()
+    assert body["auto_swap_enabled"] is False
+    assert body["active_regime"] is None
+
+
+def test_set_auto_swap_endpoint_enables_flag(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.patch(f"/api/v1/live-strategies/{strategy_id}/auto-swap", json={"enabled": True})
+
+    assert resp.status_code == 200
+    assert resp.json()["auto_swap_enabled"] is True
+
+
+def test_set_auto_swap_endpoint_returns_404_for_missing_strategy(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.patch("/api/v1/live-strategies/does-not-exist/auto-swap", json={"enabled": True})
+
+    assert resp.status_code == 404
+
+
+def test_regime_swap_log_endpoint_returns_empty_list_initially(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+
+    resp = client.get(f"/api/v1/live-strategies/{strategy_id}/regime-swap-log")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_regime_swap_log_endpoint_returns_404_for_missing_strategy(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.get("/api/v1/live-strategies/does-not-exist/regime-swap-log")
+
+    assert resp.status_code == 404
+
+
+def test_replace_strategy_stamps_active_regime_when_autoswap_enabled(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post(
+        "/api/v1/live-strategies", json=_live_strategy_request(source_run_id="old-run"),
+    ).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    client.patch(f"/api/v1/live-strategies/{strategy_id}/auto-swap", json={"enabled": True})
+    _seed_backtest_run("new-run", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+    monkeypatch.setattr(regime_autoswap, "determine_target_regime", lambda market: "상승")
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "new-run"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["active_regime"] == "상승"
+    log = client.get(f"/api/v1/live-strategies/{strategy_id}/regime-swap-log").json()
+    assert len(log) == 1
+    assert log[0]["event"] == "manual_override_ack"
+    assert log[0]["to_regime"] == "상승"
+
+
+def test_replace_strategy_does_not_stamp_active_regime_when_autoswap_disabled(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post(
+        "/api/v1/live-strategies", json=_live_strategy_request(source_run_id="old-run"),
+    ).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    _seed_backtest_run("new-run", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "new-run"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["active_regime"] is None
+    assert client.get(f"/api/v1/live-strategies/{strategy_id}/regime-swap-log").json() == []
