@@ -76,8 +76,8 @@ export default function JournalMarketDetailView({
           </p>
         ) : (
           <>
-            <div className="flex flex-wrap gap-3 rounded-md border p-2 text-xs">
-              <div className="min-w-[70px] flex-1 text-center">
+            <div className="grid grid-cols-2 gap-3 rounded-md border p-2 text-xs">
+              <div className="text-center">
                 <p className="text-muted-foreground">승률</p>
                 <p className="font-medium">
                   {comparison.backtest.win_rate_pct.toFixed(1)}%
@@ -85,7 +85,7 @@ export default function JournalMarketDetailView({
                   {comparison.live.win_rate_pct.toFixed(1)}%
                 </p>
               </div>
-              <div className="min-w-[70px] flex-1 text-center">
+              <div className="text-center">
                 <p className="text-muted-foreground">평균수익률</p>
                 <p className="font-medium">
                   {fmtPct(comparison.backtest.avg_return_pct)}
@@ -93,7 +93,7 @@ export default function JournalMarketDetailView({
                   {fmtPct(comparison.live.avg_return_pct)}
                 </p>
               </div>
-              <div className="min-w-[70px] flex-1 text-center">
+              <div className="text-center">
                 <p className="text-muted-foreground">MDD</p>
                 <p className="font-medium">
                   {fmtPct(comparison.backtest.mdd_pct)}
@@ -101,7 +101,7 @@ export default function JournalMarketDetailView({
                   {fmtPct(comparison.live.mdd_pct)}
                 </p>
               </div>
-              <div className="min-w-[70px] flex-1 text-center">
+              <div className="text-center">
                 <p className="text-muted-foreground">거래횟수</p>
                 <p className="font-medium">
                   {comparison.backtest.trade_count}
