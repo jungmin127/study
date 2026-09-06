@@ -1574,20 +1574,12 @@ class ReplaceLiveStrategyRequest(BaseModel):
     source_run_id: str
 
 
-@app.post("/api/v1/live-strategies/{strategy_id}/replace-strategy")
-def replace_live_strategy_endpoint(strategy_id: str, req: ReplaceLiveStrategyRequest) -> dict:
-    strategy = trading_db.get_live_strategy(strategy_id)
-    if strategy is None:
-        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
-    if strategy["status"] == "draft":
-        raise HTTPException(status_code=409, detail="draft 상태의 전략은 교체할 수 없습니다")
-
-    config = get_run_config(req.source_run_id)
-    if config is None:
-        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 설정을 찾을 수 없습니다")
+def _validate_backtest_config_for_market(config: dict, market: str) -> None:
+    """백테스트 결과가 실거래(라이브 전략 교체 / 전략 라이브러리 매핑)에 쓰일 수
+    있는지 검증한다. config는 get_run_config()의 반환값."""
     if config["strategy_name"] != "ConditionTreeStrategy":
         raise HTTPException(status_code=400, detail="지원하지 않는 백테스트 결과입니다")
-    if config["market"] != strategy["market"]:
+    if config["market"] != market:
         raise HTTPException(status_code=400, detail="선택한 백테스트 결과의 마켓이 현재 전략과 다릅니다")
     if config["timeframe"] not in VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 봉데이터입니다: {config['timeframe']}")
@@ -1599,6 +1591,20 @@ def replace_live_strategy_endpoint(strategy_id: str, req: ReplaceLiveStrategyReq
     )
     if unknown:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 지표입니다: {', '.join(unknown)}")
+
+
+@app.post("/api/v1/live-strategies/{strategy_id}/replace-strategy")
+def replace_live_strategy_endpoint(strategy_id: str, req: ReplaceLiveStrategyRequest) -> dict:
+    strategy = trading_db.get_live_strategy(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
+    if strategy["status"] == "draft":
+        raise HTTPException(status_code=409, detail="draft 상태의 전략은 교체할 수 없습니다")
+
+    config = get_run_config(req.source_run_id)
+    if config is None:
+        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 설정을 찾을 수 없습니다")
+    _validate_backtest_config_for_market(config, strategy["market"])
 
     replaced = trading_db.replace_live_strategy_strategy(
         strategy_id,
