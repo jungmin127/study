@@ -22,6 +22,7 @@ import trading.db as db
 import trading.order_executor as order_executor
 import trading.position_manager as position_manager
 import trading.reconciler as reconciler
+import trading.regime_autoswap as regime_autoswap
 import trading.risk_manager as risk_manager
 import trading.signal_engine as signal_engine
 import trading.upbit_ws as upbit_ws
@@ -35,6 +36,7 @@ _NTP_CHECK_INTERVAL_SEC = 600
 _NTP_DRIFT_THRESHOLD_SEC = 0.5
 _MIN_POLL_INTERVAL_SEC = 5.0
 _MAX_POLL_INTERVAL_SEC = 60.0
+_AUTOSWAP_CHECK_INTERVAL_SEC = 600  # 10분 — 판정 기준이 1시간봉이라 더 자주 볼 필요 없음
 # exit_for_risk()가 "slippage_exceeded"(FOK 취소, 대기 주문을 남기지 않음)를 반환하거나
 # 그냥 "exited"로 성공해도, 다음 tick에도 가격이 같은 임계치 근방이면 즉시 재시도돼
 # 거래소에 tick 주기(초당 여러 번)로 취소+재주문 스팸을 계속 낸다(5라운드부터 트리거
@@ -377,11 +379,27 @@ async def _run_ntp_check_loop() -> None:
         await asyncio.sleep(_NTP_CHECK_INTERVAL_SEC)
 
 
+async def _run_regime_autoswap_loop() -> None:
+    """10분마다 regime_autoswap.process_autoswap_tick()을 호출한다. 판정 기준이
+    1시간봉이라 더 짧은 주기로 볼 필요는 없다(설계 스펙 결정). process_autoswap_tick
+    자체도 전략 단위로 예외를 흡수하지만, 이 루프 레벨에서도 한 번 더 감싸
+    list_active_strategies() 자체가 실패하는 것 같은 예상 밖의 오류로도 루프가
+    죽지 않게 한다(daemon.py의 기존 이중 방어 패턴과 동일)."""
+    while True:
+        try:
+            await asyncio.to_thread(regime_autoswap.process_autoswap_tick)
+        except Exception:
+            logger.exception("자동스왑 틱 처리 중 예외 발생")
+        await asyncio.sleep(_AUTOSWAP_CHECK_INTERVAL_SEC)
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    await asyncio.gather(_task_set_manager_loop(), _run_ntp_check_loop())
+    await asyncio.gather(
+        _task_set_manager_loop(), _run_ntp_check_loop(), _run_regime_autoswap_loop(),
+    )
 
 
 if __name__ == "__main__":

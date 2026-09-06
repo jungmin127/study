@@ -508,6 +508,45 @@ async def test_run_strategy_loop_hydrate_state_waits_for_shared_lock(monkeypatch
     assert events == ["lock_held_by_other", "lock_released_by_other", "hydrate_state"]
 
 
+import trading.regime_autoswap as regime_autoswap
+
+
+async def test_regime_autoswap_loop_calls_process_tick_each_cycle(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_process_tick():
+        calls["count"] += 1
+
+    monkeypatch.setattr(regime_autoswap, "process_autoswap_tick", fake_process_tick)
+
+    async def stop_after_one_check(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_check)
+
+    with pytest.raises(asyncio.CancelledError):
+        await daemon._run_regime_autoswap_loop()
+
+    assert calls["count"] == 1
+
+
+async def test_regime_autoswap_loop_survives_exception(monkeypatch, caplog):
+    def fake_process_tick():
+        raise RuntimeError("캔들 조회 실패")
+
+    monkeypatch.setattr(regime_autoswap, "process_autoswap_tick", fake_process_tick)
+
+    async def stop_after_one_check(seconds):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(daemon.asyncio, "sleep", stop_after_one_check)
+
+    with caplog.at_level("ERROR"), pytest.raises(asyncio.CancelledError):
+        await daemon._run_regime_autoswap_loop()  # RuntimeError가 밖으로 새면 테스트 실패
+
+    assert len(caplog.records) == 1
+
+
 async def test_task_set_manager_creates_task_for_new_strategy(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm, status="running")
