@@ -3099,3 +3099,87 @@ def test_replace_strategy_does_not_stamp_active_regime_when_autoswap_disabled(mo
     assert resp.status_code == 200
     assert resp.json()["active_regime"] is None
     assert client.get(f"/api/v1/live-strategies/{strategy_id}/regime-swap-log").json() == []
+
+
+def test_replace_strategy_survives_determine_target_regime_exception(monkeypatch, tmp_path):
+    """F4: determine_target_regime()이 예외를 던져도(네트워크 실패 등) 이미 커밋된
+    전략 교체 자체는 성공 응답으로 돌려줘야 한다 — 500으로 전체 요청을 실패시키면
+    사용자의 수동 개입이 stamp 안 된 채 다음 daemon 틱에 되돌려질 위험이 생긴다."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post(
+        "/api/v1/live-strategies", json=_live_strategy_request(source_run_id="old-run"),
+    ).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    client.patch(f"/api/v1/live-strategies/{strategy_id}/auto-swap", json={"enabled": True})
+    _seed_backtest_run("new-run", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    def raise_error(market):
+        raise RuntimeError("캔들 조회 실패")
+
+    monkeypatch.setattr(regime_autoswap, "determine_target_regime", raise_error)
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "new-run"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["source_run_id"] == "new-run"
+    assert client.get(f"/api/v1/live-strategies/{strategy_id}/regime-swap-log").json() == []
+
+
+def test_replace_strategy_skips_stamp_when_target_regime_uncertain(monkeypatch, tmp_path):
+    """F4: determine_target_regime()이 None(장세 불확실)을 반환하면 stamp할 값이
+    없으므로 조용히 건너뛴다 — active_regime 변경도, 로그도 없어야 한다."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post(
+        "/api/v1/live-strategies", json=_live_strategy_request(source_run_id="old-run"),
+    ).json()["id"]
+    client.post(f"/api/v1/live-strategies/{strategy_id}/stop")
+    client.patch(f"/api/v1/live-strategies/{strategy_id}/auto-swap", json={"enabled": True})
+    _seed_backtest_run("new-run", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+    monkeypatch.setattr(regime_autoswap, "determine_target_regime", lambda market: None)
+
+    resp = client.post(
+        f"/api/v1/live-strategies/{strategy_id}/replace-strategy",
+        json={"source_run_id": "new-run"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["active_regime"] is None
+    assert client.get(f"/api/v1/live-strategies/{strategy_id}/regime-swap-log").json() == []
+
+
+def test_set_auto_swap_endpoint_resets_active_regime_when_enabling(monkeypatch, tmp_path):
+    """F6: auto-swap을 켤 때 active_regime을 NULL로 리셋해 다음 틱에 재동기화를
+    강제한다(꺼짐→수동작업→다시 켜짐 시나리오에서 daemon이 재동기화를 하지
+    않던 버그 수정)."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    trading_db_module.set_active_regime(strategy_id, "상승")
+
+    resp = client.patch(f"/api/v1/live-strategies/{strategy_id}/auto-swap", json={"enabled": True})
+
+    assert resp.status_code == 200
+    assert resp.json()["active_regime"] is None
+
+
+def test_regime_swap_log_endpoint_returns_utc_offset_timestamp(monkeypatch, tmp_path):
+    """F8: occurred_at은 다른 엔드포인트들과 동일하게 _to_utc_iso()를 거쳐 UTC
+    오프셋이 붙은 문자열이어야 한다(그래야 프론트의 new Date(...)가 로컬시간대로
+    잘못 해석하지 않는다)."""
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(backend_module, "get_krw_markets", lambda: [{"market": "KRW-BTC"}])
+    strategy_id = client.post("/api/v1/live-strategies", json=_live_strategy_request()).json()["id"]
+    trading_db_module.insert_regime_swap_log(
+        strategy_id, "KRW-BTC", "swap_success", None, "상승", detail="테스트",
+    )
+
+    resp = client.get(f"/api/v1/live-strategies/{strategy_id}/regime-swap-log")
+
+    assert resp.status_code == 200
+    occurred_at = resp.json()[0]["occurred_at"]
+    assert occurred_at.endswith("+00:00")

@@ -37,26 +37,26 @@ def test_determine_target_regime_confirms_when_last_three_bars_agree(monkeypatch
     assert regime_autoswap.determine_target_regime("KRW-BTC") == "상승"
 
 
-def test_determine_target_regime_falls_back_when_last_three_bars_disagree(monkeypatch):
+def test_determine_target_regime_returns_none_when_last_three_bars_disagree(monkeypatch):
     monkeypatch.setattr(regime_autoswap, "get_candles", lambda *a, **k: _fake_raw_df(5))
     monkeypatch.setattr(regime_autoswap, "compute_adx_di", lambda df: _fake_adx_df(5))
     monkeypatch.setattr(regime_autoswap, "classify_regime", Mock(side_effect=["상승", "상승", "하락"]))
 
-    assert regime_autoswap.determine_target_regime("KRW-BTC") == "기본"
+    assert regime_autoswap.determine_target_regime("KRW-BTC") is None
 
 
-def test_determine_target_regime_falls_back_when_unclassified(monkeypatch):
+def test_determine_target_regime_returns_none_when_unclassified(monkeypatch):
     monkeypatch.setattr(regime_autoswap, "get_candles", lambda *a, **k: _fake_raw_df(5))
     monkeypatch.setattr(regime_autoswap, "compute_adx_di", lambda df: _fake_adx_df(5))
     monkeypatch.setattr(regime_autoswap, "classify_regime", Mock(side_effect=[None, None, None]))
 
-    assert regime_autoswap.determine_target_regime("KRW-BTC") == "기본"
+    assert regime_autoswap.determine_target_regime("KRW-BTC") is None
 
 
-def test_determine_target_regime_falls_back_when_not_enough_bars(monkeypatch):
+def test_determine_target_regime_returns_none_when_not_enough_bars(monkeypatch):
     monkeypatch.setattr(regime_autoswap, "get_candles", lambda *a, **k: _fake_raw_df(2))
 
-    assert regime_autoswap.determine_target_regime("KRW-BTC") == "기본"
+    assert regime_autoswap.determine_target_regime("KRW-BTC") is None
 
 
 def test_process_autoswap_tick_skips_when_already_synced(monkeypatch, tmp_path):
@@ -166,3 +166,81 @@ def test_process_autoswap_tick_continues_after_one_strategy_raises(monkeypatch, 
 
     assert any(broken_id in r.message for r in caplog.records)  # 실패한 전략도 로그로 남음
     assert dbm.list_regime_swap_log(ok_id) == []  # 정상 전략은 이미 동기화 상태라 로그 없이 계속 처리됨
+
+
+def test_process_autoswap_tick_holds_state_when_regime_uncertain(monkeypatch, tmp_path):
+    """F2: determine_target_regime()이 None(장세 불확실)을 반환하면 이미 설정된
+    active_regime이 있어도 아무 것도 바꾸지 않는다(스왑 없음, 로그 없음)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", market="KRW-BTC")
+    dbm.set_auto_swap_enabled(strategy_id, True)
+    dbm.set_active_regime(strategy_id, "상승")
+    monkeypatch.setattr(regime_autoswap, "determine_target_regime", lambda market: None)
+
+    regime_autoswap.process_autoswap_tick()
+
+    assert dbm.get_live_strategy(strategy_id)["active_regime"] == "상승"
+    assert dbm.list_regime_swap_log(strategy_id) == []
+
+
+def test_process_autoswap_tick_skips_paused_strategy(monkeypatch, tmp_path):
+    """F7: status가 running이 아니면(서킷브레이커 트립으로 인한 paused 포함) 목표
+    장세가 다르게 판정돼도 건드리지 않는다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="paused", market="KRW-BTC")
+    dbm.set_auto_swap_enabled(strategy_id, True)
+    dbm.set_active_regime(strategy_id, "하락")
+    dbm.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-up", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+    monkeypatch.setattr(regime_autoswap, "determine_target_regime", lambda market: "상승")
+
+    regime_autoswap.process_autoswap_tick()
+
+    strategy = dbm.get_live_strategy(strategy_id)
+    assert strategy["active_regime"] == "하락"
+    assert strategy["source_run_id"] is None
+    assert dbm.list_regime_swap_log(strategy_id) == []
+
+
+def test_process_autoswap_tick_dedupes_repeated_no_mapping_skip_logs(monkeypatch, tmp_path):
+    """F5: 같은 사유(swap_skipped_no_mapping, 같은 target)로 연속 스킵되면 로그를
+    한 번만 남긴다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", market="KRW-BTC")
+    dbm.set_auto_swap_enabled(strategy_id, True)
+    monkeypatch.setattr(regime_autoswap, "determine_target_regime", lambda market: "상승")
+
+    regime_autoswap.process_autoswap_tick()
+    regime_autoswap.process_autoswap_tick()
+
+    logs = dbm.list_regime_swap_log(strategy_id)
+    assert len(logs) == 1
+    assert logs[0]["event"] == "swap_skipped_no_mapping"
+
+
+def test_process_autoswap_tick_rechecks_fresh_state_before_swapping(monkeypatch, tmp_path):
+    """F3: determine_target_regime()의 네트워크 호출이 걸리는 동안(side effect로
+    시뮬레이션) 사용자가 auto_swap을 껐다면, 틱 시작 시점 스냅샷이 켜져 있었더라도
+    스왑을 수행하지 않는다."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm, status="running", market="KRW-BTC")
+    dbm.set_auto_swap_enabled(strategy_id, True)
+    dbm.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-up", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+
+    def fake_determine(market):
+        dbm.set_auto_swap_enabled(strategy_id, False)  # 네트워크 호출 도중 사용자가 끔
+        return "상승"
+
+    monkeypatch.setattr(regime_autoswap, "determine_target_regime", fake_determine)
+
+    regime_autoswap.process_autoswap_tick()
+
+    strategy = dbm.get_live_strategy(strategy_id)
+    assert strategy["active_regime"] is None
+    assert strategy["source_run_id"] is None
+    assert dbm.list_regime_swap_log(strategy_id) == []

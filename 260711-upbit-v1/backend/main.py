@@ -7,6 +7,7 @@ Run: uvicorn backend.main:app --reload --port 8000  (저장소 루트에서 실�
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import threading
@@ -90,6 +91,8 @@ def _to_utc_iso(value: str) -> str:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
 
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Upbit Strategy EDA API", version="0.1.0")
 
@@ -1620,13 +1623,18 @@ def replace_live_strategy_endpoint(strategy_id: str, req: ReplaceLiveStrategyReq
         raise HTTPException(status_code=409, detail="포지션이 열려 있어 교체할 수 없습니다")
 
     if strategy["auto_swap_enabled"]:
-        target_regime = regime_autoswap.determine_target_regime(strategy["market"])
-        trading_db.set_active_regime(strategy_id, target_regime)
-        trading_db.insert_regime_swap_log(
-            strategy_id, strategy["market"], "manual_override_ack",
-            strategy["active_regime"], target_regime,
-            detail="수동 전략 교체로 인한 자동스왑 상태 동기화",
-        )
+        try:
+            target_regime = regime_autoswap.determine_target_regime(strategy["market"])
+        except Exception:
+            logger.exception("수동 교체 후 장세 동기화 실패: strategy_id=%s", strategy_id)
+            target_regime = None
+        if target_regime is not None:
+            trading_db.set_active_regime(strategy_id, target_regime)
+            trading_db.insert_regime_swap_log(
+                strategy_id, strategy["market"], "manual_override_ack",
+                strategy["active_regime"], target_regime,
+                detail="수동 전략 교체로 인한 자동스왑 상태 동기화",
+            )
     return _full_live_strategy_response(strategy_id)
 
 
@@ -1639,6 +1647,8 @@ def set_auto_swap_endpoint(strategy_id: str, req: SetAutoSwapRequest) -> dict:
     if trading_db.get_live_strategy(strategy_id) is None:
         raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
     trading_db.set_auto_swap_enabled(strategy_id, req.enabled)
+    if req.enabled:
+        trading_db.set_active_regime(strategy_id, None)
     return _full_live_strategy_response(strategy_id)
 
 
@@ -1646,7 +1656,10 @@ def set_auto_swap_endpoint(strategy_id: str, req: SetAutoSwapRequest) -> dict:
 def get_regime_swap_log_endpoint(strategy_id: str) -> list[dict]:
     if trading_db.get_live_strategy(strategy_id) is None:
         raise HTTPException(status_code=404, detail="해당 id의 라이브 전략을 찾을 수 없습니다")
-    return trading_db.list_regime_swap_log(strategy_id)
+    return [
+        {**row, "occurred_at": _to_utc_iso(row["occurred_at"])}
+        for row in trading_db.list_regime_swap_log(strategy_id)
+    ]
 
 
 REGIME_LIBRARY_SLOTS = ("하락", "횡보", "상승", "기본")
