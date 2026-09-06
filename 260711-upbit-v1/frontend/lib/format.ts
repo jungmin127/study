@@ -9,14 +9,22 @@ const KST_FORMATTER = new Intl.DateTimeFormat('en-US', {
   hour12: false,
 });
 
+// 백엔드(SQLite datetime('now'))가 타임존 마커 없는 UTC 문자열("2026-09-06 05:30:00")을
+// 그대로 내려주기 때문에, new Date()에 곧바로 넘기면 브라우저가 로컬 시간으로 오인한다.
+// 마커가 없으면 UTC로 명시해서 파싱한다.
+function toUtcDate(iso: string): Date {
+  const hasTimezone = /[Zz]|[+-]\d{2}:\d{2}$/.test(iso);
+  return new Date(hasTimezone ? iso : `${iso.replace(' ', 'T')}Z`);
+}
+
 export function formatDateTime(iso: string): string {
-  const parts = KST_FORMATTER.formatToParts(new Date(iso));
+  const parts = KST_FORMATTER.formatToParts(toUtcDate(iso));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
 export function formatDateTimeShort(iso: string): string {
-  const parts = KST_FORMATTER.formatToParts(new Date(iso));
+  const parts = KST_FORMATTER.formatToParts(toUtcDate(iso));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return `${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
 }
