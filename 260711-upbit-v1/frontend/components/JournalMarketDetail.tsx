@@ -26,6 +26,9 @@ function fmtCloseReason(reason: string): string {
   return CLOSE_REASON_LABELS[reason] ?? reason;
 }
 
+// lib/return-rate-color.ts의 returnRateColor와 의도적으로 다른 헬퍼: 여기선 0을
+// 수익(빨강)으로 취급한다 — 이 컴포넌트의 승률 정의("손익이 0 이상인 비율")와
+// 맞추기 위함. returnRateColor로 통합하지 말 것(0 처리 결과가 달라짐).
 function pnlColorClass(value: number): string {
   return value >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400';
 }
@@ -36,6 +39,7 @@ export default function JournalMarketDetailView({
   detail: JournalMarketDetail;
 }) {
   const comparison = detail.backtest_comparison;
+  const recentFirstTradeLog = [...detail.trade_log].reverse();
 
   return (
     <div className="space-y-4 rounded-md border p-4">
@@ -107,7 +111,7 @@ export default function JournalMarketDetailView({
               </div>
             </div>
             {comparison.sample_size_warning && (
-              <p className="mt-2 text-xs text-amber-600">
+              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
                 실매매 표본이 10건 미만이라 통계적으로 신뢰하기 이릅니다.
               </p>
             )}
@@ -127,10 +131,10 @@ export default function JournalMarketDetailView({
         {detail.trade_log.length === 0 ? (
           <p className="text-sm text-muted-foreground">청산된 거래가 없습니다.</p>
         ) : (
-          <div className="max-h-[320px] overflow-y-auto pr-1">
+          <div className="max-h-[320px] overflow-y-auto rounded-md border p-2">
             <div className="hidden md:block">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 bg-background">
                   <TableRow>
                     <TableHead>진입</TableHead>
                     <TableHead>청산</TableHead>
@@ -139,7 +143,7 @@ export default function JournalMarketDetailView({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detail.trade_log.map((t) => (
+                  {recentFirstTradeLog.map((t) => (
                     <TableRow key={t.position_id}>
                       <TableCell>
                         {formatDateTime(t.entry_time)}
@@ -161,7 +165,7 @@ export default function JournalMarketDetailView({
               </Table>
             </div>
             <div className="space-y-2 md:hidden">
-              {detail.trade_log.map((t) => (
+              {recentFirstTradeLog.map((t) => (
                 <div key={t.position_id} className="rounded-md border p-3 text-sm">
                   <p className="text-xs text-muted-foreground">
                     진입 {formatDateTime(t.entry_time)} · {Math.round(t.entry_price).toLocaleString()}원
