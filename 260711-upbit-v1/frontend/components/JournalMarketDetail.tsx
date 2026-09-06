@@ -26,6 +26,10 @@ function fmtCloseReason(reason: string): string {
   return CLOSE_REASON_LABELS[reason] ?? reason;
 }
 
+function pnlColorClass(value: number): string {
+  return value >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400';
+}
+
 export default function JournalMarketDetailView({
   detail,
 }: {
@@ -159,11 +163,18 @@ export default function JournalMarketDetailView({
       </div>
 
       <div>
-        <h3 className="mb-2 text-sm font-semibold">매매일지</h3>
+        <h3 className="mb-2 text-sm font-semibold">
+          매매일지
+          {detail.trade_log.length > 0 && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              전체 {detail.trade_log.length}건
+            </span>
+          )}
+        </h3>
         {detail.trade_log.length === 0 ? (
           <p className="text-sm text-muted-foreground">청산된 거래가 없습니다.</p>
         ) : (
-          <>
+          <div className="max-h-[320px] overflow-y-auto pr-1">
             <div className="hidden md:block">
               <Table>
                 <TableHeader>
@@ -180,14 +191,14 @@ export default function JournalMarketDetailView({
                       <TableCell>
                         {formatDateTime(t.entry_time)}
                         <br />
-                        {Math.round(t.entry_price).toLocaleString()}원 × {t.entry_qty}
+                        {Math.round(t.entry_price).toLocaleString()}원
                       </TableCell>
                       <TableCell>
                         {formatDateTime(t.exit_time)}
                         <br />
-                        {Math.round(t.exit_price).toLocaleString()}원 × {t.exit_qty}
+                        {Math.round(t.exit_price).toLocaleString()}원
                       </TableCell>
-                      <TableCell>
+                      <TableCell className={pnlColorClass(t.realized_pnl)}>
                         {fmtKrw(t.realized_pnl)} ({fmtPct(t.realized_pnl_pct)})
                       </TableCell>
                       <TableCell>{fmtCloseReason(t.close_reason)}</TableCell>
@@ -200,20 +211,22 @@ export default function JournalMarketDetailView({
               {detail.trade_log.map((t) => (
                 <div key={t.position_id} className="rounded-md border p-3 text-sm">
                   <p className="text-xs text-muted-foreground">
-                    진입 {formatDateTime(t.entry_time)} · {Math.round(t.entry_price).toLocaleString()}원 ×{' '}
-                    {t.entry_qty}
+                    진입 {formatDateTime(t.entry_time)} · {Math.round(t.entry_price).toLocaleString()}원
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    청산 {formatDateTime(t.exit_time)} · {Math.round(t.exit_price).toLocaleString()}원 ×{' '}
-                    {t.exit_qty}
+                    청산 {formatDateTime(t.exit_time)} · {Math.round(t.exit_price).toLocaleString()}원
                   </p>
                   <p className="mt-1">
-                    {fmtKrw(t.realized_pnl)} ({fmtPct(t.realized_pnl_pct)}) · {fmtCloseReason(t.close_reason)}
+                    <span className={pnlColorClass(t.realized_pnl)}>
+                      {fmtKrw(t.realized_pnl)} ({fmtPct(t.realized_pnl_pct)})
+                    </span>
+                    {' · '}
+                    {fmtCloseReason(t.close_reason)}
                   </p>
                 </div>
               ))}
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
