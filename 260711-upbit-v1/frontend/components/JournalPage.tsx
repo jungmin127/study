@@ -165,8 +165,6 @@ export default function JournalPage() {
                 {detail.timeframes.map(formatTimeframe).join(', ')} · {detail.statuses.join(', ')}
               </p>
 
-              <JournalCalendar daily={detail.daily} />
-
               <JournalMarketDetailView detail={detail} />
             </div>
           )}
