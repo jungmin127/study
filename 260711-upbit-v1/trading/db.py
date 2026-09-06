@@ -24,6 +24,7 @@ TABLE_NAMES = (
     "manual_intervention_events",
     "capital_adjustments",
     "regime_strategy_library",
+    "regime_swap_log",
 )
 
 _initialized_paths: set[Path] = set()
@@ -46,7 +47,9 @@ CREATE TABLE IF NOT EXISTS live_strategies (
     started_at          TEXT,
     stopped_at          TEXT,
     baseline_qty        REAL,
-    deleted_at          TEXT
+    deleted_at          TEXT,
+    auto_swap_enabled   INTEGER NOT NULL DEFAULT 0,
+    active_regime       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS positions (
@@ -156,6 +159,20 @@ CREATE TABLE IF NOT EXISTS regime_strategy_library (
     updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (market, regime)
 );
+
+CREATE TABLE IF NOT EXISTS regime_swap_log (
+    id                TEXT PRIMARY KEY,
+    live_strategy_id  TEXT NOT NULL REFERENCES live_strategies(id),
+    market            TEXT NOT NULL,
+    occurred_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    event             TEXT NOT NULL CHECK (event IN (
+                          'swap_success', 'swap_skipped_open_position',
+                          'swap_skipped_no_mapping', 'manual_override_ack'
+                      )),
+    from_regime       TEXT,
+    to_regime         TEXT NOT NULL,
+    detail            TEXT
+);
 """
 
 
@@ -239,6 +256,36 @@ def _ensure_live_strategies_deleted_at_column(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_live_strategies_auto_swap_enabled_column(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 live_strategies 테이블에 새 컬럼
+    auto_swap_enabled를 추가하지 못한다. 기존 행은 DEFAULT 0으로 채워진다."""
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='live_strategies'"
+    ).fetchone() is not None
+    if not table_exists:
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('live_strategies')")}
+    if "auto_swap_enabled" in columns:
+        return
+    conn.execute("ALTER TABLE live_strategies ADD COLUMN auto_swap_enabled INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+
+
+def _ensure_live_strategies_active_regime_column(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 live_strategies 테이블에 새 컬럼
+    active_regime을 추가하지 못한다. 기존 행은 NULL로 채워진다."""
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='live_strategies'"
+    ).fetchone() is not None
+    if not table_exists:
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('live_strategies')")}
+    if "active_regime" in columns:
+        return
+    conn.execute("ALTER TABLE live_strategies ADD COLUMN active_regime TEXT")
+    conn.commit()
+
+
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -250,6 +297,8 @@ def _connect() -> sqlite3.Connection:
         _assert_live_strategies_manual_pause_column_present(conn)
         _ensure_positions_entry_fee_column(conn)
         _ensure_live_strategies_deleted_at_column(conn)
+        _ensure_live_strategies_auto_swap_enabled_column(conn)
+        _ensure_live_strategies_active_regime_column(conn)
         _initialized_paths.add(DB_PATH)
     return conn
 
@@ -921,6 +970,66 @@ def list_regime_strategy_mappings() -> list[dict]:
     try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT * FROM regime_strategy_library").fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def set_auto_swap_enabled(strategy_id: str, enabled: bool) -> bool:
+    """존재하는 라이브 전략의 auto_swap_enabled를 갱신한다. 반환값은 갱신 성공
+    여부(해당 id가 없으면 False)."""
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE live_strategies SET auto_swap_enabled = ? WHERE id = ?",
+            (1 if enabled else 0, strategy_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def set_active_regime(strategy_id: str, regime: str | None) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE live_strategies SET active_regime = ? WHERE id = ?",
+            (regime, strategy_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def insert_regime_swap_log(
+    live_strategy_id: str, market: str, event: str,
+    from_regime: str | None, to_regime: str, detail: str | None = None,
+) -> str:
+    log_id = str(uuid.uuid4())
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO regime_swap_log "
+            "(id, live_strategy_id, market, event, from_regime, to_regime, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (log_id, live_strategy_id, market, event, from_regime, to_regime, detail),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return log_id
+
+
+def list_regime_swap_log(live_strategy_id: str, limit: int = 50) -> list[dict]:
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM regime_swap_log WHERE live_strategy_id = ? "
+            "ORDER BY occurred_at DESC LIMIT ?",
+            (live_strategy_id, limit),
+        ).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()

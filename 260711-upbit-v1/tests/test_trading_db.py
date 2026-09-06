@@ -130,6 +130,7 @@ def test_live_strategies_columns(monkeypatch, tmp_path):
         "sell_conditions_json", "risk_config_json", "current_capital", "status",
         "manual_pause", "last_processed_candle_time", "created_at", "approved_at",
         "started_at", "stopped_at", "baseline_qty", "deleted_at",
+        "auto_swap_enabled", "active_regime",
     }
 
 
@@ -1495,3 +1496,115 @@ def test_list_regime_strategy_mappings_returns_empty_list_when_none(tmp_path, mo
     monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "trading.db")
 
     assert db_module.list_regime_strategy_mappings() == []
+
+
+def test_set_auto_swap_enabled_updates_flag(tmp_path, monkeypatch):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    result = db.set_auto_swap_enabled(strategy_id, True)
+
+    assert result is True
+    assert db.get_live_strategy(strategy_id)["auto_swap_enabled"] == 1
+
+
+def test_set_auto_swap_enabled_returns_false_for_missing_strategy(tmp_path, monkeypatch):
+    db = _fresh_db(monkeypatch, tmp_path)
+
+    result = db.set_auto_swap_enabled("does-not-exist", True)
+
+    assert result is False
+
+
+def test_new_live_strategy_defaults_auto_swap_disabled_and_no_active_regime(tmp_path, monkeypatch):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    strategy = db.get_live_strategy(strategy_id)
+
+    assert strategy["auto_swap_enabled"] == 0
+    assert strategy["active_regime"] is None
+
+
+def test_set_active_regime_updates_field(tmp_path, monkeypatch):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    db.set_active_regime(strategy_id, "상승")
+
+    assert db.get_live_strategy(strategy_id)["active_regime"] == "상승"
+
+
+def test_set_active_regime_accepts_none(tmp_path, monkeypatch):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+    db.set_active_regime(strategy_id, "상승")
+
+    db.set_active_regime(strategy_id, None)
+
+    assert db.get_live_strategy(strategy_id)["active_regime"] is None
+
+
+def test_insert_and_list_regime_swap_log(tmp_path, monkeypatch):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    log_id = db.insert_regime_swap_log(
+        strategy_id, "KRW-BTC", "swap_success", "하락", "상승", detail="source_run_id=run-1",
+    )
+
+    rows = db.list_regime_swap_log(strategy_id)
+    assert len(rows) == 1
+    assert rows[0]["id"] == log_id
+    assert rows[0]["market"] == "KRW-BTC"
+    assert rows[0]["event"] == "swap_success"
+    assert rows[0]["from_regime"] == "하락"
+    assert rows[0]["to_regime"] == "상승"
+    assert rows[0]["detail"] == "source_run_id=run-1"
+
+
+def test_list_regime_swap_log_orders_newest_first(tmp_path, monkeypatch):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+    conn = db._connect()
+    try:
+        conn.execute(
+            "INSERT INTO regime_swap_log (id, live_strategy_id, market, occurred_at, event, from_regime, to_regime) "
+            "VALUES ('log-old', ?, 'KRW-BTC', '2026-01-01T00:00:00', 'swap_success', NULL, '상승')",
+            (strategy_id,),
+        )
+        conn.execute(
+            "INSERT INTO regime_swap_log (id, live_strategy_id, market, occurred_at, event, from_regime, to_regime) "
+            "VALUES ('log-new', ?, 'KRW-BTC', '2026-01-02T00:00:00', 'swap_success', '상승', '하락')",
+            (strategy_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rows = db.list_regime_swap_log(strategy_id)
+
+    assert [r["id"] for r in rows] == ["log-new", "log-old"]
+
+
+def test_list_regime_swap_log_returns_empty_for_strategy_with_no_logs(tmp_path, monkeypatch):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db, status="running")
+
+    assert db.list_regime_swap_log(strategy_id) == []
+
+
+def test_connect_creates_all_tables_includes_regime_swap_log(tmp_path, monkeypatch):
+    """test_connect_creates_all_tables가 이미 TABLE_NAMES 전체를 검증하지만, 이
+    테이블을 빠뜨리기 쉬운 실수(TABLE_NAMES에는 추가했는데 _SCHEMA에는 빠뜨림, 또는
+    반대)를 이 파일을 읽는 사람이 바로 알아볼 수 있게 명시적으로 하나 더 남긴다."""
+    db = _fresh_db(monkeypatch, tmp_path)
+    conn = db._connect()
+    try:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='regime_swap_log'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
