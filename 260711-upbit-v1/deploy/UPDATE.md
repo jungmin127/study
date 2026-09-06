@@ -151,3 +151,16 @@ bash scripts/push_regime_strategy_library.sh
 실행이 끝나면 "전략 라이브러리 동기화 완료: N건 반영, K건 삭제"가
 출력된다. 로컬 라이브러리가 완전히 비어있는 상태로 실행하면 서버의
 모든 매핑이 삭제되었다는 경고가 대신 출력된다.
+
+**안전장치: 로컬 라이브러리가 0건이면 기본적으로 실행이 차단된다.**
+`trading/db.py`의 스키마 불일치 복구 절차(`data/trading.db`를 지우고
+앱을 재시작)를 따른 직후처럼, 로컬 DB가 방금 새로 생성되어 라이브러리가
+비어있는 상태를 모른 채 이 절을 실행하면 서버에 남아있는 유일한
+매핑본까지 전부 삭제될 수 있다. 이를 막기 위해 입력 파일의 매핑이
+0건이면 `scripts/import_regime_strategy_library.py`가 한국어 에러
+메시지와 함께 즉시 종료하고, 서버 데이터는 건드리지 않는다. 정말로
+서버의 라이브러리를 전부 비우고 싶을 때만 `--allow-empty` 플래그를
+붙여 다시 실행한다(`push_regime_strategy_library.sh`는 이 플래그를
+전달하지 않으므로, 의도적으로 비우려면 스크립트를 거치지 않고
+`import_regime_strategy_library.py`를 직접 `--allow-empty`와 함께
+서버에서 실행해야 한다).

@@ -12,6 +12,7 @@ Run: PYTHONPATH=. python scripts/export_regime_strategy_library.py data/_export_
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from pathlib import Path
 
 import trading.db as trading_db
@@ -40,7 +41,10 @@ def export_regime_strategy_library(output_path: Path) -> int:
             conn.commit()
             return count
         finally:
-            conn.execute("DETACH DATABASE export")
+            try:
+                conn.execute("DETACH DATABASE export")
+            except sqlite3.OperationalError:
+                pass
     finally:
         conn.close()
 

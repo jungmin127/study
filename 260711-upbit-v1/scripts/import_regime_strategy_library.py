@@ -12,9 +12,19 @@ Run: PYTHONPATH=. .venv/bin/python scripts/import_regime_strategy_library.py dat
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from pathlib import Path
 
 import trading.db as trading_db
+
+
+def _count_incoming_rows(incoming_path: Path) -> int:
+    """incoming_path 파일의 regime_strategy_library 테이블 행 수를 반환한다."""
+    conn = sqlite3.connect(incoming_path)
+    try:
+        return conn.execute("SELECT COUNT(*) FROM regime_strategy_library").fetchone()[0]
+    finally:
+        conn.close()
 
 
 def mirror_regime_strategy_library(incoming_path: Path) -> dict[str, int]:
@@ -51,7 +61,10 @@ def mirror_regime_strategy_library(incoming_path: Path) -> dict[str, int]:
             conn.commit()
             return {"upserted": len(incoming_keys), "deleted": len(to_delete)}
         finally:
-            conn.execute("DETACH DATABASE incoming")
+            try:
+                conn.execute("DETACH DATABASE incoming")
+            except sqlite3.OperationalError:
+                pass
     finally:
         conn.close()
 
@@ -59,11 +72,22 @@ def mirror_regime_strategy_library(incoming_path: Path) -> dict[str, int]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="전략 라이브러리를 서버 DB에 완전 거울 동기화")
     parser.add_argument("incoming_path", help="병합할 sqlite 파일 경로")
+    parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="입력 파일에 매핑이 0건이어도(서버 전체 삭제를 의도한 경우) 진행한다",
+    )
     args = parser.parse_args()
     incoming_path = Path(args.incoming_path)
 
     if not incoming_path.exists():
         raise SystemExit(f"입력 파일이 없습니다: {incoming_path}")
+
+    if _count_incoming_rows(incoming_path) == 0 and not args.allow_empty:
+        raise SystemExit(
+            "입력 파일에 매핑이 0건입니다 — 서버의 모든 매핑이 삭제됩니다. "
+            "의도한 것이라면 --allow-empty를 붙여 다시 실행하세요."
+        )
 
     counts = mirror_regime_strategy_library(incoming_path)
     if counts["upserted"] == 0:

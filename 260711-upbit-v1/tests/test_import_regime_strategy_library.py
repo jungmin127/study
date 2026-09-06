@@ -133,13 +133,52 @@ def test_main_warns_when_incoming_is_empty(tmp_path, monkeypatch, capsys):
         buy_conditions_json="{}", sell_conditions_json="{}",
     )
     incoming = _make_incoming(tmp_path, "incoming", [])
-    monkeypatch.setattr(sys, "argv", ["import_regime_strategy_library.py", str(incoming)])
+    monkeypatch.setattr(
+        sys, "argv", ["import_regime_strategy_library.py", str(incoming), "--allow-empty"]
+    )
 
     main()
 
     output = capsys.readouterr().out
     assert "경고" in output
     assert "삭제했습니다" in output
+
+
+def test_main_blocks_empty_incoming_without_allow_empty_flag(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(trading_db, "DB_PATH", tmp_path / "server.db")
+    trading_db.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-1", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+    incoming = _make_incoming(tmp_path, "incoming", [])
+    monkeypatch.setattr(sys, "argv", ["import_regime_strategy_library.py", str(incoming)])
+
+    before = trading_db.list_regime_strategy_mappings()
+    with pytest.raises(SystemExit, match="--allow-empty를 붙여"):
+        main()
+    after = trading_db.list_regime_strategy_mappings()
+
+    assert before == after
+    assert len(after) == 1
+
+
+def test_main_allow_empty_flag_proceeds_with_full_wipe(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(trading_db, "DB_PATH", tmp_path / "server.db")
+    trading_db.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-1", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+    incoming = _make_incoming(tmp_path, "incoming", [])
+    monkeypatch.setattr(
+        sys, "argv", ["import_regime_strategy_library.py", str(incoming), "--allow-empty"]
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "경고" in output
+    assert "삭제했습니다" in output
+    assert trading_db.list_regime_strategy_mappings() == []
 
 
 def test_script_runs_as_real_subprocess_entry_point():
