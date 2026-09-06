@@ -4,15 +4,12 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '@/lib/api/client';
 import { getMarkets, getRegimeAdxOverview } from '@/lib/api/eda';
 import type { Market, RegimeAdxLabel, RegimeAdxOverviewItem } from '@/lib/types/eda';
-import { MAJOR_MARKETS, TIMEFRAME } from '@/lib/constants/regime';
-
-const LABEL_BG_CLASS: Record<RegimeAdxLabel, string> = {
-  상승: 'bg-[color:var(--regime-surge-up)]/15 border-[color:var(--regime-surge-up)]/40',
-  하락: 'bg-[color:var(--regime-surge-down)]/15 border-[color:var(--regime-surge-down)]/40',
-  횡보: 'bg-[color:var(--marker-boundary)]/15 border-[color:var(--marker-boundary)]/40',
-};
-
-const UNCLASSIFIED_BG_CLASS = 'bg-[color:var(--trend-unclassified)]/15 border-[color:var(--trend-unclassified)]/40';
+import {
+  MAJOR_MARKETS,
+  REGIME_LABEL_BG_CLASS as LABEL_BG_CLASS,
+  REGIME_UNCLASSIFIED_BG_CLASS as UNCLASSIFIED_BG_CLASS,
+  TIMEFRAME,
+} from '@/lib/constants/regime';
 
 export default function RegimeAdxOverview({
   selectedMarket, onSelectMarket,
