@@ -23,6 +23,7 @@ TABLE_NAMES = (
     "circuit_breaker_state",
     "manual_intervention_events",
     "capital_adjustments",
+    "regime_strategy_library",
 )
 
 _initialized_paths: set[Path] = set()
@@ -143,6 +144,17 @@ CREATE TABLE IF NOT EXISTS capital_adjustments (
     previous_capital  REAL NOT NULL,
     new_capital       REAL NOT NULL,
     delta             REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS regime_strategy_library (
+    market                TEXT NOT NULL,
+    regime                TEXT NOT NULL CHECK (regime IN ('하락', '횡보', '상승', '기본')),
+    source_run_id         TEXT NOT NULL,
+    timeframe             TEXT NOT NULL,
+    buy_conditions_json   TEXT NOT NULL,
+    sell_conditions_json  TEXT NOT NULL,
+    updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (market, regime)
 );
 """
 
@@ -859,6 +871,57 @@ def replace_live_strategy_strategy(
         )
         conn.commit()
         return True
+    finally:
+        conn.close()
+
+
+def upsert_regime_strategy_mapping(
+    market: str,
+    regime: str,
+    source_run_id: str,
+    timeframe: str,
+    buy_conditions_json: str,
+    sell_conditions_json: str,
+) -> None:
+    """market+regime 슬롯을 있으면 덮어쓰고 없으면 새로 만든다. live_strategies와
+    동일하게 저장 시점에 조건을 스냅샷한다(source_run_id는 표시용 참조일 뿐)."""
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO regime_strategy_library "
+            "(market, regime, source_run_id, timeframe, buy_conditions_json, sell_conditions_json, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, datetime('now')) "
+            "ON CONFLICT(market, regime) DO UPDATE SET "
+            "source_run_id=excluded.source_run_id, timeframe=excluded.timeframe, "
+            "buy_conditions_json=excluded.buy_conditions_json, "
+            "sell_conditions_json=excluded.sell_conditions_json, updated_at=excluded.updated_at",
+            (market, regime, source_run_id, timeframe, buy_conditions_json, sell_conditions_json),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_regime_strategy_mapping(market: str, regime: str) -> bool:
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM regime_strategy_library WHERE market = ? AND regime = ?",
+            (market, regime),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def list_regime_strategy_mappings() -> list[dict]:
+    """설정된 슬롯만 반환한다(미설정 슬롯은 행 자체가 없음)."""
+    conn = _connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM regime_strategy_library").fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 

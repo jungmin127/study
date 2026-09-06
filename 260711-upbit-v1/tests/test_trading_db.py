@@ -1408,3 +1408,90 @@ def test_replace_live_strategy_strategy_noop_when_no_circuit_breaker_row(monkeyp
 
     assert result is True
     assert db.get_circuit_breaker_state(strategy_id) is None
+
+
+def test_upsert_regime_strategy_mapping_inserts_new_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "trading.db")
+
+    db_module.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-1", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+
+    rows = db_module.list_regime_strategy_mappings()
+    assert len(rows) == 1
+    assert rows[0]["market"] == "KRW-BTC"
+    assert rows[0]["regime"] == "상승"
+    assert rows[0]["source_run_id"] == "run-1"
+    assert rows[0]["timeframe"] == "minutes60"
+
+
+def test_upsert_regime_strategy_mapping_overwrites_existing_slot(tmp_path, monkeypatch):
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "trading.db")
+    db_module.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-1", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+
+    db_module.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-2", timeframe="minutes30",
+        buy_conditions_json='{"a":1}', sell_conditions_json='{"b":2}',
+    )
+
+    rows = db_module.list_regime_strategy_mappings()
+    assert len(rows) == 1
+    assert rows[0]["source_run_id"] == "run-2"
+    assert rows[0]["timeframe"] == "minutes30"
+    assert rows[0]["buy_conditions_json"] == '{"a":1}'
+
+
+def test_upsert_regime_strategy_mapping_keeps_slots_independent(tmp_path, monkeypatch):
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "trading.db")
+    db_module.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-up", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+    db_module.upsert_regime_strategy_mapping(
+        "KRW-BTC", "하락", source_run_id="run-down", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+    db_module.upsert_regime_strategy_mapping(
+        "KRW-ETH", "상승", source_run_id="run-eth-up", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+
+    rows = db_module.list_regime_strategy_mappings()
+    assert len(rows) == 3
+    keys = {(r["market"], r["regime"], r["source_run_id"]) for r in rows}
+    assert keys == {
+        ("KRW-BTC", "상승", "run-up"),
+        ("KRW-BTC", "하락", "run-down"),
+        ("KRW-ETH", "상승", "run-eth-up"),
+    }
+
+
+def test_delete_regime_strategy_mapping_returns_true_when_deleted(tmp_path, monkeypatch):
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "trading.db")
+    db_module.upsert_regime_strategy_mapping(
+        "KRW-BTC", "상승", source_run_id="run-1", timeframe="minutes60",
+        buy_conditions_json="{}", sell_conditions_json="{}",
+    )
+
+    deleted = db_module.delete_regime_strategy_mapping("KRW-BTC", "상승")
+
+    assert deleted is True
+    assert db_module.list_regime_strategy_mappings() == []
+
+
+def test_delete_regime_strategy_mapping_returns_false_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "trading.db")
+
+    deleted = db_module.delete_regime_strategy_mapping("KRW-BTC", "상승")
+
+    assert deleted is False
+
+
+def test_list_regime_strategy_mappings_returns_empty_list_when_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "trading.db")
+
+    assert db_module.list_regime_strategy_mappings() == []
