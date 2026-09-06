@@ -58,6 +58,8 @@ export interface LiveStrategy {
   sell_conditions: ConditionGroup;
   risk_config: LiveStrategyRiskConfig;
   capital_adjustments: CapitalAdjustment[];
+  auto_swap_enabled: boolean;
+  active_regime: '하락' | '횡보' | '상승' | '기본' | null;
 }
 
 export interface BacktestConfig {

@@ -53,3 +53,24 @@ export function replaceLiveStrategyStrategy(id: string, sourceRunId: string): Pr
     body: JSON.stringify({ source_run_id: sourceRunId }),
   });
 }
+
+export function setLiveStrategyAutoSwap(id: string, enabled: boolean): Promise<LiveStrategy> {
+  return apiFetch<LiveStrategy>(`/api/v1/live-strategies/${id}/auto-swap`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export interface RegimeSwapLogEntry {
+  id: string;
+  market: string;
+  occurred_at: string;
+  event: 'swap_success' | 'swap_skipped_open_position' | 'swap_skipped_no_mapping' | 'manual_override_ack';
+  from_regime: string | null;
+  to_regime: string;
+  detail: string | null;
+}
+
+export function getRegimeSwapLog(id: string): Promise<RegimeSwapLogEntry[]> {
+  return apiFetch<RegimeSwapLogEntry[]>(`/api/v1/live-strategies/${id}/regime-swap-log`);
+}

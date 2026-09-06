@@ -1,18 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Coins, Pause, Play, RefreshCw, Square, Trash2, X } from 'lucide-react';
+import { Check, Coins, Pause, Play, RefreshCw, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import {
   approveLiveStrategy,
   deleteLiveStrategy,
   getLiveStrategies,
+  getRegimeSwapLog,
   pauseLiveStrategy,
   replaceLiveStrategyStrategy,
   resumeLiveStrategy,
+  setLiveStrategyAutoSwap,
   stopLiveStrategy,
   updateLiveStrategyCapital,
 } from '@/lib/api/liveStrategies';
+import type { RegimeSwapLogEntry } from '@/lib/api/liveStrategies';
 import { getMarkets } from '@/lib/api/eda';
 import type { LiveStrategy, LiveStrategyRiskConfig } from '@/lib/types/liveStrategies';
 import BacktestPickerDialog from '@/components/BacktestPickerDialog';
@@ -49,6 +52,13 @@ const POLL_INTERVAL_MS = 5000;
 function fmtPct(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
+
+const ACTIVE_REGIME_TEXT_CLASS: Record<'하락' | '횡보' | '상승' | '기본', string> = {
+  상승: 'text-[color:var(--regime-surge-up)]',
+  하락: 'text-[color:var(--regime-surge-down)]',
+  횡보: 'text-[color:var(--marker-boundary)]',
+  기본: 'text-muted-foreground',
+};
 
 const RISK_CONFIG_LABELS: Record<keyof LiveStrategyRiskConfig, string> = {
   position_sizing_mode: '포지션 사이징 방식',
@@ -276,6 +286,11 @@ export default function LiveStrategiesPage() {
                 <span className="min-w-0 truncate text-[0.8rem] font-semibold">
                   {koreanName} · {formatTimeframe(s.timeframe)}
                 </span>
+                {s.active_regime && (
+                  <span className={`shrink-0 text-[0.7rem] font-medium ${ACTIVE_REGIME_TEXT_CLASS[s.active_regime]}`}>
+                    {s.active_regime}
+                  </span>
+                )}
                 <Dialog>
                   <DialogTrigger
                     type="button"
@@ -342,6 +357,7 @@ export default function LiveStrategiesPage() {
                           </div>
                         )}
                       </div>
+                      <RegimeSwapLogPanel strategyId={s.id} />
                     </div>
                   </DialogContent>
                 </Dialog>
@@ -349,6 +365,19 @@ export default function LiveStrategiesPage() {
               <div className="flex shrink-0 items-center gap-1.5">
                 {s.open_position === null && (s.status === 'running' || s.status === 'paused') && (
                   <ChangeCapitalDialog strategy={s} onChanged={refresh} />
+                )}
+                {s.status !== 'draft' && (
+                  <Button
+                    type="button"
+                    variant={s.auto_swap_enabled ? 'default' : 'outline'}
+                    size="icon-lg"
+                    aria-label={s.auto_swap_enabled ? '자동 스왑 끄기' : '자동 스왑 켜기'}
+                    title={s.auto_swap_enabled ? '자동 스왑: 켜짐 (클릭하여 끄기)' : '자동 스왑: 꺼짐 (클릭하여 켜기)'}
+                    disabled={pendingId === s.id}
+                    onClick={() => runAction(s.id, (id) => setLiveStrategyAutoSwap(id, !s.auto_swap_enabled))}
+                  >
+                    <Sparkles />
+                  </Button>
                 )}
                 {s.open_position === null && s.status !== 'draft' && (
                   <BacktestPickerDialog
@@ -513,6 +542,62 @@ export default function LiveStrategiesPage() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function RegimeSwapLogPanel({ strategyId }: { strategyId: string }) {
+  const [open, setOpen] = useState(false);
+  const [entries, setEntries] = useState<RegimeSwapLogEntry[] | null>(null);
+
+  const EVENT_LABELS: Record<RegimeSwapLogEntry['event'], string> = {
+    swap_success: '자동 교체 성공',
+    swap_skipped_open_position: '포지션 대기 중',
+    swap_skipped_no_mapping: '매핑 없음',
+    manual_override_ack: '수동 개입 반영',
+  };
+
+  async function toggle() {
+    if (!open && entries === null) {
+      try {
+        setEntries(await getRegimeSwapLog(strategyId));
+      } catch {
+        setEntries([]);
+      }
+    }
+    setOpen((v) => !v);
+  }
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={toggle}
+        className="text-xs text-muted-foreground underline underline-offset-2"
+      >
+        {open ? '스왑 이력 접기' : '스왑 이력 보기'}
+      </button>
+      {open && (
+        <div className="mt-1 space-y-1 rounded-md bg-muted/50 p-2">
+          {entries === null ? (
+            <p className="text-xs text-muted-foreground">불러오는 중…</p>
+          ) : entries.length === 0 ? (
+            <p className="text-xs text-muted-foreground">이력 없음</p>
+          ) : (
+            entries.map((e) => (
+              <div key={e.id} className="text-xs">
+                <span className="text-muted-foreground">{formatDateTime(e.occurred_at)}</span>{' '}
+                <span>{EVENT_LABELS[e.event]}</span>{' '}
+                {e.from_regime && (
+                  <span className="text-muted-foreground">
+                    ({e.from_regime} → {e.to_regime})
+                  </span>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
