@@ -1580,7 +1580,7 @@ def _validate_backtest_config_for_market(config: dict, market: str) -> None:
     if config["strategy_name"] != "ConditionTreeStrategy":
         raise HTTPException(status_code=400, detail="지원하지 않는 백테스트 결과입니다")
     if config["market"] != market:
-        raise HTTPException(status_code=400, detail="선택한 백테스트 결과의 마켓이 현재 전략과 다릅니다")
+        raise HTTPException(status_code=400, detail="선택한 백테스트 결과의 마켓이 일치하지 않습니다")
     if config["timeframe"] not in VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 봉데이터입니다: {config['timeframe']}")
     if is_empty(config["buy_conditions"]) or is_empty(config["sell_conditions"]):
@@ -1616,6 +1616,51 @@ def replace_live_strategy_endpoint(strategy_id: str, req: ReplaceLiveStrategyReq
     if not replaced:
         raise HTTPException(status_code=409, detail="포지션이 열려 있어 교체할 수 없습니다")
     return _full_live_strategy_response(strategy_id)
+
+
+REGIME_LIBRARY_SLOTS = ("하락", "횡보", "상승", "기본")
+
+
+class UpsertRegimeStrategyMappingRequest(BaseModel):
+    source_run_id: str
+
+
+@app.get("/api/v1/regime-strategy-library")
+def get_regime_strategy_library_endpoint() -> list[dict]:
+    return trading_db.list_regime_strategy_mappings()
+
+
+@app.put("/api/v1/regime-strategy-library/{market}/{regime}")
+def upsert_regime_strategy_mapping_endpoint(
+    market: str, regime: str, req: UpsertRegimeStrategyMappingRequest
+) -> dict:
+    if market not in MAJOR_MARKETS:
+        raise HTTPException(status_code=400, detail=f"{market}은(는) 지원하지 않는 마켓입니다.")
+    if regime not in REGIME_LIBRARY_SLOTS:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 슬롯입니다: {regime}")
+
+    config = get_run_config(req.source_run_id)
+    if config is None:
+        raise HTTPException(status_code=404, detail="해당 run_id의 백테스트 설정을 찾을 수 없습니다")
+    _validate_backtest_config_for_market(config, market)
+
+    trading_db.upsert_regime_strategy_mapping(
+        market,
+        regime,
+        source_run_id=req.source_run_id,
+        timeframe=config["timeframe"],
+        buy_conditions_json=json.dumps(config["buy_conditions"]),
+        sell_conditions_json=json.dumps(config["sell_conditions"]),
+    )
+    return {"market": market, "regime": regime, "source_run_id": req.source_run_id}
+
+
+@app.delete("/api/v1/regime-strategy-library/{market}/{regime}")
+def delete_regime_strategy_mapping_endpoint(market: str, regime: str) -> dict:
+    if regime not in REGIME_LIBRARY_SLOTS:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 슬롯입니다: {regime}")
+    trading_db.delete_regime_strategy_mapping(market, regime)
+    return {"deleted": True}
 
 
 @app.get("/api/v1/journal/summary")

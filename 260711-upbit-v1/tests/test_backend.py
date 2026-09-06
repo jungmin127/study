@@ -2891,3 +2891,116 @@ def test_regime_adx_overview_endpoint_rejects_non_minutes60_timeframe(monkeypatc
     response = client.get("/api/v1/regime/adx-overview", params={"timeframe": "days"})
 
     assert response.status_code == 400
+
+
+def test_get_regime_strategy_library_returns_empty_list_initially(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.get("/api/v1/regime-strategy-library")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_upsert_regime_strategy_mapping_saves_snapshot(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_backtest_run("run-up", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    resp = client.put(
+        "/api/v1/regime-strategy-library/KRW-BTC/상승",
+        json={"source_run_id": "run-up"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"market": "KRW-BTC", "regime": "상승", "source_run_id": "run-up"}
+
+    list_resp = client.get("/api/v1/regime-strategy-library")
+    rows = list_resp.json()
+    assert len(rows) == 1
+    assert rows[0]["market"] == "KRW-BTC"
+    assert rows[0]["regime"] == "상승"
+    assert rows[0]["source_run_id"] == "run-up"
+    assert rows[0]["timeframe"] == "minutes30"
+
+
+def test_upsert_regime_strategy_mapping_returns_404_for_missing_run(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.put(
+        "/api/v1/regime-strategy-library/KRW-BTC/상승",
+        json={"source_run_id": "does-not-exist"},
+    )
+
+    assert resp.status_code == 404
+
+
+def test_upsert_regime_strategy_mapping_returns_400_for_market_mismatch(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_backtest_run("eth-run", "KRW-ETH", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    resp = client.put(
+        "/api/v1/regime-strategy-library/KRW-BTC/상승",
+        json={"source_run_id": "eth-run"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_upsert_regime_strategy_mapping_returns_400_for_unsupported_market(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_backtest_run("run-1", "KRW-NOTREAL", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    resp = client.put(
+        "/api/v1/regime-strategy-library/KRW-NOTREAL/상승",
+        json={"source_run_id": "run-1"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_upsert_regime_strategy_mapping_returns_400_for_unsupported_slot(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_backtest_run("run-1", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+
+    resp = client.put(
+        "/api/v1/regime-strategy-library/KRW-BTC/폭등",
+        json={"source_run_id": "run-1"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_upsert_regime_strategy_mapping_overwrites_existing_slot(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_backtest_run("run-1", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+    _seed_backtest_run("run-2", "KRW-BTC", "minutes60", _VALID_BUY, _VALID_SELL)
+    client.put("/api/v1/regime-strategy-library/KRW-BTC/상승", json={"source_run_id": "run-1"})
+
+    resp = client.put("/api/v1/regime-strategy-library/KRW-BTC/상승", json={"source_run_id": "run-2"})
+
+    assert resp.status_code == 200
+    rows = client.get("/api/v1/regime-strategy-library").json()
+    assert len(rows) == 1
+    assert rows[0]["source_run_id"] == "run-2"
+    assert rows[0]["timeframe"] == "minutes60"
+
+
+def test_delete_regime_strategy_mapping_removes_slot(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_backtest_run("run-1", "KRW-BTC", "minutes30", _VALID_BUY, _VALID_SELL)
+    client.put("/api/v1/regime-strategy-library/KRW-BTC/상승", json={"source_run_id": "run-1"})
+
+    resp = client.delete("/api/v1/regime-strategy-library/KRW-BTC/상승")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": True}
+    assert client.get("/api/v1/regime-strategy-library").json() == []
+
+
+def test_delete_regime_strategy_mapping_is_idempotent_when_missing(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+
+    resp = client.delete("/api/v1/regime-strategy-library/KRW-BTC/상승")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": True}
