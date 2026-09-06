@@ -13,9 +13,9 @@ import {
   stopLiveStrategy,
   updateLiveStrategyCapital,
 } from '@/lib/api/liveStrategies';
-import { getBacktestRuns, getMarkets } from '@/lib/api/eda';
-import type { BacktestRunSummary } from '@/lib/types/eda';
+import { getMarkets } from '@/lib/api/eda';
 import type { LiveStrategy, LiveStrategyRiskConfig } from '@/lib/types/liveStrategies';
+import BacktestPickerDialog from '@/components/BacktestPickerDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -199,143 +199,6 @@ function ChangeCapitalDialog({
   );
 }
 
-function StrategySwapDialog({
-  strategy,
-  marketName,
-  onChanged,
-}: {
-  strategy: LiveStrategy;
-  marketName: string;
-  onChanged: () => Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [candidates, setCandidates] = useState<BacktestRunSummary[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  function closeAndReset() {
-    setOpen(false);
-    setCandidates([]);
-    setSelectedRunId(null);
-    setLoadError(null);
-    setSubmitError(null);
-  }
-
-  async function loadCandidates() {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const runs = await getBacktestRuns(strategy.market);
-      setCandidates(runs.filter((r) => r.run_id !== strategy.source_run_id));
-    } catch (err) {
-      setLoadError(err instanceof ApiError ? err.message : '백테스트 결과를 불러오지 못했습니다.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleSubmit() {
-    if (!selectedRunId) return;
-    setSubmitting(true);
-    setSubmitError(null);
-    try {
-      await replaceLiveStrategyStrategy(strategy.id, selectedRunId);
-      await onChanged();
-      closeAndReset();
-    } catch (err) {
-      setSubmitError(err instanceof ApiError ? err.message : '전략 교체에 실패했습니다.');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (next) {
-          setOpen(true);
-          loadCandidates();
-        } else {
-          closeAndReset();
-        }
-      }}
-    >
-      <DialogTrigger
-        type="button"
-        className={buttonVariants({ variant: 'outline', size: 'icon-lg' })}
-        aria-label="전략 교체"
-        title="전략 교체"
-      >
-        <RefreshCw />
-      </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>전략 교체 — {marketName}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3 text-sm">
-          <p className="text-xs text-muted-foreground">
-            같은 코인의 다른 백테스트 결과를 선택하면 시간봉·매수/매도 조건이 그 결과로
-            교체됩니다. 자금관리 설정과 거래 이력은 그대로 유지됩니다.
-          </p>
-          {loading && <p className="text-muted-foreground">불러오는 중...</p>}
-          {loadError && <p className="text-destructive">{loadError}</p>}
-          {!loading && !loadError && candidates.length === 0 && (
-            <p className="rounded-md bg-muted/50 p-3 text-muted-foreground">
-              교체 가능한 백테스트 결과가 없습니다.
-            </p>
-          )}
-          {!loading && candidates.length > 0 && (
-            <div className="space-y-2">
-              {candidates.map((run) => (
-                <label
-                  key={run.run_id}
-                  className={`flex cursor-pointer items-start gap-2 rounded-md border p-3 ${
-                    selectedRunId === run.run_id ? 'border-primary bg-muted/50' : 'border-border'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="swap-candidate"
-                    className="mt-1"
-                    checked={selectedRunId === run.run_id}
-                    onChange={() => setSelectedRunId(run.run_id)}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate font-medium">
-                        {run.title || <span className="text-muted-foreground">(제목 없음)</span>}
-                      </span>
-                      <span className={returnRateColor(run.return_rate)}>
-                        수익률 {run.return_rate?.toFixed(2) ?? '-'}%
-                      </span>
-                    </div>
-                    {run.description && (
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{run.description}</p>
-                    )}
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-          {submitError && <p className="text-destructive">{submitError}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={closeAndReset} disabled={submitting}>
-            취소
-          </Button>
-          <Button onClick={handleSubmit} disabled={submitting || !selectedRunId}>
-            교체
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export default function LiveStrategiesPage() {
   const [strategies, setStrategies] = useState<LiveStrategy[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -488,7 +351,26 @@ export default function LiveStrategiesPage() {
                   <ChangeCapitalDialog strategy={s} onChanged={refresh} />
                 )}
                 {s.open_position === null && s.status !== 'draft' && (
-                  <StrategySwapDialog strategy={s} marketName={koreanName} onChanged={refresh} />
+                  <BacktestPickerDialog
+                    market={s.market}
+                    title={`전략 교체 — ${koreanName}`}
+                    description="같은 코인의 다른 백테스트 결과를 선택하면 시간봉·매수/매도 조건이 그 결과로 교체됩니다. 자금관리 설정과 거래 이력은 그대로 유지됩니다."
+                    excludeRunId={s.source_run_id}
+                    emptyText="교체 가능한 백테스트 결과가 없습니다."
+                    confirmText="교체"
+                    trigger={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-lg"
+                        aria-label="전략 교체"
+                        title="전략 교체"
+                      >
+                        <RefreshCw />
+                      </Button>
+                    }
+                    onSelect={(runId) => replaceLiveStrategyStrategy(s.id, runId).then(() => refresh())}
+                  />
                 )}
                 {s.status === 'draft' && (
                   <>
