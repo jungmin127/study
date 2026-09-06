@@ -72,84 +72,37 @@ export default function JournalMarketDetailView({
           </p>
         ) : (
           <>
-            <div className="hidden md:block">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead></TableHead>
-                    <TableHead>백테스트</TableHead>
-                    <TableHead>실매매</TableHead>
-                    <TableHead>차이</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow>
-                    <TableCell>승률</TableCell>
-                    <TableCell>{comparison.backtest.win_rate_pct.toFixed(1)}%</TableCell>
-                    <TableCell>{comparison.live.win_rate_pct.toFixed(1)}%</TableCell>
-                    <TableCell>
-                      {fmtPct(comparison.live.win_rate_pct - comparison.backtest.win_rate_pct)}p
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>평균수익률</TableCell>
-                    <TableCell>{fmtPct(comparison.backtest.avg_return_pct)}</TableCell>
-                    <TableCell>{fmtPct(comparison.live.avg_return_pct)}</TableCell>
-                    <TableCell>
-                      {fmtPct(comparison.live.avg_return_pct - comparison.backtest.avg_return_pct)}p
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>MDD</TableCell>
-                    <TableCell>{fmtPct(comparison.backtest.mdd_pct)}</TableCell>
-                    <TableCell>{fmtPct(comparison.live.mdd_pct)}</TableCell>
-                    <TableCell>
-                      {fmtPct(comparison.live.mdd_pct - comparison.backtest.mdd_pct)}p
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>거래횟수</TableCell>
-                    <TableCell>{comparison.backtest.trade_count}건</TableCell>
-                    <TableCell>{comparison.live.trade_count}건</TableCell>
-                    <TableCell>-</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:hidden">
-              <div className="rounded-md border p-2 text-sm">
-                <p className="text-xs text-muted-foreground">승률</p>
-                <p>
-                  백테스트 {comparison.backtest.win_rate_pct.toFixed(1)}% · 실매매{' '}
+            <div className="flex flex-wrap gap-3 rounded-md border p-2 text-xs">
+              <div className="min-w-[70px] flex-1 text-center">
+                <p className="text-muted-foreground">승률</p>
+                <p className="font-medium">
+                  {comparison.backtest.win_rate_pct.toFixed(1)}%
+                  <span className="text-muted-foreground"> → </span>
                   {comparison.live.win_rate_pct.toFixed(1)}%
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  차이 {fmtPct(comparison.live.win_rate_pct - comparison.backtest.win_rate_pct)}p
-                </p>
               </div>
-              <div className="rounded-md border p-2 text-sm">
-                <p className="text-xs text-muted-foreground">평균수익률</p>
-                <p>
-                  백테스트 {fmtPct(comparison.backtest.avg_return_pct)} · 실매매{' '}
+              <div className="min-w-[70px] flex-1 text-center">
+                <p className="text-muted-foreground">평균수익률</p>
+                <p className="font-medium">
+                  {fmtPct(comparison.backtest.avg_return_pct)}
+                  <span className="text-muted-foreground"> → </span>
                   {fmtPct(comparison.live.avg_return_pct)}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  차이 {fmtPct(comparison.live.avg_return_pct - comparison.backtest.avg_return_pct)}p
+              </div>
+              <div className="min-w-[70px] flex-1 text-center">
+                <p className="text-muted-foreground">MDD</p>
+                <p className="font-medium">
+                  {fmtPct(comparison.backtest.mdd_pct)}
+                  <span className="text-muted-foreground"> → </span>
+                  {fmtPct(comparison.live.mdd_pct)}
                 </p>
               </div>
-              <div className="rounded-md border p-2 text-sm">
-                <p className="text-xs text-muted-foreground">MDD</p>
-                <p>
-                  백테스트 {fmtPct(comparison.backtest.mdd_pct)} · 실매매 {fmtPct(comparison.live.mdd_pct)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  차이 {fmtPct(comparison.live.mdd_pct - comparison.backtest.mdd_pct)}p
-                </p>
-              </div>
-              <div className="rounded-md border p-2 text-sm">
-                <p className="text-xs text-muted-foreground">거래횟수</p>
-                <p>
-                  백테스트 {comparison.backtest.trade_count}건 · 실매매 {comparison.live.trade_count}건
+              <div className="min-w-[70px] flex-1 text-center">
+                <p className="text-muted-foreground">거래횟수</p>
+                <p className="font-medium">
+                  {comparison.backtest.trade_count}
+                  <span className="text-muted-foreground"> → </span>
+                  {comparison.live.trade_count}건
                 </p>
               </div>
             </div>
