@@ -256,36 +256,6 @@ def _ensure_live_strategies_deleted_at_column(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _ensure_live_strategies_auto_swap_enabled_column(conn: sqlite3.Connection) -> None:
-    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 live_strategies 테이블에 새 컬럼
-    auto_swap_enabled를 추가하지 못한다. 기존 행은 DEFAULT 0으로 채워진다."""
-    table_exists = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='live_strategies'"
-    ).fetchone() is not None
-    if not table_exists:
-        return
-    columns = {row[1] for row in conn.execute("PRAGMA table_info('live_strategies')")}
-    if "auto_swap_enabled" in columns:
-        return
-    conn.execute("ALTER TABLE live_strategies ADD COLUMN auto_swap_enabled INTEGER NOT NULL DEFAULT 0")
-    conn.commit()
-
-
-def _ensure_live_strategies_active_regime_column(conn: sqlite3.Connection) -> None:
-    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 live_strategies 테이블에 새 컬럼
-    active_regime을 추가하지 못한다. 기존 행은 NULL로 채워진다."""
-    table_exists = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='live_strategies'"
-    ).fetchone() is not None
-    if not table_exists:
-        return
-    columns = {row[1] for row in conn.execute("PRAGMA table_info('live_strategies')")}
-    if "active_regime" in columns:
-        return
-    conn.execute("ALTER TABLE live_strategies ADD COLUMN active_regime TEXT")
-    conn.commit()
-
-
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -297,8 +267,6 @@ def _connect() -> sqlite3.Connection:
         _assert_live_strategies_manual_pause_column_present(conn)
         _ensure_positions_entry_fee_column(conn)
         _ensure_live_strategies_deleted_at_column(conn)
-        _ensure_live_strategies_auto_swap_enabled_column(conn)
-        _ensure_live_strategies_active_regime_column(conn)
         _initialized_paths.add(DB_PATH)
     return conn
 
