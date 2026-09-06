@@ -43,43 +43,41 @@ export default function JournalMarketDetailView({
 
   return (
     <div className="space-y-4 rounded-md border p-4">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div>
-          <p className="text-xs text-muted-foreground">누적손익</p>
-          <p className="font-semibold">
-            {fmtKrw(detail.cumulative_pnl)} ({fmtPct(detail.cumulative_pnl_pct)})
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">MDD</p>
-          <p className="font-semibold">{fmtPct(detail.mdd_pct)}</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">승률</p>
-          <p className="font-semibold">{detail.win_rate_pct.toFixed(1)}%</p>
-        </div>
-        <div>
-          <p className="text-xs text-muted-foreground">평균 · 최대 슬리피지</p>
-          <p className="font-semibold">
-            {detail.avg_slippage_pct !== null ? fmtPct(detail.avg_slippage_pct) : 'N/A'}
-            {' · '}
-            {detail.max_slippage_pct !== null ? fmtPct(detail.max_slippage_pct) : 'N/A'}
-          </p>
-        </div>
-      </div>
+      <div className="rounded-md border p-3">
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="text-center">
+            <p className="text-muted-foreground">누적손익</p>
+            <p className="text-sm font-semibold">
+              {fmtKrw(detail.cumulative_pnl)} ({fmtPct(detail.cumulative_pnl_pct)})
+            </p>
+          </div>
+          <div className="text-center">
+            <p className="text-muted-foreground">MDD</p>
+            <p className="text-sm font-semibold">{fmtPct(detail.mdd_pct)}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-muted-foreground">승률</p>
+            <p className="text-sm font-semibold">{detail.win_rate_pct.toFixed(1)}%</p>
+          </div>
+          <div className="text-center">
+            <p className="text-muted-foreground">평균 · 최대 슬리피지</p>
+            <p className="text-sm font-semibold">
+              {detail.avg_slippage_pct !== null ? fmtPct(detail.avg_slippage_pct) : 'N/A'}
+              {' · '}
+              {detail.max_slippage_pct !== null ? fmtPct(detail.max_slippage_pct) : 'N/A'}
+            </p>
+          </div>
 
-      <div>
-        <h3 className="mb-2 text-sm font-semibold">백테스트 vs 실매매</h3>
-        {comparison === null ? (
-          <p className="text-sm text-muted-foreground">
-            백테스트 비교 불가(연결된 백테스트 결과가 없습니다).
-          </p>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-3 rounded-md border p-2 text-xs">
+          {comparison === null ? (
+            <p className="col-span-2 border-t border-dashed pt-3 text-center text-muted-foreground">
+              백테스트 비교 불가(연결된 백테스트 결과가 없습니다).
+            </p>
+          ) : (
+            <>
+              <div className="col-span-2 border-t border-dashed" />
               <div className="text-center">
                 <p className="text-muted-foreground">승률</p>
-                <p className="font-medium">
+                <p className="text-sm font-semibold">
                   {comparison.backtest.win_rate_pct.toFixed(1)}%
                   <span className="text-muted-foreground"> → </span>
                   {comparison.live.win_rate_pct.toFixed(1)}%
@@ -87,7 +85,7 @@ export default function JournalMarketDetailView({
               </div>
               <div className="text-center">
                 <p className="text-muted-foreground">평균수익률</p>
-                <p className="font-medium">
+                <p className="text-sm font-semibold">
                   {fmtPct(comparison.backtest.avg_return_pct)}
                   <span className="text-muted-foreground"> → </span>
                   {fmtPct(comparison.live.avg_return_pct)}
@@ -95,7 +93,7 @@ export default function JournalMarketDetailView({
               </div>
               <div className="text-center">
                 <p className="text-muted-foreground">MDD</p>
-                <p className="font-medium">
+                <p className="text-sm font-semibold">
                   {fmtPct(comparison.backtest.mdd_pct)}
                   <span className="text-muted-foreground"> → </span>
                   {fmtPct(comparison.live.mdd_pct)}
@@ -103,19 +101,19 @@ export default function JournalMarketDetailView({
               </div>
               <div className="text-center">
                 <p className="text-muted-foreground">거래횟수</p>
-                <p className="font-medium">
+                <p className="text-sm font-semibold">
                   {comparison.backtest.trade_count}
                   <span className="text-muted-foreground"> → </span>
                   {comparison.live.trade_count}건
                 </p>
               </div>
-            </div>
-            {comparison.sample_size_warning && (
-              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                실매매 표본이 10건 미만이라 통계적으로 신뢰하기 이릅니다.
-              </p>
-            )}
-          </>
+            </>
+          )}
+        </div>
+        {comparison?.sample_size_warning && (
+          <p className="mt-2 text-center text-xs text-amber-600 dark:text-amber-400">
+            실매매 표본이 10건 미만이라 통계적으로 신뢰하기 이릅니다.
+          </p>
         )}
       </div>
 
