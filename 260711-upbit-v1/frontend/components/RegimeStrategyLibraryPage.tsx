@@ -95,15 +95,30 @@ export default function RegimeStrategyLibraryPage() {
     setLoading(false);
   }
 
-  // 저장/삭제 후에는 바뀐 매핑 목록만 다시 받아온다. loadAll()을 다시
-  // 부르면 loading=true가 되어 20행짜리 표 전체가 "불러오는 중..."으로
-  // 잠깐 사라지므로, 클릭할 때마다 그러지 않도록 이 부분만 갱신한다.
+  // 저장/삭제 후에는 매핑 목록과 백테스트 결과 목록만 다시 받아온다.
+  // loadAll()을 다시 부르면 loading=true가 되어 20행짜리 표 전체가
+  // "불러오는 중..."으로 잠깐 사라지므로 이 두 개만 갱신한다 — 오버뷰/
+  // 마켓/라이브전략까지 매번 다시 부르진 않는다(비용이 큰 ADX 재계산과
+  // 외부 거래소 API 호출이 껴 있음). 백테스트 결과도 함께 갱신하지
+  // 않으면 방금 저장한 매핑의 run_id가 마운트 이후 생성된 결과일 때
+  // backtestRuns에서 못 찾아 "삭제된 백테스트 결과"로 잘못 표시된다.
   async function refreshMappings() {
-    try {
-      const result = await getRegimeStrategyLibrary();
-      setMappings(result);
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : '매핑 목록을 다시 불러오지 못했습니다.');
+    const [mappingsResult, runsResult] = await Promise.allSettled([
+      getRegimeStrategyLibrary(),
+      getBacktestRuns(),
+    ]);
+    if (mappingsResult.status === 'fulfilled') {
+      setMappings(mappingsResult.value);
+    } else {
+      setActionError(
+        mappingsResult.reason instanceof ApiError
+          ? mappingsResult.reason.message
+          : '매핑 목록을 다시 불러오지 못했습니다.',
+      );
+    }
+    if (runsResult.status === 'fulfilled') {
+      setBacktestRuns(runsResult.value);
+      setRunsLoadFailed(false);
     }
   }
 
