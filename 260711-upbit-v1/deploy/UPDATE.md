@@ -122,3 +122,32 @@ bash scripts/push_backtest_results.sh
 삭제하는 방식을 기본으로 쓴다 — `push_backtest_results.sh`는 로컬 DB 전체를
 보내고 서버가 새로 있는 것만 반영하는 구조라, 특정 결과만 골라 보내는 기능은
 없다.
+
+## 6. 로컬 전략 라이브러리를 서버로 동기화하기
+
+`/strategy-library` 화면(코인별 하락/횡보/상승/기본 전략 매핑)에서 로컬에
+설정한 내용을 서버의 실거래 DB로 그대로 반영한다. 5절과 같은 `.env`
+설정(`DEPLOY_SSH_KEY_PATH`/`DEPLOY_SERVER_HOST`)을 그대로 쓰므로 별도
+설정은 필요 없다.
+
+**이 동작은 완전 거울(mirror) 동기화다** — 로컬에서 슬롯을 삭제한 뒤
+실행하면 서버 쪽 해당 슬롯도 함께 삭제된다. 로컬 `/strategy-library`
+화면이 "진실의 원천"이라고 생각하고 쓴다.
+
+(이 절을 처음 실행하기 전에는 1~2절로 서버 코드를 최신으로 갱신해둬야 한다 —
+`scripts/import_regime_strategy_library.py`가 서버에 있어야 이 명령이 동작한다.)
+
+로컬 PC(Git Bash)에서 저장소 루트로 이동한 뒤:
+
+```bash
+bash scripts/push_regime_strategy_library.sh
+```
+
+이 한 줄이 로컬 `regime_strategy_library` 테이블만 뽑아 서버로 전송하고,
+서버에서 자동으로 거울 동기화까지 실행한다(`live_strategies` 등 다른
+테이블에는 전혀 영향을 주지 않으며, 서버 daemon/백엔드 재시작도 하지
+않는다). 로컬에서 라이브러리를 편집할 때마다 반복 실행해도 안전하다.
+
+실행이 끝나면 "전략 라이브러리 동기화 완료: N건 반영, K건 삭제"가
+출력된다. 로컬 라이브러리가 완전히 비어있는 상태로 실행하면 서버의
+모든 매핑이 삭제되었다는 경고가 대신 출력된다.

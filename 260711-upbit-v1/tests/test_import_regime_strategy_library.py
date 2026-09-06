@@ -162,3 +162,29 @@ def test_script_runs_as_real_subprocess_entry_point():
     assert result.returncode != 0
     assert "입력 파일이 없습니다" in (result.stdout + result.stderr)
     assert "ModuleNotFoundError" not in (result.stdout + result.stderr)
+
+
+def test_push_script_sets_pythonpath_for_local_and_remote_invocation():
+    """push_regime_strategy_library.sh가 로컬 export 실행과 서버 ssh 실행 양쪽에
+    PYTHONPATH=.를 빠뜨리면 trading.db import가 실패한다(위 서브프로세스 테스트가
+    검증하는 바로 그 문제) — 이 테스트는 그 방지책이 스크립트 안에 실제로
+    남아있는지 직접 확인한다(push_backtest_results.sh의 동일 이름 테스트와 같은
+    이유, tests/test_import_backtest_results.py 참고)."""
+    script = (REPO_ROOT / "scripts" / "push_regime_strategy_library.sh").read_text(encoding="utf-8")
+    assert script.count("PYTHONPATH=.") >= 2  # 로컬 export 1회 + 원격 ssh 1회
+
+
+def test_push_script_references_both_helper_scripts():
+    script = (REPO_ROOT / "scripts" / "push_regime_strategy_library.sh").read_text(encoding="utf-8")
+    assert "export_regime_strategy_library.py" in script
+    assert "import_regime_strategy_library.py" in script
+
+
+def test_push_script_never_restarts_server_daemon():
+    """이 푸시는 regime_strategy_library 단일 테이블만 건드리는 데이터 동기화이지,
+    코드 배포가 아니다 — update.sh/systemctl을 호출하면 daemon이 재시작되어
+    실시간 손절/익절 감시가 끊기므로(project convention), 이 스크립트에는 그런
+    호출이 있으면 안 된다."""
+    script = (REPO_ROOT / "scripts" / "push_regime_strategy_library.sh").read_text(encoding="utf-8")
+    assert "update.sh" not in script
+    assert "systemctl" not in script
