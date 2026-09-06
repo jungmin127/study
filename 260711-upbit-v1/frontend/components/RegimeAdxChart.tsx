@@ -1,8 +1,26 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { createChart, CandlestickSeries, ColorType, CrosshairMode, type UTCTimestamp } from 'lightweight-charts';
+import {
+  createChart, CandlestickSeries, ColorType, CrosshairMode, TickMarkType,
+  type Time, type UTCTimestamp,
+} from 'lightweight-charts';
 import type { RegimeAdxBar } from '@/lib/types/eda';
+
+// lightweight-charts는 UTCTimestamp를 기본적으로 UTC로 표시한다(브라우저 로컬
+// 타임존이 아님) — 이 앱의 다른 화면(표/뱃지 등)은 전부 KST로 보여주므로,
+// 축/십자선 라벨도 KST로 맞춰 혼동을 없앤다.
+const KST_PARTS_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hour12: false,
+});
+
+function toKstParts(unixSeconds: number) {
+  const parts = KST_PARTS_FORMATTER.formatToParts(new Date(unixSeconds * 1000));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour'), minute: get('minute') };
+}
 
 export default function RegimeAdxChart({ bars }: { bars: RegimeAdxBar[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -36,7 +54,30 @@ export default function RegimeAdxChart({ bars }: { bars: RegimeAdxBar[] }) {
       height: containerRef.current.clientHeight,
       layout: { background: { type: ColorType.Solid, color: background }, textColor: foreground },
       crosshair: { mode: CrosshairMode.Normal },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: border },
+      localization: {
+        timeFormatter: (time: Time) => {
+          const { year, month, day, hour, minute } = toKstParts(time as number);
+          return `${year}-${month}-${day} ${hour}:${minute} KST`;
+        },
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        borderColor: border,
+        tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) => {
+          const { year, month, day, hour, minute } = toKstParts(time as number);
+          switch (tickMarkType) {
+            case TickMarkType.Year:
+              return year;
+            case TickMarkType.Month:
+              return `${month}월`;
+            case TickMarkType.DayOfMonth:
+              return `${day}일`;
+            default:
+              return `${hour}:${minute}`;
+          }
+        },
+      },
       rightPriceScale: { borderColor: border },
     });
 
@@ -100,6 +141,7 @@ export default function RegimeAdxChart({ bars }: { bars: RegimeAdxBar[] }) {
           <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--trend-unclassified)' }} />
           미분류(워밍업)
         </span>
+        <span className="ml-auto">시간축 기준: KST</span>
       </div>
       <div ref={containerRef} className="h-60 w-full rounded-lg overflow-hidden border md:h-80" />
     </div>
