@@ -18,7 +18,7 @@ import math
 from datetime import datetime, timedelta
 from datetime import timezone
 
-from backend.regime_adx_service import compute_adx_regime_history
+from backend.regime_adx_service import MIN_SEGMENT_BARS, compute_adx_regime_history
 from scripts.grid_search import build_condition_grid, compute_grid_results_parallel, _check_candle_warmup, dedup_top_results
 from backend.main import _fetch_backtest_dataframe
 from engine.sweep import DEFAULT_RISK_CONFIG
@@ -27,7 +27,6 @@ from engine.runner import run_backtest
 from engine.condition_strategy import ConditionTreeStrategy
 import trading.db as trading_db
 from engine.cache import run_backtest_cached
-from fastapi import HTTPException
 from engine.regime_adx_constants import MAJOR_MARKETS
 
 TIMEFRAME = "minutes60"
@@ -60,7 +59,7 @@ def select_target_segments(market: str, history_start: datetime) -> dict[str, di
         if datetime.fromisoformat(seg["start"]) < history_start:
             continue
         label = seg["label"]
-        if label not in by_label or seg["end"] > by_label[label]["end"]:
+        if label not in by_label or datetime.fromisoformat(seg["end"]) > datetime.fromisoformat(by_label[label]["end"]):
             by_label[label] = seg
     return {label: by_label.get(label) for label in ("하락", "횡보", "상승")}
 
@@ -135,7 +134,7 @@ def save_and_map(
 ) -> str:
     title = (
         f"[{regime}] {market} {start.date()}~{end.date()} "
-        f"그리드+TP{take_profit_pct}%/SL{abs(stop_loss_pct)}%"
+        f"그리드+TP{take_profit_pct:g}%/SL{abs(stop_loss_pct):g}%"
     )
     description = (
         f"regime_strategy_pipeline - {market}/{TIMEFRAME}/{start.date()}~{end.date()}, "
@@ -164,15 +163,36 @@ def _ensure_supported_market(market: str) -> None:
         raise SystemExit(f"{market}은(는) 지원하지 않는 마켓입니다.")
 
 
+def _positive_capital(value: str) -> float:
+    n = float(value)
+    if n <= 0:
+        raise argparse.ArgumentTypeError(f"--capital은 0보다 커야 합니다 (받은 값: {n})")
+    return n
+
+
+def _positive_min_days(value: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"--min-days는 1 이상이어야 합니다 (받은 값: {n})")
+    return n
+
+
+def _positive_candidate_pool(value: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"--candidate-pool은 1 이상이어야 합니다 (받은 값: {n})")
+    return n
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="장세별 전략 자동 발굴 파이프라인")
     parser.add_argument("--market", required=True, help="마켓코드 (예: KRW-ETH)")
     parser.add_argument("--history-start", required=True, help="시작일 YYYY-MM-DD (이 날짜 이후 세그먼트만 사용)")
-    parser.add_argument("--capital", type=float, default=10_000_000)
-    parser.add_argument("--min-days", type=int, default=10)
+    parser.add_argument("--capital", type=_positive_capital, default=10_000_000)
+    parser.add_argument("--min-days", type=_positive_min_days, default=10)
     parser.add_argument("--stop-loss-pct", type=float, default=-5.0)
     parser.add_argument("--take-profit-pct", type=float, default=8.0)
-    parser.add_argument("--candidate-pool", type=int, default=20)
+    parser.add_argument("--candidate-pool", type=_positive_candidate_pool, default=20)
     return parser.parse_args(argv)
 
 
@@ -180,12 +200,31 @@ def run_pipeline(
     market: str, history_start: datetime, capital: float, min_days: int,
     stop_loss_pct: float, take_profit_pct: float, candidate_pool: int,
 ) -> list[dict]:
+    # 부호가 뒤바뀐 TP/SL(예: --stop-loss-pct 5)은 거의 모든 포지션에서 즉시
+    # 청산 조건을 만족시켜 거래횟수만 인위적으로 늘리고, pick_final_strategy의
+    # min_trades 체크를 손쉽게 통과한 퇴화 전략이 아무 경고 없이 라이브러리에
+    # 매핑될 수 있다 — segment 탐지 전, 몇 시간짜리 grid search가 시작되기
+    # 전에 즉시 실패시킨다.
+    if not (stop_loss_pct < 0 < take_profit_pct):
+        raise SystemExit(
+            "--stop-loss-pct는 음수, --take-profit-pct는 양수여야 합니다 "
+            f"(받은 값: stop_loss_pct={stop_loss_pct}, take_profit_pct={take_profit_pct})"
+        )
+
     segments = select_target_segments(market, history_start)
     summary: list[dict] = []
-    for regime, seg in segments.items():
+    for i, (regime, seg) in enumerate(segments.items(), start=1):
+        print(f"[{i}/{len(segments)}] {regime} 처리 시작: {market}", flush=True)
         if seg is None:
             summary.append({"regime": regime, "status": "skipped", "reason": "탐지된 구간 없음"})
             continue
+        # compute_adx_regime_history는 마지막(진행중) 구간을 MIN_SEGMENT_BARS
+        # 미만이어도 항상 포함한다. select_target_segments는 항상 최신 end를
+        # 고르므로 이런 진행중/짧은 구간이 채택될 수 있다(설계상 감수 — 세그먼트
+        # 선정 로직 자체는 바꾸지 않고, 사람이 결과 표에서 알아볼 수 있게 표시만
+        # 한다). 아래 두 필드를 요약 행마다 함께 남겨 print_summary_table이
+        # 경고를 붙일 수 있게 한다.
+        seg_info = {"segment_bar_count": seg["bar_count"], "segment_in_progress": seg["in_progress"]}
         try:
             start, end = adjust_window(seg, min_days, history_start)
             period_days = (end - start).days
@@ -194,7 +233,7 @@ def run_pipeline(
             grid = run_grid_for_window(market, start, end, capital)
             candidates = top_candidates(grid["results"], min_trades, candidate_pool)
             if not candidates:
-                summary.append({"regime": regime, "status": "skipped", "reason": "거래횟수 조건을 만족하는 후보 없음"})
+                summary.append({"regime": regime, "status": "skipped", "reason": "거래횟수 조건을 만족하는 후보 없음", **seg_info})
                 continue
 
             final = pick_final_strategy(
@@ -202,7 +241,7 @@ def run_pipeline(
                 stop_loss_pct, take_profit_pct,
             )
             if final is None:
-                summary.append({"regime": regime, "status": "skipped", "reason": "TP/SL 부착 후 거래횟수 조건을 만족하는 후보 없음"})
+                summary.append({"regime": regime, "status": "skipped", "reason": "TP/SL 부착 후 거래횟수 조건을 만족하는 후보 없음", **seg_info})
                 continue
 
             run_id = save_and_map(
@@ -214,9 +253,15 @@ def run_pipeline(
                 "period": f"{start.date()}~{end.date()}",
                 "return_pct": round(final["return_pct"], 2),
                 "trade_count": len(final["trades"]),
+                **seg_info,
             })
-        except (HTTPException, SystemExit) as exc:
-            summary.append({"regime": regime, "status": "failed", "reason": str(exc)})
+        except (SystemExit, Exception) as exc:
+            # 라벨 하나의 실패(RuntimeError - compute_grid_results_parallel의
+            # 실패한 combo/워커 타임아웃, sqlite3.OperationalError - 라이브
+            # daemon과의 trading.db 동시쓰기 락 등)가 이미 끝난 다른 라벨들의
+            # 결과 저장/요약 출력을 막아서는 안 된다. SystemExit은 BaseException이라
+            # Exception만으로는 못 잡으므로 명시적으로 함께 나열한다.
+            summary.append({"regime": regime, "status": "failed", "reason": str(exc), **seg_info})
     return summary
 
 
@@ -227,6 +272,8 @@ def print_summary_table(summary: list[dict]) -> None:
         return_pct = f"{row['return_pct']:+.2f}%" if "return_pct" in row else "-"
         trade_count = str(row.get("trade_count", "-"))
         reason = row.get("reason", row.get("run_id", ""))
+        if row.get("segment_in_progress") or row.get("segment_bar_count", MIN_SEGMENT_BARS) < MIN_SEGMENT_BARS:
+            reason = f"{reason} ⚠ 진행중/짧은 구간"
         print(f"{row['regime']:6}{row['status']:10}{period:24}{return_pct:>10}{trade_count:>6}  {reason}")
 
 

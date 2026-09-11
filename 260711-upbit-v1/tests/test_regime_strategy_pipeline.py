@@ -270,8 +270,14 @@ def test_parse_args_defaults():
 def test_run_pipeline_isolates_label_failures(monkeypatch):
     segments = {
         "하락": None,
-        "횡보": {"start": "2026-02-01T00:00:00+00:00", "end": "2026-02-10T00:00:00+00:00", "label": "횡보", "bar_count": 240},
-        "상승": {"start": "2026-03-01T00:00:00+00:00", "end": "2026-03-15T00:00:00+00:00", "label": "상승", "bar_count": 360},
+        "횡보": {
+            "start": "2026-02-01T00:00:00+00:00", "end": "2026-02-10T00:00:00+00:00",
+            "label": "횡보", "bar_count": 240, "in_progress": False,
+        },
+        "상승": {
+            "start": "2026-03-01T00:00:00+00:00", "end": "2026-03-15T00:00:00+00:00",
+            "label": "상승", "bar_count": 360, "in_progress": True,
+        },
     }
     monkeypatch.setattr("scripts.regime_strategy_pipeline.select_target_segments", lambda market, history_start: segments)
 
@@ -311,8 +317,38 @@ def test_run_pipeline_isolates_label_failures(monkeypatch):
     assert by_regime["하락"]["reason"] == "탐지된 구간 없음"
     assert by_regime["횡보"]["status"] == "failed"
     assert "워밍업 부족" in by_regime["횡보"]["reason"]
+    assert by_regime["횡보"]["segment_bar_count"] == 240
+    assert by_regime["횡보"]["segment_in_progress"] is False
     assert by_regime["상승"]["status"] == "mapped"
     assert by_regime["상승"]["run_id"] == "run-xyz"
+    assert by_regime["상승"]["segment_bar_count"] == 360
+    assert by_regime["상승"]["segment_in_progress"] is True
+
+
+def test_run_pipeline_rejects_non_negative_stop_loss_before_segment_detection(monkeypatch):
+    def _fail_if_called(market, history_start):
+        raise AssertionError("stop_loss_pct 부호 검증 전에 select_target_segments가 호출되면 안 된다")
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.select_target_segments", _fail_if_called)
+    history_start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_pipeline("KRW-ETH", history_start, 10_000_000, 10, 5.0, 8.0, 20)
+
+    assert "stop_loss_pct" in str(exc_info.value)
+
+
+def test_run_pipeline_rejects_non_positive_take_profit_before_segment_detection(monkeypatch):
+    def _fail_if_called(market, history_start):
+        raise AssertionError("take_profit_pct 부호 검증 전에 select_target_segments가 호출되면 안 된다")
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.select_target_segments", _fail_if_called)
+    history_start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_pipeline("KRW-ETH", history_start, 10_000_000, 10, -5.0, -8.0, 20)
+
+    assert "take_profit_pct" in str(exc_info.value)
 
 
 def test_print_summary_table_smoke(capsys):
@@ -330,3 +366,34 @@ def test_print_summary_table_smoke(capsys):
     assert "하락" in captured.out
     assert "상승" in captured.out
     assert "12.34" in captured.out
+
+
+def test_print_summary_table_warns_on_in_progress_or_short_segment(capsys):
+    summary = [
+        {
+            # in_progress=True인 경우 — MIN_SEGMENT_BARS 이상이어도 경고해야 한다.
+            "regime": "상승", "status": "mapped", "run_id": "abc",
+            "period": "2026-03-01~2026-03-15", "return_pct": 12.34, "trade_count": 5,
+            "segment_bar_count": 999, "segment_in_progress": True,
+        },
+        {
+            # bar_count가 MIN_SEGMENT_BARS 미만인 경우(진행중 아니어도) 경고해야 한다.
+            "regime": "횡보", "status": "mapped", "run_id": "def",
+            "period": "2026-02-01~2026-02-05", "return_pct": 1.0, "trade_count": 3,
+            "segment_bar_count": 10, "segment_in_progress": False,
+        },
+        {
+            # 충분히 길고 진행중도 아니면 경고 없이 조용해야 한다.
+            "regime": "하락", "status": "mapped", "run_id": "ghi",
+            "period": "2026-01-01~2026-01-20", "return_pct": 3.0, "trade_count": 4,
+            "segment_bar_count": 480, "segment_in_progress": False,
+        },
+    ]
+
+    print_summary_table(summary)
+
+    captured = capsys.readouterr()
+    lines = {line.split()[0]: line for line in captured.out.splitlines() if line}
+    assert "⚠" in lines["상승"]
+    assert "⚠" in lines["횡보"]
+    assert "⚠" not in lines["하락"]
