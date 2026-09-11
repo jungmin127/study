@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, run_grid_for_window, select_target_segments, top_candidates
 from scripts.regime_strategy_pipeline import pick_final_strategy
+from scripts.regime_strategy_pipeline import save_and_map
 
 
 def test_min_trades_for_days_boundary():
@@ -198,3 +199,43 @@ def test_pick_final_strategy_returns_none_when_all_candidates_fail(monkeypatch):
     final = pick_final_strategy(None, candidates, risk_config, min_trades=3, stop_loss_pct=-5, take_profit_pct=8)
 
     assert final is None
+
+
+def test_save_and_map_builds_title_and_maps_to_library(monkeypatch):
+    captured = {}
+
+    def fake_run_backtest_cached(**kwargs):
+        captured["cached_kwargs"] = kwargs
+        return {"run_id": "abc123"}
+
+    def fake_upsert(market, regime, source_run_id, timeframe, buy_conditions_json, sell_conditions_json):
+        captured["upsert_args"] = {
+            "market": market, "regime": regime, "source_run_id": source_run_id,
+            "timeframe": timeframe,
+        }
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.run_backtest_cached", fake_run_backtest_cached)
+    monkeypatch.setattr("trading.db.upsert_regime_strategy_mapping", fake_upsert)
+
+    final = {
+        "buy_conditions": {"type": "AND", "conditions": []},
+        "sell_conditions": {"type": "OR", "conditions": []},
+        "return_pct": 12.5, "trades": [{}] * 5,
+        "raw_return_pct": 10.0, "raw_trade_count": 4,
+    }
+    start = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    risk_config = {"initial_capital": 1_000_000}
+
+    run_id = save_and_map(
+        "KRW-ETH", "상승", start, end, final,
+        df=None, risk_config=risk_config, stop_loss_pct=-5, take_profit_pct=8,
+    )
+
+    assert run_id == "abc123"
+    assert captured["cached_kwargs"]["title"] == "[상승] KRW-ETH 2026-06-01~2026-06-20 그리드+TP8%/SL5%"
+    assert "10.00%(4건)" in captured["cached_kwargs"]["description"]
+    assert "12.50%(5건)" in captured["cached_kwargs"]["description"]
+    assert captured["upsert_args"]["market"] == "KRW-ETH"
+    assert captured["upsert_args"]["regime"] == "상승"
+    assert captured["upsert_args"]["source_run_id"] == "abc123"

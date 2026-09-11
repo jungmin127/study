@@ -12,6 +12,7 @@ Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/regime_strategy_pipeline
 """
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timedelta
 
@@ -22,6 +23,8 @@ from engine.sweep import DEFAULT_RISK_CONFIG
 from scripts.grid_search import _wrap_condition
 from engine.runner import run_backtest
 from engine.condition_strategy import ConditionTreeStrategy
+import trading.db as trading_db
+from engine.cache import run_backtest_cached
 
 TIMEFRAME = "minutes60"
 ALL_CATEGORIES = ["오실레이터", "추세", "가격대", "거래량", "거래대금", "시장 심리"]
@@ -120,3 +123,33 @@ def pick_final_strategy(
                 "raw_return_pct": cand["return_pct"], "raw_trade_count": len(cand["trades"]),
             }
     return None
+
+
+def save_and_map(
+    market: str, regime: str, start: datetime, end: datetime, final: dict,
+    df, risk_config: dict, stop_loss_pct: float, take_profit_pct: float,
+) -> str:
+    title = (
+        f"[{regime}] {market} {start.date()}~{end.date()} "
+        f"그리드+TP{take_profit_pct}%/SL{abs(stop_loss_pct)}%"
+    )
+    description = (
+        f"regime_strategy_pipeline - {market}/{TIMEFRAME}/{start.date()}~{end.date()}, "
+        f"원본 수익률 {final['raw_return_pct']:+.2f}%({final['raw_trade_count']}건) -> "
+        f"TP/SL 부착 후 {final['return_pct']:+.2f}%({len(final['trades'])}건)"
+    )
+    saved = run_backtest_cached(
+        df=df, strategy_cls=ConditionTreeStrategy, risk_config=risk_config,
+        market=market, timeframe=TIMEFRAME, start=start, end=end,
+        strategy_params={
+            "buy_conditions": final["buy_conditions"],
+            "sell_conditions": final["sell_conditions"],
+        },
+        title=title, description=description,
+    )
+    trading_db.upsert_regime_strategy_mapping(
+        market, regime, source_run_id=saved["run_id"], timeframe=TIMEFRAME,
+        buy_conditions_json=json.dumps(final["buy_conditions"]),
+        sell_conditions_json=json.dumps(final["sell_conditions"]),
+    )
+    return saved["run_id"]
