@@ -309,6 +309,15 @@ export const INDICATOR_GUIDE: Record<string, IndicatorGuideText> = {
       '매도 조건 전용, 연산자 "≥" 고정. threshold는 봉 개수이지 날짜가 아닙니다 — 15분봉에서 threshold 20이면 5시간, 일봉에서 threshold 20이면 20일 후 매도됩니다(선택한 봉데이터 타입에 따라 실제 경과 시간이 달라짐).',
     usage: '방향성 없이 오래 물려 있는 포지션을 정리하는 "시간 손절"로, STOP_LOSS_PCT/TAKE_PROFIT_PCT와 함께 OR로 묶어 씁니다.',
   },
+  TRAILING_STOP_STEP_PCT: {
+    meaning:
+      '캔들 지표가 아니라 보유 포지션이 진입 후 지금까지 도달한 "최고 수익률(%)"을 기준으로, 그 최고 수익률이 임계값(계단 폭)의 배수를 넘을 때마다 손절선이 한 단계씩 따라 올라가는 지표입니다. STOP_LOSS_PCT처럼 손절선이 고정돼 있지 않습니다.',
+    params: [],
+    formula: '손절선(%) = (floor(최고 수익률 ÷ step) − 1) × step  (step = threshold)',
+    thresholdExample:
+      '매도 조건 전용(sellOnly), 연산자 "≤" 고정. threshold는 계단 폭(step, 보통 양수, 예: 5)입니다. 최고 수익률이 아직 첫 계단도 못 넘었으면 손절선이 음수로 계산돼 사실상 미발동 상태가 됩니다(같은 조건그룹의 STOP_LOSS_PCT가 먼저 걸리는 게 자연스러운 폴백). 예: step=5, 최고 수익률 +16%면 손절선은 +10% — 수익률이 +10% 이하로 떨어지는 순간 매도.',
+    usage: 'STOP_LOSS_PCT/TAKE_PROFIT_PCT처럼 고정된 라인이 아니라, 크게 오른 뒤 그 이익을 얼마나 반납하면 청산할지를 계단식으로 관리하고 싶을 때 씁니다. 보통 STOP_LOSS_PCT와 OR로 함께 걸어, 트레일링이 발동하기 전까지는 기존 손절선이 안전망 역할을 하게 합니다.',
+  },
   FIB_382: {
     meaning: '최근 period봉의 스윙 고점(최고가)과 저점(최저가) 사이에서, 고점 대비 38.2% 되돌아온 가격입니다.',
     params: [{ key: 'period', role: '스윙 고점/저점을 찾을 봉 개수.' }],

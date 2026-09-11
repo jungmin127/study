@@ -741,6 +741,38 @@ export function buildGuideExample(value: string): GuideExample {
         chart: { type: 'none' },
       };
     }
+    case 'TRAILING_STOP_STEP_PCT': {
+      const entry = 100000;
+      const step = 5;
+      const path = [100000, 106000, 109000, 115000, 103000];
+      let peak = -Infinity;
+      const rows = path.map((price, i) => {
+        const returnPct = ((price - entry) / entry) * 100;
+        peak = Math.max(peak, returnPct);
+        const stopLevel = (Math.floor(peak / step) - 1) * step;
+        return {
+          bar: i,
+          cells: {
+            bars: String(i),
+            price: n(price, 0),
+            returnPct: `${(returnPct >= 0 ? '+' : '') + n(returnPct)}%`,
+            peakPct: `${(peak >= 0 ? '+' : '') + n(peak)}%`,
+            stopLevel: `${(stopLevel >= 0 ? '+' : '') + n(stopLevel)}%`,
+          },
+        };
+      });
+      return {
+        columns: [
+          { key: 'bars', label: '봉' },
+          { key: 'price', label: '현재가' },
+          { key: 'returnPct', label: '진입가 대비 수익률' },
+          { key: 'peakPct', label: '최고 수익률(고점)' },
+          { key: 'stopLevel', label: '손절선(step=5)' },
+        ],
+        rows,
+        chart: { type: 'none' },
+      };
+    }
     default:
       return { columns: [], rows: [], chart: { type: 'none' } };
   }

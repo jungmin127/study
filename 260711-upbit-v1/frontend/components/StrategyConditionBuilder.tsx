@@ -65,6 +65,7 @@ const POSITION_RELATIVE_DEFAULTS: Record<string, number> = {
   STOP_LOSS_PCT: -5,
   TAKE_PROFIT_PCT: 10,
   HOLDING_PERIOD_BARS: 20,
+  TRAILING_STOP_STEP_PCT: 5,
 };
 
 function recommendedThreshold(
