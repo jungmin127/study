@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, run_grid_for_window, select_target_segments, top_candidates
+from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, pick_final_strategy, run_grid_for_window, select_target_segments, top_candidates
 
 
 def test_min_trades_for_days_boundary():
@@ -137,3 +137,63 @@ def test_run_grid_for_window_uses_all_six_categories_and_given_capital(monkeypat
     assert calls["risk_config"]["initial_capital"] == 10_000_000
     assert grid["df"] is fake_df
     assert grid["results"] == [{"return_pct": 1.0, "trades": []}]
+
+
+def _candidate(return_pct: float, n_trades: int) -> dict:
+    return {
+        "buy_block": {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30},
+        "sell_block": {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70},
+        "return_pct": return_pct,
+        "trades": [{"entryTime": f"t{i}", "exitTime": f"t{i}x"} for i in range(n_trades)],
+    }
+
+
+def test_pick_final_strategy_accepts_first_passing_candidate(monkeypatch):
+    call_count = {"n": 0}
+
+    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params):
+        call_count["n"] += 1
+        return {"trades": [{"pnl": 1.0}] * 5, "final_value": 1_100_000}
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.run_backtest", fake_run_backtest)
+    candidates = [_candidate(10.0, 4), _candidate(8.0, 4)]
+    risk_config = {"initial_capital": 1_000_000}
+
+    final = pick_final_strategy(None, candidates, risk_config, min_trades=3, stop_loss_pct=-5, take_profit_pct=8)
+
+    assert call_count["n"] == 1
+    assert final["raw_return_pct"] == 10.0
+    assert final["raw_trade_count"] == 4
+    assert final["return_pct"] == 10.0
+    assert final["sell_conditions"]["type"] == "OR"
+
+
+def test_pick_final_strategy_falls_through_when_first_fails_trade_count(monkeypatch):
+    responses = [
+        {"trades": [{"pnl": 1.0}], "final_value": 1_010_000},
+        {"trades": [{"pnl": 1.0}] * 5, "final_value": 1_080_000},
+    ]
+
+    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params):
+        return responses.pop(0)
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.run_backtest", fake_run_backtest)
+    candidates = [_candidate(10.0, 4), _candidate(8.0, 4)]
+    risk_config = {"initial_capital": 1_000_000}
+
+    final = pick_final_strategy(None, candidates, risk_config, min_trades=3, stop_loss_pct=-5, take_profit_pct=8)
+
+    assert final["raw_return_pct"] == 8.0
+
+
+def test_pick_final_strategy_returns_none_when_all_candidates_fail(monkeypatch):
+    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params):
+        return {"trades": [{"pnl": 1.0}], "final_value": 1_010_000}
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.run_backtest", fake_run_backtest)
+    candidates = [_candidate(10.0, 4)]
+    risk_config = {"initial_capital": 1_000_000}
+
+    final = pick_final_strategy(None, candidates, risk_config, min_trades=3, stop_loss_pct=-5, take_profit_pct=8)
+
+    assert final is None

@@ -19,6 +19,9 @@ from backend.regime_adx_service import compute_adx_regime_history
 from scripts.grid_search import build_condition_grid, compute_grid_results_parallel, _check_candle_warmup, dedup_top_results
 from backend.main import _fetch_backtest_dataframe
 from engine.sweep import DEFAULT_RISK_CONFIG
+from scripts.grid_search import _wrap_condition
+from engine.runner import run_backtest
+from engine.condition_strategy import ConditionTreeStrategy
 
 TIMEFRAME = "minutes60"
 ALL_CATEGORIES = ["오실레이터", "추세", "가격대", "거래량", "거래대금", "시장 심리"]
@@ -90,3 +93,30 @@ def run_grid_for_window(market: str, start: datetime, end: datetime, capital: fl
     risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": capital}
     results = compute_grid_results_parallel(df, buy_conditions, sell_conditions, risk_config)
     return {"df": df, "risk_config": risk_config, "results": results}
+
+
+def pick_final_strategy(
+    df, candidates: list[dict], risk_config: dict, min_trades: int,
+    stop_loss_pct: float, take_profit_pct: float,
+) -> dict | None:
+    """후보를 수익률 내림차순으로 순회하며 TP/SL 증강 후에도 거래횟수를 만족하는
+    첫 번째를 채택한다. 전부 실패하면 None."""
+    for cand in candidates:
+        buy_group = _wrap_condition(cand["buy_block"], None, "AND")
+        base_sell_group = _wrap_condition(cand["sell_block"], None, "AND")
+        augmented_sell = augment_with_tp_sl(base_sell_group, stop_loss_pct, take_profit_pct)
+        result = run_backtest(
+            df, ConditionTreeStrategy, risk_config,
+            {"buy_conditions": buy_group, "sell_conditions": augmented_sell},
+        )
+        if len(result["trades"]) >= min_trades:
+            return_pct = (
+                (result["final_value"] - risk_config["initial_capital"])
+                / risk_config["initial_capital"] * 100
+            )
+            return {
+                "buy_conditions": buy_group, "sell_conditions": augmented_sell,
+                "return_pct": return_pct, "trades": result["trades"],
+                "raw_return_pct": cand["return_pct"], "raw_trade_count": len(cand["trades"]),
+            }
+    return None
