@@ -491,6 +491,16 @@ INDICATOR_CATALOG: list[dict] = [
         "example": "임계값 20을 넣으면, 진입 후 20개 봉이 지나는 순간(15분봉이면 5시간, 일봉이면 20일) 매도 조건이 참이 됩니다.",
     },
     {
+        "value": "TRAILING_STOP_STEP_PCT", "label": "계단식 트레일링 스탑 (%)", "category": "손익",
+        "params": [], "sellOnly": True, "fixedOperator": "<=",
+        "description": "포지션 진입 후 도달한 최고 수익률(%)을 추적해, 그 값이 임계값(계단 폭)의 "
+            "배수를 넘을 때마다 손절선을 한 단계씩 끌어올립니다. 임계값은 계단 폭(step)이며, "
+            "실제 손절선은 floor(최고수익률/step - 1)*step으로 계산됩니다.",
+        "example": "임계값(step) 5를 넣으면: 최고수익률이 +5%를 넘으면 손절선 0%(본절), "
+            "+10%를 넘으면 손절선 +5%, +15%를 넘으면 손절선 +10%로 따라 올라갑니다. "
+            "현재 수익률이 그 손절선 이하로 내려오면 매도합니다.",
+    },
+    {
         "value": "MARKET_TREND", "label": "시장 추세 (BTC 종가-이동평균)", "category": "시장 심리",
         "params": [{"key": "period", "label": "기간", "default": 10}],
         "description": "대상 코인이 아니라 KRW-BTC 종가에서 KRW-BTC의 이동평균을 뺀 값입니다. 알트코인이 BTC 추세를 따라가는 경향을 이용해, 시장 전체가 약세일 때 매수를 쉬거나 매도하는 필터로 씁니다.",

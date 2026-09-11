@@ -443,3 +443,59 @@ def test_eval_group_values_drops_nan_leaf_in_or():
         indicator_key("FUNDING_RATE", {}): float("nan"),
     }
     assert eval_group_values(tree, values) is False
+
+
+def test_find_unknown_indicators_allows_trailing_stop_step_pct():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5}],
+    }
+    assert find_unknown_indicators(tree) == []
+
+
+def test_eval_group_values_trailing_stop_step_pct_computes_stepped_stop_level():
+    # step=5, peak=+16% -> 3계단 클리어(5,10,15) -> stop_level=(3-1)*5=10
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5}],
+    }
+    assert eval_group_values(tree, {}, position_return_pct=11.0, position_peak_return_pct=16.0) is False
+    assert eval_group_values(tree, {}, position_return_pct=9.0, position_peak_return_pct=16.0) is True
+
+
+def test_eval_group_values_trailing_stop_step_pct_not_yet_armed_before_first_step():
+    # peak=+3%, step=5 -> floor(3/5)=0 -> stop_level=(0-1)*5=-5 (사실상 미발동,
+    # 같은 매도조건 그룹의 STOP_LOSS_PCT가 먼저 걸리는 게 자연스러운 폴백)
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5}],
+    }
+    assert eval_group_values(tree, {}, position_return_pct=-4.0, position_peak_return_pct=3.0) is False
+    assert eval_group_values(tree, {}, position_return_pct=-6.0, position_peak_return_pct=3.0) is True
+
+
+def test_eval_group_values_trailing_stop_step_pct_false_without_position_or_peak():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5}],
+    }
+    assert eval_group_values(tree, {}, position_return_pct=None, position_peak_return_pct=16.0) is False
+    assert eval_group_values(tree, {}, position_return_pct=9.0, position_peak_return_pct=None) is False
+
+
+def test_eval_group_values_trailing_stop_step_pct_invalid_step_never_triggers():
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 0}],
+    }
+    assert eval_group_values(tree, {}, position_return_pct=-100.0, position_peak_return_pct=50.0) is False
+
+
+def test_eval_group_trailing_stop_step_pct_matches_eval_group_values():
+    # eval_group()(bt.Indicator 버전)도 eval_group_values()와 동일하게 동작해야 한다(쌍둥이 함수).
+    tree = {
+        "type": "AND",
+        "conditions": [{"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5}],
+    }
+    assert eval_group(tree, {}, position_return_pct=11.0, position_peak_return_pct=16.0) is False
+    assert eval_group(tree, {}, position_return_pct=9.0, position_peak_return_pct=16.0) is True

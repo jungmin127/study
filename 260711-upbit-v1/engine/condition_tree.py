@@ -14,13 +14,15 @@ C:\\Users\\jungm\\project\\backtesting_1의 backend/app/engine/strategy_builder.
 """
 from __future__ import annotations
 
+import math
+
 import backtrader as bt
 
 from engine.indicators import INDICATOR_FACTORY
 
 # 캔들 데이터로 미리 계산하는 bt.Indicator가 아니라, 포지션이 열려야만 알 수 있는
 # 진입가 대비 수익률(%)을 값으로 쓰는 지표. eval_group에 position_return_pct로 전달된다.
-POSITION_RELATIVE_INDICATORS = {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT", "HOLDING_PERIOD_BARS"}
+POSITION_RELATIVE_INDICATORS = {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT", "HOLDING_PERIOD_BARS", "TRAILING_STOP_STEP_PCT"}
 
 
 def indicator_key(indicator: str, params: dict) -> str:
@@ -126,11 +128,13 @@ def eval_group(
     indicators: dict[str, bt.Indicator],
     position_return_pct: float | None = None,
     position_holding_bars: int | None = None,
+    position_peak_return_pct: float | None = None,
 ) -> bool:
     """ConditionGroup을 재귀적으로 평가해 bool 반환. indicators는 indicator_key -> bt.Indicator 매핑.
     position_return_pct는 포지션 진입가 대비 현재 수익률(%)로 STOP_LOSS_PCT/TAKE_PROFIT_PCT 평가에,
-    position_holding_bars는 포지션 보유 봉수로 HOLDING_PERIOD_BARS 평가에 쓰인다. 포지션이 없어
-    해당 값이 None이면 그 블록은 False로 처리한다."""
+    position_holding_bars는 포지션 보유 봉수로 HOLDING_PERIOD_BARS 평가에 쓰인다.
+    position_peak_return_pct는 포지션 진입 후 지금까지의 최고 수익률(%)로 TRAILING_STOP_STEP_PCT
+    평가에 쓰인다. 포지션이 없어 해당 값이 None이면 그 블록은 False로 처리한다."""
     group_type = group.get("type", "AND")
     conditions = group.get("conditions", [])
 
@@ -148,6 +152,19 @@ def eval_group(
                         apply_operator(position_holding_bars, item["operator"], float(item["threshold"]))
                     )
                 continue
+            if item["indicator"] == "TRAILING_STOP_STEP_PCT":
+                # threshold는 일반 지표처럼 "비교할 값"이 아니라 계단 폭(step_pct)이다. 손절선 자체가
+                # 고점(position_peak_return_pct)으로부터 매번 새로 계산되는 이동값이라 operator/threshold를
+                # apply_operator에 그대로 넘기는 일반 경로를 쓸 수 없다 — item["operator"]는 의도적으로
+                # 무시한다(UI는 "<=" 고정으로 혼란을 막는다). 설계 근거:
+                # docs/superpowers/specs_v2/2026-09-11-trailing-stop-step-design.md
+                step = float(item["threshold"])
+                if position_return_pct is None or position_peak_return_pct is None or step <= 0:
+                    results.append(False)
+                else:
+                    stop_level = (math.floor(position_peak_return_pct / step) - 1) * step
+                    results.append(position_return_pct <= stop_level)
+                continue
             if item["indicator"] in POSITION_RELATIVE_INDICATORS:
                 if position_return_pct is None:
                     results.append(False)
@@ -161,7 +178,9 @@ def eval_group(
             value = get_indicator_value(item["indicator"], indicators[key])
             results.append(apply_operator(value, item["operator"], float(item["threshold"])))
         elif "type" in item:
-            results.append(eval_group(item, indicators, position_return_pct, position_holding_bars))
+            results.append(
+                eval_group(item, indicators, position_return_pct, position_holding_bars, position_peak_return_pct)
+            )
 
     return all(results) if group_type == "AND" else any(results)
 
@@ -174,6 +193,7 @@ def eval_group_values(
     values: dict[str, float | None],
     position_return_pct: float | None = None,
     position_holding_bars: int | None = None,
+    position_peak_return_pct: float | None = None,
 ) -> bool | None:
     """ConditionGroup을 재귀적으로 평가해 bool 또는 None(unknown)을 반환. eval_group()과
     로직은 같지만 bt.Indicator 대신 이미 계산된 값 딕셔너리(indicator_key -> float | None)를
@@ -201,6 +221,15 @@ def eval_group_values(
                         apply_operator(position_holding_bars, item["operator"], float(item["threshold"]))
                     )
                 continue
+            if item["indicator"] == "TRAILING_STOP_STEP_PCT":
+                # eval_group()과 동일 로직 — 쌍둥이 함수, 둘 다 고칠 것.
+                step = float(item["threshold"])
+                if position_return_pct is None or position_peak_return_pct is None or step <= 0:
+                    results.append(False)
+                else:
+                    stop_level = (math.floor(position_peak_return_pct / step) - 1) * step
+                    results.append(position_return_pct <= stop_level)
+                continue
             if item["indicator"] in POSITION_RELATIVE_INDICATORS:
                 if position_return_pct is None:
                     results.append(False)
@@ -213,7 +242,9 @@ def eval_group_values(
                 continue  # unknown 리프는 이 그룹 평가에서 제외
             results.append(apply_operator(value, item["operator"], float(item["threshold"])))
         elif "type" in item:
-            child = eval_group_values(item, values, position_return_pct, position_holding_bars)
+            child = eval_group_values(
+                item, values, position_return_pct, position_holding_bars, position_peak_return_pct
+            )
             if child is None:
                 continue  # 하위 그룹 전체가 unknown -> 이 그룹 평가에서도 제외
             results.append(child)
