@@ -15,6 +15,8 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta
 
+from backend.regime_adx_service import compute_adx_regime_history
+
 TIMEFRAME = "minutes60"
 
 
@@ -33,3 +35,17 @@ def adjust_window(seg: dict, min_days: int, history_start: datetime) -> tuple[da
     if start > min_start:
         start = max(min_start, history_start)
     return start, end
+
+
+def select_target_segments(market: str, history_start: datetime) -> dict[str, dict | None]:
+    """라벨(하락/횡보/상승)별 history_start 이후 시작하는 가장 최근 세그먼트를
+    고른다. 해당 라벨의 세그먼트가 없으면 None."""
+    history = compute_adx_regime_history(market, TIMEFRAME)
+    by_label: dict[str, dict] = {}
+    for seg in history["segments"]:
+        if datetime.fromisoformat(seg["start"]) < history_start:
+            continue
+        label = seg["label"]
+        if label not in by_label or seg["end"] > by_label[label]["end"]:
+            by_label[label] = seg
+    return {label: by_label.get(label) for label in ("하락", "횡보", "상승")}
