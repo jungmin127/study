@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, select_target_segments, top_candidates
+from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, run_grid_for_window, select_target_segments, top_candidates
 
 
 def test_min_trades_for_days_boundary():
@@ -95,3 +95,45 @@ def test_top_candidates_filters_by_min_trades_then_sorts_by_return():
 
     assert len(candidates) == 1
     assert candidates[0]["return_pct"] == 5.0
+
+
+def test_run_grid_for_window_uses_all_six_categories_and_given_capital(monkeypatch):
+    calls = {}
+
+    def fake_build_condition_grid(pool, market=None):
+        calls["pool"] = pool
+        calls["market"] = market
+        return (
+            [{"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30}],
+            [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}],
+        )
+
+    fake_df = object()
+
+    def fake_fetch(market, timeframe, start, end, buy_group, sell_group):
+        calls["fetch_args"] = (market, timeframe, start, end)
+        return fake_df
+
+    def fake_check_warmup(df, buy_conditions, sell_conditions):
+        calls["warmup_checked"] = True
+
+    def fake_compute_parallel(df, buy_conditions, sell_conditions, risk_config):
+        calls["risk_config"] = risk_config
+        return [{"return_pct": 1.0, "trades": []}]
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.build_condition_grid", fake_build_condition_grid)
+    monkeypatch.setattr("scripts.regime_strategy_pipeline._fetch_backtest_dataframe", fake_fetch)
+    monkeypatch.setattr("scripts.regime_strategy_pipeline._check_candle_warmup", fake_check_warmup)
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.compute_grid_results_parallel", fake_compute_parallel)
+
+    start = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 20, tzinfo=timezone.utc)
+
+    grid = run_grid_for_window("KRW-ETH", start, end, capital=10_000_000)
+
+    assert calls["pool"]["categories"] == ["오실레이터", "추세", "가격대", "거래량", "거래대금", "시장 심리"]
+    assert calls["market"] == "KRW-ETH"
+    assert calls["warmup_checked"] is True
+    assert calls["risk_config"]["initial_capital"] == 10_000_000
+    assert grid["df"] is fake_df
+    assert grid["results"] == [{"return_pct": 1.0, "trades": []}]

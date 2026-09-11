@@ -16,9 +16,12 @@ import math
 from datetime import datetime, timedelta
 
 from backend.regime_adx_service import compute_adx_regime_history
-from scripts.grid_search import dedup_top_results
+from scripts.grid_search import build_condition_grid, compute_grid_results_parallel, _check_candle_warmup, dedup_top_results
+from backend.main import _fetch_backtest_dataframe
+from engine.sweep import DEFAULT_RISK_CONFIG
 
 TIMEFRAME = "minutes60"
+ALL_CATEGORIES = ["오실레이터", "추세", "가격대", "거래량", "거래대금", "시장 심리"]
 
 
 def min_trades_for_days(period_days: float) -> int:
@@ -71,3 +74,19 @@ def top_candidates(results: list[dict], min_trades: int, pool_size: int) -> list
     수익률 내림차순 상위 pool_size개를 돌려준다."""
     filtered = [r for r in results if len(r["trades"]) >= min_trades]
     return dedup_top_results(filtered, pool_size)
+
+
+def run_grid_for_window(market: str, start: datetime, end: datetime, capital: float) -> dict:
+    """grid search를 실행하고, 이후 단계(후보 재검증/최종 저장)가 그대로 재사용할
+    df/risk_config까지 함께 반환한다(같은 df로 캔들을 두 번 조회하지 않기 위함)."""
+    pool = {"categories": ALL_CATEGORIES, "excluded_indicators": []}
+    buy_conditions, sell_conditions = build_condition_grid(pool, market=market)
+    df = _fetch_backtest_dataframe(
+        market, TIMEFRAME, start, end,
+        {"type": "AND", "conditions": buy_conditions},
+        {"type": "AND", "conditions": sell_conditions},
+    )
+    _check_candle_warmup(df, buy_conditions, sell_conditions)
+    risk_config = {**DEFAULT_RISK_CONFIG, "initial_capital": capital}
+    results = compute_grid_results_parallel(df, buy_conditions, sell_conditions, risk_config)
+    return {"df": df, "risk_config": risk_config, "results": results}
