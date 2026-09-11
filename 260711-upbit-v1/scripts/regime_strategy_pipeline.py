@@ -12,9 +12,11 @@ Run: PYTHONPATH=. PYTHONIOENCODING=utf-8 python scripts/regime_strategy_pipeline
 """
 from __future__ import annotations
 
+import argparse
 import json
 import math
 from datetime import datetime, timedelta
+from datetime import timezone
 
 from backend.regime_adx_service import compute_adx_regime_history
 from scripts.grid_search import build_condition_grid, compute_grid_results_parallel, _check_candle_warmup, dedup_top_results
@@ -25,6 +27,8 @@ from engine.runner import run_backtest
 from engine.condition_strategy import ConditionTreeStrategy
 import trading.db as trading_db
 from engine.cache import run_backtest_cached
+from fastapi import HTTPException
+from engine.regime_adx_constants import MAJOR_MARKETS
 
 TIMEFRAME = "minutes60"
 ALL_CATEGORIES = ["오실레이터", "추세", "가격대", "거래량", "거래대금", "시장 심리"]
@@ -153,3 +157,90 @@ def save_and_map(
         sell_conditions_json=json.dumps(final["sell_conditions"]),
     )
     return saved["run_id"]
+
+
+def _ensure_supported_market(market: str) -> None:
+    if market not in MAJOR_MARKETS:
+        raise SystemExit(f"{market}은(는) 지원하지 않는 마켓입니다.")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="장세별 전략 자동 발굴 파이프라인")
+    parser.add_argument("--market", required=True, help="마켓코드 (예: KRW-ETH)")
+    parser.add_argument("--history-start", required=True, help="시작일 YYYY-MM-DD (이 날짜 이후 세그먼트만 사용)")
+    parser.add_argument("--capital", type=float, default=10_000_000)
+    parser.add_argument("--min-days", type=int, default=10)
+    parser.add_argument("--stop-loss-pct", type=float, default=-5.0)
+    parser.add_argument("--take-profit-pct", type=float, default=8.0)
+    parser.add_argument("--candidate-pool", type=int, default=20)
+    return parser.parse_args(argv)
+
+
+def run_pipeline(
+    market: str, history_start: datetime, capital: float, min_days: int,
+    stop_loss_pct: float, take_profit_pct: float, candidate_pool: int,
+) -> list[dict]:
+    segments = select_target_segments(market, history_start)
+    summary: list[dict] = []
+    for regime, seg in segments.items():
+        if seg is None:
+            summary.append({"regime": regime, "status": "skipped", "reason": "탐지된 구간 없음"})
+            continue
+        try:
+            start, end = adjust_window(seg, min_days, history_start)
+            period_days = (end - start).days
+            min_trades = min_trades_for_days(period_days)
+
+            grid = run_grid_for_window(market, start, end, capital)
+            candidates = top_candidates(grid["results"], min_trades, candidate_pool)
+            if not candidates:
+                summary.append({"regime": regime, "status": "skipped", "reason": "거래횟수 조건을 만족하는 후보 없음"})
+                continue
+
+            final = pick_final_strategy(
+                grid["df"], candidates, grid["risk_config"], min_trades,
+                stop_loss_pct, take_profit_pct,
+            )
+            if final is None:
+                summary.append({"regime": regime, "status": "skipped", "reason": "TP/SL 부착 후 거래횟수 조건을 만족하는 후보 없음"})
+                continue
+
+            run_id = save_and_map(
+                market, regime, start, end, final,
+                grid["df"], grid["risk_config"], stop_loss_pct, take_profit_pct,
+            )
+            summary.append({
+                "regime": regime, "status": "mapped", "run_id": run_id,
+                "period": f"{start.date()}~{end.date()}",
+                "return_pct": round(final["return_pct"], 2),
+                "trade_count": len(final["trades"]),
+            })
+        except (HTTPException, SystemExit) as exc:
+            summary.append({"regime": regime, "status": "failed", "reason": str(exc)})
+    return summary
+
+
+def print_summary_table(summary: list[dict]) -> None:
+    print(f"{'장세':6}{'상태':10}{'기간':24}{'수익률':>10}{'거래':>6}  비고")
+    for row in summary:
+        period = row.get("period", "-")
+        return_pct = f"{row['return_pct']:+.2f}%" if "return_pct" in row else "-"
+        trade_count = str(row.get("trade_count", "-"))
+        reason = row.get("reason", row.get("run_id", ""))
+        print(f"{row['regime']:6}{row['status']:10}{period:24}{return_pct:>10}{trade_count:>6}  {reason}")
+
+
+def main() -> None:
+    args = parse_args()
+    _ensure_supported_market(args.market)
+    history_start = datetime.strptime(args.history_start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    summary = run_pipeline(
+        args.market, history_start, args.capital, args.min_days,
+        args.stop_loss_pct, args.take_profit_pct, args.candidate_pool,
+    )
+    print_summary_table(summary)
+    print(f"RESULT_JSON: {json.dumps({'market': args.market, 'segments': summary}, ensure_ascii=False)}")
+
+
+if __name__ == "__main__":
+    main()

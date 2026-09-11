@@ -1,8 +1,13 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, run_grid_for_window, select_target_segments, top_candidates
 from scripts.regime_strategy_pipeline import pick_final_strategy
 from scripts.regime_strategy_pipeline import save_and_map
+from scripts.regime_strategy_pipeline import (
+    _ensure_supported_market, parse_args, print_summary_table, run_pipeline,
+)
 
 
 def test_min_trades_for_days_boundary():
@@ -239,3 +244,89 @@ def test_save_and_map_builds_title_and_maps_to_library(monkeypatch):
     assert captured["upsert_args"]["market"] == "KRW-ETH"
     assert captured["upsert_args"]["regime"] == "상승"
     assert captured["upsert_args"]["source_run_id"] == "abc123"
+
+
+def test_ensure_supported_market_rejects_unknown_market():
+    with pytest.raises(SystemExit):
+        _ensure_supported_market("KRW-NOTREAL")
+
+
+def test_ensure_supported_market_accepts_major_market():
+    _ensure_supported_market("KRW-ETH")
+
+
+def test_parse_args_defaults():
+    args = parse_args(["--market", "KRW-ETH", "--history-start", "2026-01-01"])
+
+    assert args.market == "KRW-ETH"
+    assert args.history_start == "2026-01-01"
+    assert args.capital == 10_000_000
+    assert args.min_days == 10
+    assert args.stop_loss_pct == -5.0
+    assert args.take_profit_pct == 8.0
+    assert args.candidate_pool == 20
+
+
+def test_run_pipeline_isolates_label_failures(monkeypatch):
+    segments = {
+        "하락": None,
+        "횡보": {"start": "2026-02-01T00:00:00+00:00", "end": "2026-02-10T00:00:00+00:00", "label": "횡보", "bar_count": 240},
+        "상승": {"start": "2026-03-01T00:00:00+00:00", "end": "2026-03-15T00:00:00+00:00", "label": "상승", "bar_count": 360},
+    }
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.select_target_segments", lambda market, history_start: segments)
+
+    def fake_run_grid_for_window(market, start, end, capital):
+        # adjust_window가 짧은 세그먼트(횡보, 9일<min_days10)의 start를 1월로
+        # 당기므로 start가 아니라 항상 고정인 end로 라벨을 구분한다.
+        if end.month == 2:
+            raise SystemExit("워밍업 부족")
+        return {
+            "df": None, "risk_config": {"initial_capital": capital},
+            "results": [{"return_pct": 5.0, "trades": [{}, {}, {}]}],
+        }
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.run_grid_for_window", fake_run_grid_for_window)
+    monkeypatch.setattr(
+        "scripts.regime_strategy_pipeline.top_candidates",
+        lambda results, min_trades, pool: [{
+            "return_pct": 5.0, "trades": [{}, {}, {}],
+            "buy_block": {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30},
+            "sell_block": {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70},
+        }],
+    )
+    monkeypatch.setattr(
+        "scripts.regime_strategy_pipeline.pick_final_strategy",
+        lambda df, candidates, risk_config, min_trades, sl, tp: {
+            "buy_conditions": {}, "sell_conditions": {}, "return_pct": 6.0, "trades": [{}, {}, {}],
+            "raw_return_pct": 5.0, "raw_trade_count": 3,
+        },
+    )
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.save_and_map", lambda *a, **k: "run-xyz")
+
+    history_start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    summary = run_pipeline("KRW-ETH", history_start, 10_000_000, 10, -5.0, 8.0, 20)
+
+    by_regime = {row["regime"]: row for row in summary}
+    assert by_regime["하락"]["status"] == "skipped"
+    assert by_regime["하락"]["reason"] == "탐지된 구간 없음"
+    assert by_regime["횡보"]["status"] == "failed"
+    assert "워밍업 부족" in by_regime["횡보"]["reason"]
+    assert by_regime["상승"]["status"] == "mapped"
+    assert by_regime["상승"]["run_id"] == "run-xyz"
+
+
+def test_print_summary_table_smoke(capsys):
+    summary = [
+        {"regime": "하락", "status": "skipped", "reason": "탐지된 구간 없음"},
+        {
+            "regime": "상승", "status": "mapped", "run_id": "abc",
+            "period": "2026-03-01~2026-03-15", "return_pct": 12.34, "trade_count": 5,
+        },
+    ]
+
+    print_summary_table(summary)
+
+    captured = capsys.readouterr()
+    assert "하락" in captured.out
+    assert "상승" in captured.out
+    assert "12.34" in captured.out
