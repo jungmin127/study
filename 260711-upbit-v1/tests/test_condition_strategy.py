@@ -67,3 +67,16 @@ def test_holding_period_bars_forces_exit_after_n_bars():
     result = _run(buy, sell)
     assert len(result["trades"]) > 10
     assert all(t["holdingPeriod"] <= 5 for t in result["trades"])
+
+
+def test_trailing_stop_step_pct_locks_in_gains_as_price_rises():
+    # 항상 매수, 계단식 트레일링(step=1)만 매도조건. make_oscillating_df()는
+    # base=20000 진폭 600(=3%)+리플 50 사인파라 진입 후 대부분의 상승 구간에서
+    # 최소 1%(step) 이상은 오르내리므로, 최고수익률 대비 한 단계 아래로
+    # 떨어지는 순간 매도가 걸려야 한다.
+    buy = {"type": "AND", "conditions": [{"indicator": "SMA", "params": {"period": 1}, "operator": ">", "threshold": 0}]}  # 항상 참
+    sell = {"type": "AND", "conditions": [{"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 1}]}
+    result = _run(buy, sell)
+    assert len(result["trades"]) > 0
+    # 계단식은 "본절 이상을 지키는" 게 목적 -> 최소 한 건은 수익(또는 본절 근접) 청산이어야 한다.
+    assert any(t["returnRate"] >= -0.5 for t in result["trades"])

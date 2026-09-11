@@ -29,6 +29,7 @@ class ConditionTreeStrategy(bt.Strategy):
         self._buy_inds: dict[str, bt.Indicator] = {}
         self._sell_inds: dict[str, bt.Indicator] = {}
         self._entry_bar: int | None = None
+        self._peak_return_pct: float | None = None
 
         for block in collect_blocks(self._buy_cond):
             self._ensure_indicator(self._buy_inds, block)
@@ -49,6 +50,7 @@ class ConditionTreeStrategy(bt.Strategy):
     def next(self) -> None:
         if not self.position:
             self._entry_bar = None
+            self._peak_return_pct = None
             if eval_group(self._buy_cond, self._buy_inds):
                 self.buy()
         else:
@@ -58,12 +60,18 @@ class ConditionTreeStrategy(bt.Strategy):
             position_return_pct = (
                 (self.data.close[0] - entry_price) / entry_price * 100 if entry_price else None
             )
+            if position_return_pct is not None:
+                self._peak_return_pct = (
+                    position_return_pct if self._peak_return_pct is None
+                    else max(self._peak_return_pct, position_return_pct)
+                )
             position_holding_bars = len(self) - self._entry_bar
             if eval_group(
                 self._sell_cond,
                 self._sell_inds,
                 position_return_pct=position_return_pct,
                 position_holding_bars=position_holding_bars,
+                position_peak_return_pct=self._peak_return_pct,
             ):
                 self.sell()
 
