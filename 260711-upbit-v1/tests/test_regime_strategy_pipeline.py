@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from scripts.regime_strategy_pipeline import adjust_window, min_trades_for_days, select_target_segments
+from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, select_target_segments
 
 
 def test_min_trades_for_days_boundary():
@@ -58,3 +58,21 @@ def test_select_target_segments_picks_latest_per_label_and_filters_by_history_st
     assert result["상승"]["start"] == "2026-03-01T00:00:00+00:00"  # 두 개 중 더 최근 것
     assert result["하락"] is None  # history_start 이전이라 제외
     assert result["횡보"] is None  # 세그먼트 자체가 없음
+
+
+def test_augment_with_tp_sl_preserves_base_and_adds_or_blocks():
+    base_sell = {
+        "type": "AND",
+        "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}],
+    }
+
+    result = augment_with_tp_sl(base_sell, stop_loss_pct=-5, take_profit_pct=8)
+
+    assert result["type"] == "OR"
+    assert result["conditions"][0] == base_sell
+    assert result["conditions"][1] == {
+        "indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5,
+    }
+    assert result["conditions"][2] == {
+        "indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 8,
+    }

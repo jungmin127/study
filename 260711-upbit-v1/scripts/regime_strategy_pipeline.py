@@ -49,3 +49,17 @@ def select_target_segments(market: str, history_start: datetime) -> dict[str, di
         if label not in by_label or seg["end"] > by_label[label]["end"]:
             by_label[label] = seg
     return {label: by_label.get(label) for label in ("하락", "횡보", "상승")}
+
+
+def augment_with_tp_sl(sell_group: dict, stop_loss_pct: float, take_profit_pct: float) -> dict:
+    """원래 매도조건에 손절/익절 OR조건을 얹는다. STOP_LOSS_PCT/TAKE_PROFIT_PCT는
+    포지션 진입가 대비 수익률로 평가되는 기존 조건트리 지표(engine/condition_tree.py의
+    POSITION_RELATIVE_INDICATORS)라 그대로 재사용한다."""
+    return {
+        "type": "OR",
+        "conditions": [
+            sell_group,
+            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": stop_loss_pct},
+            {"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": take_profit_pct},
+        ],
+    }
