@@ -394,6 +394,6 @@ def test_print_summary_table_warns_on_in_progress_or_short_segment(capsys):
 
     captured = capsys.readouterr()
     lines = {line.split()[0]: line for line in captured.out.splitlines() if line}
-    assert "⚠" in lines["상승"]
-    assert "⚠" in lines["횡보"]
-    assert "⚠" not in lines["하락"]
+    assert "[!]" in lines["상승"]
+    assert "[!]" in lines["횡보"]
+    assert "[!]" not in lines["하락"]

@@ -223,9 +223,13 @@ def run_pipeline(
         # 고르므로 이런 진행중/짧은 구간이 채택될 수 있다(설계상 감수 — 세그먼트
         # 선정 로직 자체는 바꾸지 않고, 사람이 결과 표에서 알아볼 수 있게 표시만
         # 한다). 아래 두 필드를 요약 행마다 함께 남겨 print_summary_table이
-        # 경고를 붙일 수 있게 한다.
-        seg_info = {"segment_bar_count": seg["bar_count"], "segment_in_progress": seg["in_progress"]}
+        # 경고를 붙일 수 있게 한다. seg["bar_count"]/["in_progress"] 접근을 try
+        # 안에 두어, 업스트림 스키마가 바뀌어 KeyError가 나도 except 절이 잡아서
+        # 이 라벨만 failed 처리하고 나머지 라벨은 계속 진행되게 한다(seg_info는
+        # except 절에서도 쓰이므로 try 진입 전 빈 dict로 기본값을 잡아둔다).
+        seg_info: dict = {}
         try:
+            seg_info = {"segment_bar_count": seg["bar_count"], "segment_in_progress": seg["in_progress"]}
             start, end = adjust_window(seg, min_days, history_start)
             period_days = (end - start).days
             min_trades = min_trades_for_days(period_days)
@@ -273,7 +277,10 @@ def print_summary_table(summary: list[dict]) -> None:
         trade_count = str(row.get("trade_count", "-"))
         reason = row.get("reason", row.get("run_id", ""))
         if row.get("segment_in_progress") or row.get("segment_bar_count", MIN_SEGMENT_BARS) < MIN_SEGMENT_BARS:
-            reason = f"{reason} ⚠ 진행중/짧은 구간"
+            # cp949 콘솔(PYTHONIOENCODING 미설정)에서도 안전하게 출력되도록 이모지
+            # 대신 ASCII 마커를 쓴다 — 표 출력이 이 시점에서 실패하면 다른 라벨의
+            # 결과까지 함께 못 보게 되어 I1이 막으려던 실패와 같아진다.
+            reason = f"{reason} [!] 진행중/짧은 구간"
         print(f"{row['regime']:6}{row['status']:10}{period:24}{return_pct:>10}{trade_count:>6}  {reason}")
 
 
