@@ -16,6 +16,7 @@ import math
 from datetime import datetime, timedelta
 
 from backend.regime_adx_service import compute_adx_regime_history
+from scripts.grid_search import dedup_top_results
 
 TIMEFRAME = "minutes60"
 
@@ -63,3 +64,10 @@ def augment_with_tp_sl(sell_group: dict, stop_loss_pct: float, take_profit_pct: 
             {"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": take_profit_pct},
         ],
     }
+
+
+def top_candidates(results: list[dict], min_trades: int, pool_size: int) -> list[dict]:
+    """거래횟수 미달 결과를 먼저 버리고, 남은 것에 기존 dedup_top_results를 적용해
+    수익률 내림차순 상위 pool_size개를 돌려준다."""
+    filtered = [r for r in results if len(r["trades"]) >= min_trades]
+    return dedup_top_results(filtered, pool_size)

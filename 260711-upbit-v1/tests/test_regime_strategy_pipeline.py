@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, select_target_segments
+from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, select_target_segments, top_candidates
 
 
 def test_min_trades_for_days_boundary():
@@ -76,3 +76,22 @@ def test_augment_with_tp_sl_preserves_base_and_adds_or_blocks():
     assert result["conditions"][2] == {
         "indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 8,
     }
+
+
+def _grid_result(return_pct: float, n_trades: int) -> dict:
+    return {
+        "return_pct": return_pct,
+        "buy_block": {"indicator": "RSI", "params": {"period": 14}, "operator": "<", "threshold": 30},
+        "sell_block": {"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70},
+        "trades": [{"entryTime": f"t{i}", "exitTime": f"t{i}x"} for i in range(n_trades)],
+        "final_value": 1_000_000 * (1 + return_pct / 100),
+    }
+
+
+def test_top_candidates_filters_by_min_trades_then_sorts_by_return():
+    results = [_grid_result(10.0, 2), _grid_result(5.0, 5), _grid_result(20.0, 1)]
+
+    candidates = top_candidates(results, min_trades=3, pool_size=10)
+
+    assert len(candidates) == 1
+    assert candidates[0]["return_pct"] == 5.0
