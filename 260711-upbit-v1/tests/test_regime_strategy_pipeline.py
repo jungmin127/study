@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, pick_final_strategy, run_grid_for_window, select_target_segments, top_candidates
+from scripts.regime_strategy_pipeline import adjust_window, augment_with_tp_sl, min_trades_for_days, run_grid_for_window, select_target_segments, top_candidates
+from scripts.regime_strategy_pipeline import pick_final_strategy
 
 
 def test_min_trades_for_days_boundary():
