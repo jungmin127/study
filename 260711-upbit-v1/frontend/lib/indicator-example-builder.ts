@@ -758,7 +758,7 @@ export function buildGuideExample(value: string): GuideExample {
             price: n(price, 0),
             returnPct: `${(returnPct >= 0 ? '+' : '') + n(returnPct)}%`,
             peakPct: `${(peak >= 0 ? '+' : '') + n(peak)}%`,
-            stopLevel: stopLevel === null ? '비활성(수익 미확보)' : `${(stopLevel >= 0 ? '+' : '') + n(stopLevel)}%`,
+            stopLevel: stopLevel === null ? '비활성(수익 미확보)' : `+${n(stopLevel)}%`,
           },
         };
       });
