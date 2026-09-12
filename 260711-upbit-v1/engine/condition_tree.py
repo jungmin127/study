@@ -123,6 +123,17 @@ def apply_operator(value: float, operator: str, threshold: float) -> bool:
 # eval_group_values()(라이브, 평가된 값 dict)는 로직이 같다. 새 operator나 새
 # position-relative 특수 케이스를 추가할 때는 반드시 두 함수 모두 수정할 것 —
 # 하나만 고치면 조용히 어긋난다.
+def trailing_stop_step_level(peak_return_pct: float, step_pct: float) -> float | None:
+    """계단식 트레일링 스탑의 현재 손절선(%)을 계산한다. step_pct<=0이면 None(항상
+    미발동을 뜻함) — 호출부가 결과를 그대로 bool 판정에 쓸 수 있도록 None 처리는
+    호출부 책임으로 남긴다. 백테스트(eval_group)와 라이브(eval_group_values,
+    trading/signal_engine.py의 matched_risk_exit_indicator)가 모두 이 함수를
+    공유해 공식이 갈라지지 않게 한다."""
+    if step_pct <= 0:
+        return None
+    return (math.floor(peak_return_pct / step_pct) - 1) * step_pct
+
+
 def eval_group(
     group: dict,
     indicators: dict[str, bt.Indicator],
@@ -159,11 +170,10 @@ def eval_group(
                 # 무시한다(UI는 "<=" 고정으로 혼란을 막는다). 설계 근거:
                 # docs/superpowers/specs_v2/2026-09-11-trailing-stop-step-design.md
                 step = float(item["threshold"])
-                if position_return_pct is None or position_peak_return_pct is None or step <= 0:
-                    results.append(False)
-                else:
-                    stop_level = (math.floor(position_peak_return_pct / step) - 1) * step
-                    results.append(position_return_pct <= stop_level)
+                stop_level = None
+                if position_return_pct is not None and position_peak_return_pct is not None:
+                    stop_level = trailing_stop_step_level(position_peak_return_pct, step)
+                results.append(stop_level is not None and position_return_pct <= stop_level)
                 continue
             if item["indicator"] in POSITION_RELATIVE_INDICATORS:
                 if position_return_pct is None:
@@ -224,11 +234,10 @@ def eval_group_values(
             if item["indicator"] == "TRAILING_STOP_STEP_PCT":
                 # eval_group()과 동일 로직 — 쌍둥이 함수, 둘 다 고칠 것.
                 step = float(item["threshold"])
-                if position_return_pct is None or position_peak_return_pct is None or step <= 0:
-                    results.append(False)
-                else:
-                    stop_level = (math.floor(position_peak_return_pct / step) - 1) * step
-                    results.append(position_return_pct <= stop_level)
+                stop_level = None
+                if position_return_pct is not None and position_peak_return_pct is not None:
+                    stop_level = trailing_stop_step_level(position_peak_return_pct, step)
+                results.append(stop_level is not None and position_return_pct <= stop_level)
                 continue
             if item["indicator"] in POSITION_RELATIVE_INDICATORS:
                 if position_return_pct is None:

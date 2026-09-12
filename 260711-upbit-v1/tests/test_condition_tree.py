@@ -11,6 +11,7 @@ from engine.condition_tree import (
     is_empty,
     max_required_period,
     required_aux_markets,
+    trailing_stop_step_level,
 )
 from engine.indicators import INDICATOR_FACTORY
 from engine.runner import AUX_MARKET_LINE_NAME
@@ -499,3 +500,14 @@ def test_eval_group_trailing_stop_step_pct_matches_eval_group_values():
     }
     assert eval_group(tree, {}, position_return_pct=11.0, position_peak_return_pct=16.0) is False
     assert eval_group(tree, {}, position_return_pct=9.0, position_peak_return_pct=16.0) is True
+
+
+def test_trailing_stop_step_level_computes_stepped_stop_level():
+    assert trailing_stop_step_level(16.0, 5.0) == 10.0
+    assert trailing_stop_step_level(6.0, 5.0) == 0.0
+    assert trailing_stop_step_level(3.0, 5.0) == -5.0
+
+
+def test_trailing_stop_step_level_returns_none_for_invalid_step():
+    assert trailing_stop_step_level(16.0, 0.0) is None
+    assert trailing_stop_step_level(16.0, -5.0) is None
