@@ -820,6 +820,169 @@ async def test_run_risk_exit_loop_triggers_exit_for_risk_when_stop_loss_breached
     assert cb_calls["n"] == 1  # action=="exited"이면 서킷브레이커 판정도 호출돼야 한다
 
 
+async def test_run_risk_exit_loop_triggers_exit_for_risk_when_trailing_stop_step_breached(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    captured = {}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 58_000_000.0}  # +16%, 고점 형성
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 54_500_000.0}  # +9%, stop_level(10%) 이하 -> 매치
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        captured.update(strategy_id=strategy["id"], price=price, reason=reason)
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert captured["reason"] == "trailing_stop_step_pct"
+    assert captured["price"] == 54_500_000.0
+
+
+async def test_run_risk_exit_loop_does_not_trigger_trailing_stop_before_first_step(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5},
+        ]}),
+    )
+    position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    exit_calls = {"n": 0}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 51_000_000.0}  # +2%, 아직 step 미달
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        exit_calls["n"] += 1
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert exit_calls["n"] == 0
+
+
+async def test_run_risk_exit_loop_flushes_peak_return_pct_only_after_interval_elapses(monkeypatch, tmp_path):
+    """peak은 매 tick 메모리에서 갱신되지만, DB flush는 _PEAK_FLUSH_INTERVAL_SEC가
+    지나야 일어난다(스로틀 — sqlite 동시쓰기 부하 완화, Phase 2 설계 스펙 결정5)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5},
+        ]}),
+    )
+    position_id = position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    clock = {"value": 0.0}
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["value"])
+    # daemon.py의 바깥 try/except가 async 제너레이터 본체에서 던져진 예외를 로그만
+    # 남기고 삼켜버리므로(Important 5, stream_ticker 자체 예외 처리), 제너레이터
+    # 안에서 직접 assert하면 실패가 조용히 사라져 테스트가 거짓으로 통과할 수 있다
+    # — 그래서 값만 스냅샷으로 모아두고, 실제 assert는 루프가 끝난 뒤 밖에서 한다.
+    snapshots = []
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 55_000_000.0}  # +10%
+        snapshots.append(dbm.get_position(position_id)["peak_return_pct"])
+        clock["value"] += daemon._PEAK_FLUSH_INTERVAL_SEC
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 55_000_000.0}  # 여전히 +10%
+        snapshots.append(dbm.get_position(position_id)["peak_return_pct"])
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert snapshots == [0, 10.0]  # 첫 tick 직후엔 미경과라 flush 안 됨, 두 번째 tick에서 flush됨
+
+
+async def test_run_risk_exit_loop_flushes_peak_return_pct_immediately_before_exit(monkeypatch, tmp_path):
+    """청산이 트리거되면 주기적 flush 타이밍과 무관하게 그 즉시 고점을 DB에 남긴다
+    (Phase 2 설계 스펙 "청산 직전 강제 flush")."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5},
+        ]}),
+    )
+    position_id = position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 58_000_000.0}  # +16%, 고점 형성
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 54_500_000.0}  # +9%, 즉시 청산 트리거
+
+    async def fake_exit_for_risk(strategy, position, price, reason, **kwargs):
+        return {"action": "exited", "order_id": "o1"}
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+    monkeypatch.setattr(order_executor, "exit_for_risk", fake_exit_for_risk)
+    monkeypatch.setattr(risk_manager, "check_circuit_breaker", lambda sid, cfg: None)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    # _PEAK_FLUSH_INTERVAL_SEC(30초)이 전혀 안 지났어도, 청산 직전 강제 flush로
+    # 실제 청산을 유발한 고점(16%)이 DB에 남아있어야 한다.
+    assert dbm.get_position(position_id)["peak_return_pct"] == 16.0
+
+
+async def test_run_risk_exit_loop_resets_peak_tracking_when_position_changes(monkeypatch, tmp_path):
+    """포지션이 청산 후 새로 진입하면(같은 전략, 새 position id) 로컬 고점 추적이
+    새 포지션의 DB 값(0)에서 다시 시작해야 한다 — 옛 포지션의 고점을 새 포지션에
+    그대로 이어받으면 안 된다(계단식 트레일링 스탑 Phase 2 설계 스펙 "에러 처리 /
+    엣지 케이스 — 포지션 전환"). threshold=50으로 넉넉히 잡아 이 테스트 동안 실제
+    청산은 트리거되지 않게 한다(청산 로직이 아니라 순수 peak 리셋만 검증)."""
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(
+        dbm, status="running", market="KRW-BTC",
+        sell_conditions_json=json.dumps({"type": "OR", "conditions": [
+            {"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 50},
+        ]}),
+    )
+    first_position_id = position_manager.open_position(strategy_id, "KRW-BTC", 50_000_000.0, 0.01)
+    clock = {"value": 0.0}
+    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["value"])
+    second_position_id_holder = {}
+    # daemon.py의 바깥 try/except가 async 제너레이터 본체에서 던져진 예외를 로그만
+    # 남기고 삼켜버리므로(Important 5), 제너레이터 안에서 직접 assert하지 않고
+    # 값만 스냅샷으로 모아 루프가 끝난 뒤 밖에서 assert한다.
+    first_position_peak_after_flush = {}
+
+    async def fake_stream_ticker(markets):
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 58_000_000.0}  # +16%, 고점 형성
+        clock["value"] += daemon._PEAK_FLUSH_INTERVAL_SEC
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 58_000_000.0}  # flush 트리거
+        first_position_peak_after_flush["value"] = dbm.get_position(first_position_id)["peak_return_pct"]
+        # 첫 포지션 청산 후 새 포지션 진입(별도 id) — daemon 바깥(예: 신호 기반
+        # 매도+매수)에서 벌어지는 상황을 흉내낸다.
+        dbm.close_position_row(first_position_id, 58_000_000.0, 0.01, 0.0, 16.0, "signal")
+        second_position_id = position_manager.open_position(strategy_id, "KRW-BTC", 60_000_000.0, 0.01)
+        second_position_id_holder["id"] = second_position_id
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 60_600_000.0}  # 새 포지션 +1%
+        clock["value"] += daemon._PEAK_FLUSH_INTERVAL_SEC
+        yield {"type": "ticker", "code": "KRW-BTC", "trade_price": 60_600_000.0}  # flush 트리거
+
+    monkeypatch.setattr(upbit_ws, "stream_ticker", fake_stream_ticker)
+
+    await daemon._run_risk_exit_loop(strategy_id)
+
+    assert first_position_peak_after_flush["value"] == 16.0
+    # 새 포지션의 고점은 옛 포지션의 16%를 이어받지 않고 1%에서 시작해야 한다.
+    assert dbm.get_position(second_position_id_holder["id"])["peak_return_pct"] == 1.0
+
+
 async def test_run_risk_exit_loop_picks_up_sell_conditions_changed_mid_stream(monkeypatch, tmp_path):
     """전략 교체 등으로 sell_conditions_json이 태스크 시작 후 바뀌면, 다음 tick부터는
     바뀐(최신) 매도조건 기준으로 손절/익절을 판단해야 한다 — 함수 시작 시점에 한 번

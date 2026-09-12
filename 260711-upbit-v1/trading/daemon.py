@@ -44,6 +44,12 @@ _AUTOSWAP_CHECK_INTERVAL_SEC = 600  # 10분 — 판정 기준이 1시간봉이�
 # 쿨다운으로 재시도 간격을 최소 이만큼 벌린다(최종 브랜치 리뷰 Critical 1).
 _RISK_EXIT_RETRY_COOLDOWN_SEC = 30
 
+# 고점(peak_return_pct)은 매 tick 메모리에서 갱신하지만, DB에는 이 간격으로만
+# flush한다 — tick마다 SQLite에 쓰면 daemon과의 동시쓰기 부하가 커진다(계단식
+# 트레일링 스탑 Phase 2 설계 스펙 결정5). 실제 청산 트리거 직전에는 이 간격과
+# 무관하게 항상 강제로 flush한다.
+_PEAK_FLUSH_INTERVAL_SEC = 30
+
 
 def _poll_interval_sec(timeframe: str) -> float:
     """봉타임에 비례한 폴링 주기(설계 스펙 결정4). 1분봉=5초, 3분봉=15초, 15분봉
@@ -208,6 +214,15 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
     # 동일한 이유 — time.monotonic()으로 초기화하면 그 함수가 monkeypatch된 테스트에서
     # now - last_risk_exit_attempt가 항상 0이 돼 쿨다운 경과를 절대 감지 못 한다).
     last_risk_exit_attempt = float("-inf")
+    tracked_position_id: str | None = None
+    local_peak_return_pct: float = 0.0
+    # last_risk_exit_attempt와 반대로 -inf가 아니라 실제 time.monotonic()으로
+    # 시작한다 — 첫 tick에서도 반드시 시도해야 하는 손절/익절 트리거와 달리,
+    # 고점 flush는 지연돼도 안전(의사결정 자체는 메모리의 local_peak_return_pct를
+    # 그대로 쓰므로 지연과 무관)하고, -inf로 시작하면 이 함수가 시작되자마자
+    # 첫 tick에서 무조건 flush돼 "주기적으로만 flush한다"는 스로틀 의도가
+    # 첫 tick에서 깨진다.
+    last_peak_flush = time.monotonic()
     try:
         async for tick in upbit_ws.stream_ticker([market]):
             try:
@@ -220,6 +235,18 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                 position = position_manager.get_open_position(strategy_id)
                 if position is None:
                     continue
+                # 포지션이 바뀌었으면(신규 진입 또는 이 태스크의 첫 tick) 로컬 고점
+                # 추적을 DB에 남아있던 값에서 이어서 시작한다(계단식 트레일링 스탑
+                # Phase 2 설계 스펙 — daemon 재시작 시에도 마지막 flush 값부터 재개).
+                if position["id"] != tracked_position_id:
+                    tracked_position_id = position["id"]
+                    local_peak_return_pct = position["peak_return_pct"]
+                tick_return_pct = (trade_price - position["entry_price"]) / position["entry_price"] * 100
+                local_peak_return_pct = max(local_peak_return_pct, tick_return_pct)
+                now_for_peak_flush = time.monotonic()
+                if now_for_peak_flush - last_peak_flush >= _PEAK_FLUSH_INTERVAL_SEC:
+                    db.update_position_peak_return_pct(position["id"], local_peak_return_pct)
+                    last_peak_flush = now_for_peak_flush
                 # 라이브 전략 "전략 교체" 기능이 실행 중(running/paused)인 전략의
                 # sell_conditions를 제자리에서 바꿀 수 있게 되면서, 함수 시작 시점에
                 # 한 번만 읽은 sell_conditions를 계속 재사용하면 교체 이후에도 옛
@@ -233,10 +260,10 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                 if current_strategy is None:
                     continue
                 current_sell_conditions = json.loads(current_strategy["sell_conditions_json"])
-                position_return_pct = (
-                    (trade_price - position["entry_price"]) / position["entry_price"] * 100
+                position_return_pct = tick_return_pct
+                matched = signal_engine.matched_risk_exit_indicator(
+                    current_sell_conditions, position_return_pct, local_peak_return_pct,
                 )
-                matched = signal_engine.matched_risk_exit_indicator(current_sell_conditions, position_return_pct)
                 if matched is None:
                     continue
                 # 쿨다운 사전필터 — 로컬 태스크 변수만 보므로 lock 밖에서 걸러도 안전하다
@@ -280,12 +307,16 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                     fresh_position_return_pct = (
                         (trade_price - fresh_position["entry_price"]) / fresh_position["entry_price"] * 100
                     )
+                    # peak도 fresh 값 기준으로 재확인한다(3라운드 M3와 동일 원칙) —
+                    # local_peak_return_pct(락 밖에서 갱신된 값)와 방금 다시 계산한
+                    # fresh_position_return_pct 중 큰 값을 쓴다.
+                    fresh_peak_return_pct = max(local_peak_return_pct, fresh_position_return_pct)
                     # 위 tick-loop 재읽기와 같은 이유로, lock 안의 최종 판단도 바깥
                     # 스코프의 stale한 sell_conditions가 아니라 방금 다시 읽은
                     # fresh_strategy 기준으로 해야 한다.
                     fresh_sell_conditions = json.loads(fresh_strategy["sell_conditions_json"])
                     fresh_matched = signal_engine.matched_risk_exit_indicator(
-                        fresh_sell_conditions, fresh_position_return_pct,
+                        fresh_sell_conditions, fresh_position_return_pct, fresh_peak_return_pct,
                     )
                     if fresh_matched is None:
                         continue
@@ -301,6 +332,12 @@ async def _run_risk_exit_loop(strategy_id: str, lock: asyncio.Lock | None = None
                     # 소모하지 않는다 — 상태가 정상으로 돌아오자마자 곧바로 재시도할 수
                     # 있어야 한다.
                     last_risk_exit_attempt = now
+                    # 주기적 flush 타이밍과 무관하게, 실제로 청산을 유발한 고점 값을
+                    # 청산 직전에 반드시 DB에 남긴다(계단식 트레일링 스탑 Phase 2
+                    # 설계 스펙 — "청산 직전 강제 flush").
+                    db.update_position_peak_return_pct(fresh_position["id"], fresh_peak_return_pct)
+                    local_peak_return_pct = fresh_peak_return_pct
+                    last_peak_flush = now
                     result = await order_executor.exit_for_risk(
                         fresh_strategy, fresh_position, trade_price, fresh_matched.lower(),
                     )
