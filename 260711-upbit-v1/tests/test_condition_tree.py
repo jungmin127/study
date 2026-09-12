@@ -465,14 +465,16 @@ def test_eval_group_values_trailing_stop_step_pct_computes_stepped_stop_level():
 
 
 def test_eval_group_values_trailing_stop_step_pct_not_yet_armed_before_first_step():
-    # peak=+3%, step=5 -> floor(3/5)=0 -> stop_level=(0-1)*5=-5 (사실상 미발동,
-    # 같은 매도조건 그룹의 STOP_LOSS_PCT가 먼저 걸리는 게 자연스러운 폴백)
+    # peak=+3%, step=5 -> 고점이 아직 한 스텝(5%)도 못 넘었으므로 손절 용도로
+    # 오작동하지 않도록 완전히 비활성(항상 False) — 본전부터 활성화 정책
+    # (사용자 결정 2026-09-12, docs/superpowers/references/trailing-stop-step-pct-arming-policy.md).
     tree = {
         "type": "AND",
         "conditions": [{"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5}],
     }
     assert eval_group_values(tree, {}, position_return_pct=-4.0, position_peak_return_pct=3.0) is False
-    assert eval_group_values(tree, {}, position_return_pct=-6.0, position_peak_return_pct=3.0) is True
+    assert eval_group_values(tree, {}, position_return_pct=-6.0, position_peak_return_pct=3.0) is False
+    assert eval_group_values(tree, {}, position_return_pct=-100.0, position_peak_return_pct=3.0) is False
 
 
 def test_eval_group_values_trailing_stop_step_pct_false_without_position_or_peak():
@@ -505,9 +507,18 @@ def test_eval_group_trailing_stop_step_pct_matches_eval_group_values():
 def test_trailing_stop_step_level_computes_stepped_stop_level():
     assert trailing_stop_step_level(16.0, 5.0) == 10.0
     assert trailing_stop_step_level(6.0, 5.0) == 0.0
-    assert trailing_stop_step_level(3.0, 5.0) == -5.0
 
 
 def test_trailing_stop_step_level_returns_none_for_invalid_step():
     assert trailing_stop_step_level(16.0, 0.0) is None
     assert trailing_stop_step_level(16.0, -5.0) is None
+
+
+def test_trailing_stop_step_level_not_armed_until_peak_clears_first_step():
+    # 본전부터 활성화 정책(사용자 결정 2026-09-12): 고점이 한 스텝도 못 넘으면
+    # 계산값이 음수(원금 손실 구간)가 되므로, 손절 용도로 오작동하지 않도록
+    # None(비활성)을 반환한다. 한 스텝을 넘는 순간부터는 0%(본전) 이상만 나온다.
+    assert trailing_stop_step_level(0.0, 5.0) is None
+    assert trailing_stop_step_level(3.0, 5.0) is None
+    assert trailing_stop_step_level(4.999, 5.0) is None
+    assert trailing_stop_step_level(5.0, 5.0) == 0.0

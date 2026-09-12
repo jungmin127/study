@@ -128,10 +128,19 @@ def trailing_stop_step_level(peak_return_pct: float, step_pct: float) -> float |
     미발동을 뜻함) — 호출부가 결과를 그대로 bool 판정에 쓸 수 있도록 None 처리는
     호출부 책임으로 남긴다. 백테스트(eval_group)와 라이브(eval_group_values,
     trading/signal_engine.py의 matched_risk_exit_indicator)가 모두 이 함수를
-    공유해 공식이 갈라지지 않게 한다."""
+    공유해 공식이 갈라지지 않게 한다.
+
+    본전부터 활성화 정책(사용자 결정 2026-09-12): 고점이 아직 한 스텝도 못 넘으면
+    원래 공식이 음수(원금 손실 구간)를 반환해 손절 용도로 오작동한다 — 이 트레일링
+    스탑은 "이미 난 수익을 계단식으로 잠그는" 용도로만 쓰기 위한 것이므로, 그 경우
+    None(비활성)을 반환해 STOP_LOSS_PCT 같은 별도 손절 조건에게 판단을 맡긴다.
+    고점이 한 스텝을 넘는 순간부터는 0%(본전) 이상만 반환된다."""
     if step_pct <= 0:
         return None
-    return (math.floor(peak_return_pct / step_pct) - 1) * step_pct
+    level = (math.floor(peak_return_pct / step_pct) - 1) * step_pct
+    if level < 0:
+        return None
+    return level
 
 
 def eval_group(
