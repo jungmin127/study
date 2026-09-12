@@ -1149,6 +1149,70 @@ def test_connect_adds_entry_fee_column_to_existing_positions_table(monkeypatch, 
     assert row[0] == 0
 
 
+def test_connect_adds_peak_return_pct_column_to_existing_positions_table(monkeypatch, tmp_path):
+    """peak_return_pct도 entry_fee와 동일하게 실거래 중인 프로덕션 DB에 ALTER TABLE로
+    적용해야 하는 무마이그레이션 정책의 예외다."""
+    db = _fresh_db(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db.DB_PATH)
+    conn.execute("""
+        CREATE TABLE positions (
+            id               TEXT PRIMARY KEY,
+            live_strategy_id TEXT NOT NULL,
+            market           TEXT NOT NULL,
+            status           TEXT NOT NULL DEFAULT 'open',
+            entry_price      REAL,
+            entry_qty        REAL,
+            entry_fee        REAL NOT NULL DEFAULT 0,
+            entry_time       TEXT,
+            exit_price       REAL,
+            exit_qty         REAL,
+            exit_time        TEXT,
+            realized_pnl     REAL,
+            realized_pnl_pct REAL,
+            close_reason     TEXT,
+            stale_resolved_qty      REAL NOT NULL DEFAULT 0,
+            stale_resolved_proceeds REAL NOT NULL DEFAULT 0,
+            stale_resolved_fee      REAL NOT NULL DEFAULT 0,
+            created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("INSERT INTO positions (id, live_strategy_id, market) VALUES ('p1', 's1', 'KRW-BTC')")
+    conn.commit()
+    conn.close()
+
+    db._connect()
+
+    conn = sqlite3.connect(db.DB_PATH)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
+        row = conn.execute("SELECT peak_return_pct FROM positions WHERE id = 'p1'").fetchone()
+    finally:
+        conn.close()
+    assert "peak_return_pct" in columns
+    assert row[0] == 0
+
+
+def test_update_position_peak_return_pct_updates_open_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+
+    db.update_position_peak_return_pct(position_id, 12.5)
+
+    assert db.get_position(position_id)["peak_return_pct"] == 12.5
+
+
+def test_update_position_peak_return_pct_ignores_closed_position(monkeypatch, tmp_path):
+    db = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(db)
+    position_id = db.insert_position(strategy_id, "KRW-BTC", 100_000_000.0, 0.01)
+    db.close_position_row(position_id, 101_000_000.0, 0.01, 9500.0, 0.95, "signal")
+
+    db.update_position_peak_return_pct(position_id, 12.5)
+
+    assert db.get_position(position_id)["peak_return_pct"] == 0  # 닫힌 포지션엔 쓰지 않음
+
+
 def test_connect_adds_deleted_at_column_to_existing_live_strategies_table(monkeypatch, tmp_path):
     """deleted_at도 entry_fee와 동일하게 실거래 중인 프로덕션 DB에 ALTER TABLE로
     적용해야 하는 무마이그레이션 정책의 예외다."""

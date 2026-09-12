@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS positions (
     entry_price      REAL,
     entry_qty        REAL,
     entry_fee        REAL NOT NULL DEFAULT 0,
+    peak_return_pct  REAL NOT NULL DEFAULT 0,
     entry_time       TEXT,
     exit_price       REAL,
     exit_qty         REAL,
@@ -290,6 +291,25 @@ def _ensure_live_strategies_active_regime_column(conn: sqlite3.Connection) -> No
     conn.commit()
 
 
+def _ensure_positions_peak_return_pct_column(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS는 이미 존재하는 positions 테이블에 새 컬럼
+    peak_return_pct를 추가하지 못한다. entry_fee와 동일한 이유로(AWS에서 실거래
+    중인 프로덕션 DB라 파일을 지울 수 없음) ALTER TABLE로 직접 추가한다 — 기존
+    오픈 포지션은 DEFAULT 0에서 추적을 재개한다(마이그레이션 시점 이후의 실제
+    고점보다 낮게 시작할 수 있음, 알려진 한계 — 계단식 트레일링 스탑 Phase 2
+    설계 스펙 참고)."""
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='positions'"
+    ).fetchone() is not None
+    if not table_exists:
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('positions')")}
+    if "peak_return_pct" in columns:
+        return
+    conn.execute("ALTER TABLE positions ADD COLUMN peak_return_pct REAL NOT NULL DEFAULT 0")
+    conn.commit()
+
+
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -303,6 +323,7 @@ def _connect() -> sqlite3.Connection:
         _ensure_live_strategies_deleted_at_column(conn)
         _ensure_live_strategies_auto_swap_enabled_column(conn)
         _ensure_live_strategies_active_regime_column(conn)
+        _ensure_positions_peak_return_pct_column(conn)
         _initialized_paths.add(DB_PATH)
     return conn
 
@@ -746,6 +767,20 @@ def adjust_position_qty(
                 "UPDATE positions SET entry_qty = ? WHERE id = ? AND status = 'open'",
                 (new_qty, position_id),
             )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_position_peak_return_pct(position_id: str, peak_return_pct: float) -> None:
+    """열려있는 포지션의 고점 수익률을 갱신한다. status='open' 가드로 이미 닫힌
+    포지션에 대한 뒤늦은 쓰기를 무시한다(daemon 쿨다운/재시도 경합 시 안전)."""
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE positions SET peak_return_pct = ? WHERE id = ? AND status = 'open'",
+            (peak_return_pct, position_id),
+        )
         conn.commit()
     finally:
         conn.close()
