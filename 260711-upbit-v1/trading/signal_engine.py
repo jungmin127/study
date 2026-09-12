@@ -23,6 +23,7 @@ from engine.condition_tree import (
     indicator_key,
     max_required_period,
     required_aux_markets,
+    trailing_stop_step_level,
 )
 from upbit_data_service import get_candles, timeframe_duration
 from trading.live_indicators import (
@@ -147,22 +148,27 @@ def _compute_indicator_values(df: pd.DataFrame, blocks: list[dict]) -> dict[str,
 
 def _position_context(
     live_strategy_id: str, latest_close: float, latest_candle_time, timeframe: str,
-) -> tuple[float | None, int | None]:
-    """오픈 포지션이 있으면 (수익률%, 보유 봉 수)를, 없으면 (None, None)을 반환한다
-    (STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS 평가용, 설계 스펙 결정7)."""
+) -> tuple[float | None, int | None, float | None]:
+    """오픈 포지션이 있으면 (수익률%, 보유 봉 수, 고점 수익률%)를, 없으면
+    (None, None, None)을 반환한다(STOP_LOSS_PCT/TAKE_PROFIT_PCT/HOLDING_PERIOD_BARS/
+    TRAILING_STOP_STEP_PCT 평가용, 설계 스펙 결정7 + Phase 2). 고점은 daemon의
+    실시간 리스크 청산 루프가 주기적으로 flush해둔 `positions.peak_return_pct`와
+    방금 계산한 현재 수익률 중 큰 값이다 — 마지막 flush 이후의 지연을 봉 마감
+    시점에 즉석 보정한다(추가 DB 쓰기 없이 읽기만으로 보정)."""
     position = get_open_position(live_strategy_id)
     if position is None:
-        return None, None
+        return None, None, None
 
     entry_price = position["entry_price"]
     position_return_pct = (latest_close - entry_price) / entry_price * 100
+    position_peak_return_pct = max(position["peak_return_pct"], position_return_pct)
 
     entry_time = _to_utc_timestamp(position["entry_time"])
     candle_time = _to_utc_timestamp(latest_candle_time)
     elapsed = candle_time - entry_time
     position_holding_bars = max(int(elapsed / timeframe_duration(timeframe)), 0)
 
-    return position_return_pct, position_holding_bars
+    return position_return_pct, position_holding_bars, position_peak_return_pct
 
 
 def _no_new_candle_result() -> dict:
@@ -223,12 +229,16 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
     values = _compute_indicator_values(df, blocks)
 
     latest_close = df["close"].iloc[-1]
-    position_return_pct, position_holding_bars = _position_context(
+    position_return_pct, position_holding_bars, position_peak_return_pct = _position_context(
         live_strategy_id, latest_close, latest_candle_time, timeframe,
     )
 
-    buy_result = eval_group_values(buy_conditions, values, position_return_pct, position_holding_bars)
-    sell_result = eval_group_values(sell_conditions, values, position_return_pct, position_holding_bars)
+    buy_result = eval_group_values(
+        buy_conditions, values, position_return_pct, position_holding_bars, position_peak_return_pct,
+    )
+    sell_result = eval_group_values(
+        sell_conditions, values, position_return_pct, position_holding_bars, position_peak_return_pct,
+    )
 
     snapshot_json = json.dumps({k: (None if v != v else v) for k, v in values.items()})
     candle_time_str = latest_candle_time.isoformat()
@@ -293,7 +303,7 @@ def evaluate_signals(live_strategy_id: str, now: datetime | None = None) -> dict
     }
 
 
-_TICKER_RISK_INDICATORS = {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT"}
+_TICKER_RISK_INDICATORS = {"STOP_LOSS_PCT", "TAKE_PROFIT_PCT", "TRAILING_STOP_STEP_PCT"}
 
 
 def has_risk_exit_conditions(sell_conditions: dict) -> bool:
@@ -303,12 +313,29 @@ def has_risk_exit_conditions(sell_conditions: dict) -> bool:
     return any(b["indicator"] in _TICKER_RISK_INDICATORS for b in collect_blocks(sell_conditions))
 
 
-def matched_risk_exit_indicator(sell_conditions: dict, position_return_pct: float) -> str | None:
-    """STOP_LOSS_PCT/TAKE_PROFIT_PCT를 sell_conditions_json 안의 다른 조건과의 AND/OR
-    결합과 무관하게 독립 안전망으로 평가한다(⑤-4c 설계 스펙 결정1). 위반된 블록의
-    indicator 이름(트리에서 먼저 발견된 것)을 반환, 없으면 None. daemon.py가 반환값을
-    order_executor.exit_for_risk()의 close_reason 기록에 그대로 쓴다."""
+def matched_risk_exit_indicator(
+    sell_conditions: dict, position_return_pct: float,
+    position_peak_return_pct: float | None = None,
+) -> str | None:
+    """STOP_LOSS_PCT/TAKE_PROFIT_PCT/TRAILING_STOP_STEP_PCT를 sell_conditions_json 안의
+    다른 조건과의 AND/OR 결합과 무관하게 독립 안전망으로 평가한다(⑤-4c 설계 스펙
+    결정1, TRAILING_STOP_STEP_PCT는 Phase 2). 위반된 블록의 indicator 이름(트리에서
+    먼저 발견된 것)을 반환, 없으면 None. daemon.py가 반환값을
+    order_executor.exit_for_risk()의 close_reason 기록에 그대로 쓴다.
+
+    TRAILING_STOP_STEP_PCT는 STOP_LOSS_PCT/TAKE_PROFIT_PCT처럼 apply_operator로
+    바로 비교할 수 없다(손절선 자체가 고점에서 매번 새로 계산되는 이동값 —
+    engine/condition_tree.py의 eval_group()과 동일 이유). position_peak_return_pct가
+    None이면(daemon이 아직 고점을 안 넘겼거나 이 호출부가 고점을 모르는 경우)
+    이 지표는 항상 미발동으로 취급한다."""
     for block in collect_blocks(sell_conditions):
+        if block["indicator"] == "TRAILING_STOP_STEP_PCT":
+            if position_peak_return_pct is None:
+                continue
+            stop_level = trailing_stop_step_level(position_peak_return_pct, float(block["threshold"]))
+            if stop_level is not None and position_return_pct <= stop_level:
+                return block["indicator"]
+            continue
         if block["indicator"] in _TICKER_RISK_INDICATORS:
             if apply_operator(position_return_pct, block["operator"], float(block["threshold"])):
                 return block["indicator"]

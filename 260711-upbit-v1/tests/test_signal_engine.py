@@ -160,7 +160,7 @@ def test_compute_indicator_values_dedupes_same_indicator_key():
     assert len(values) == 1
 
 
-def test_position_context_returns_none_none_when_no_open_position(monkeypatch, tmp_path):
+def test_position_context_returns_none_none_none_when_no_open_position(monkeypatch, tmp_path):
     dbm = _fresh_db(monkeypatch, tmp_path)
     strategy_id = insert_live_strategy(dbm)
 
@@ -168,7 +168,7 @@ def test_position_context_returns_none_none_when_no_open_position(monkeypatch, t
         strategy_id, 100.0, datetime.now(timezone.utc), "minutes60",
     )
 
-    assert result == (None, None)
+    assert result == (None, None, None)
 
 
 def test_position_context_computes_return_pct_and_holding_bars(monkeypatch, tmp_path):
@@ -177,12 +177,32 @@ def test_position_context_computes_return_pct_and_holding_bars(monkeypatch, tmp_
     open_position(strategy_id, "KRW-BTC", 100.0, 1.0)  # entry_time = DB의 datetime('now')
 
     latest_candle_time = datetime.now(timezone.utc) + timedelta(hours=3)
-    return_pct, holding_bars = signal_engine._position_context(
+    return_pct, holding_bars, peak = signal_engine._position_context(
         strategy_id, 110.0, latest_candle_time, "minutes60",
     )
 
     assert return_pct == pytest.approx(10.0)
     assert holding_bars == 3  # 3시간 경과를 60분봉으로 나누면 3 (180분 / 60분 = 3)
+    assert peak == pytest.approx(10.0)  # 저장된 고점(0)보다 현재 수익률(10%)이 높음
+
+
+def test_position_context_returns_max_of_stored_and_current_return_as_peak(monkeypatch, tmp_path):
+    dbm = _fresh_db(monkeypatch, tmp_path)
+    strategy_id = insert_live_strategy(dbm)
+    position_id = open_position(strategy_id, "KRW-BTC", 100.0, 1.0)
+    dbm.update_position_peak_return_pct(position_id, 20.0)  # daemon이 이전에 flush해둔 값
+
+    # 지금 종가 기준 수익률(10%)은 저장된 고점(20%)보다 낮다 -> 저장된 값을 유지해야 함
+    _, _, peak = signal_engine._position_context(
+        strategy_id, 110.0, datetime.now(timezone.utc), "minutes60",
+    )
+    assert peak == 20.0
+
+    # 지금 종가 기준 수익률(30%)이 저장된 고점(20%)보다 높다 -> 방금 계산한 값을 써야 함
+    _, _, peak = signal_engine._position_context(
+        strategy_id, 130.0, datetime.now(timezone.utc), "minutes60",
+    )
+    assert peak == 30.0
 
 
 import json
@@ -589,3 +609,32 @@ def test_matched_risk_exit_indicator_ignores_holding_period_bars():
         {"indicator": "HOLDING_PERIOD_BARS", "params": {}, "operator": ">=", "threshold": 1},
     ]}
     assert signal_engine.matched_risk_exit_indicator(sell, -100.0) is None
+
+
+def test_matched_risk_exit_indicator_returns_trailing_stop_when_breached():
+    sell = {"type": "OR", "conditions": [
+        {"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5},
+    ]}
+    # peak=16%, step=5 -> stop_level=10%. 현재 수익률 9%는 그 이하이므로 매치돼야 한다.
+    assert signal_engine.matched_risk_exit_indicator(
+        sell, position_return_pct=9.0, position_peak_return_pct=16.0,
+    ) == "TRAILING_STOP_STEP_PCT"
+
+
+def test_matched_risk_exit_indicator_returns_none_when_trailing_stop_not_breached():
+    sell = {"type": "OR", "conditions": [
+        {"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5},
+    ]}
+    # peak=16%, step=5 -> stop_level=10%. 현재 수익률 11%는 그 위이므로 매치되지 않아야 한다.
+    assert signal_engine.matched_risk_exit_indicator(
+        sell, position_return_pct=11.0, position_peak_return_pct=16.0,
+    ) is None
+
+
+def test_matched_risk_exit_indicator_ignores_trailing_stop_without_peak():
+    sell = {"type": "OR", "conditions": [
+        {"indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 5},
+    ]}
+    # position_peak_return_pct를 안 넘기면(기본값 None) 항상 미발동이어야 한다
+    # (기존 호출부와의 하위호환 확인).
+    assert signal_engine.matched_risk_exit_indicator(sell, position_return_pct=-100.0) is None
