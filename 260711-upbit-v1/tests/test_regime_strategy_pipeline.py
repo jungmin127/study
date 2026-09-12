@@ -76,12 +76,27 @@ def test_augment_with_tp_sl_preserves_base_and_adds_or_blocks():
     result = augment_with_tp_sl(base_sell, stop_loss_pct=-5, take_profit_pct=8)
 
     assert result["type"] == "OR"
+    assert len(result["conditions"]) == 3
     assert result["conditions"][0] == base_sell
     assert result["conditions"][1] == {
         "indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": -5,
     }
     assert result["conditions"][2] == {
         "indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": 8,
+    }
+
+
+def test_augment_with_tp_sl_adds_trailing_stop_step_when_given():
+    base_sell = {
+        "type": "AND",
+        "conditions": [{"indicator": "RSI", "params": {"period": 14}, "operator": ">", "threshold": 70}],
+    }
+
+    result = augment_with_tp_sl(base_sell, stop_loss_pct=-5, take_profit_pct=8, trailing_stop_step_pct=3)
+
+    assert len(result["conditions"]) == 4
+    assert result["conditions"][3] == {
+        "indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=", "threshold": 3,
     }
 
 
@@ -155,12 +170,17 @@ def _candidate(return_pct: float, n_trades: int) -> dict:
     }
 
 
-def test_pick_final_strategy_accepts_first_passing_candidate(monkeypatch):
+def test_pick_final_strategy_tries_all_candidates_and_picks_highest_return(monkeypatch):
+    # 그리드서치 철학: 순서상 먼저 통과하는 후보가 아니라, 조건을 만족하는 후보 전체
+    # 중 최종 수익률이 가장 높은 것을 채택한다 — 그래서 raw_return_pct가 더 낮은
+    # 두 번째 후보(8.0)가 증강 후 실제로는 더 높은 수익률(final_value 1_200_000)을
+    # 내면 그쪽이 채택돼야 한다.
     call_count = {"n": 0}
 
     def fake_run_backtest(df, strategy_cls, risk_config, strategy_params):
         call_count["n"] += 1
-        return {"trades": [{"pnl": 1.0}] * 5, "final_value": 1_100_000}
+        final_value = 1_100_000 if call_count["n"] == 1 else 1_200_000
+        return {"trades": [{"pnl": 1.0}] * 5, "final_value": final_value}
 
     monkeypatch.setattr("scripts.regime_strategy_pipeline.run_backtest", fake_run_backtest)
     candidates = [_candidate(10.0, 4), _candidate(8.0, 4)]
@@ -168,11 +188,12 @@ def test_pick_final_strategy_accepts_first_passing_candidate(monkeypatch):
 
     final = pick_final_strategy(None, candidates, risk_config, min_trades=3, stop_loss_pct=-5, take_profit_pct=8)
 
-    assert call_count["n"] == 1
-    assert final["raw_return_pct"] == 10.0
+    assert call_count["n"] == 2  # 두 후보 모두 시도해야 한다(선착순 아님)
+    assert final["raw_return_pct"] == 8.0
     assert final["raw_trade_count"] == 4
-    assert final["return_pct"] == 10.0
+    assert final["return_pct"] == 20.0
     assert final["sell_conditions"]["type"] == "OR"
+    assert final["trailing_stop_step_pct"] is None
 
 
 def test_pick_final_strategy_falls_through_when_first_fails_trade_count(monkeypatch):
@@ -204,6 +225,33 @@ def test_pick_final_strategy_returns_none_when_all_candidates_fail(monkeypatch):
     final = pick_final_strategy(None, candidates, risk_config, min_trades=3, stop_loss_pct=-5, take_profit_pct=8)
 
     assert final is None
+
+
+def test_pick_final_strategy_grid_searches_trailing_stop_step_pcts_and_picks_best(monkeypatch):
+    # step별로 다른 final_value를 리턴하도록 해서, 후보 1개 x step 3개(2,3,5) 조합
+    # 전체를 다 시도한 뒤 그중 최고 수익률(step=3일 때)을 채택하는지 확인한다.
+    seen_steps = []
+
+    def fake_run_backtest(df, strategy_cls, risk_config, strategy_params):
+        sell = strategy_params["sell_conditions"]
+        trailing_cond = next(c for c in sell["conditions"] if c.get("indicator") == "TRAILING_STOP_STEP_PCT")
+        step = trailing_cond["threshold"]
+        seen_steps.append(step)
+        final_value = {2: 1_050_000, 3: 1_300_000, 5: 1_100_000}[step]
+        return {"trades": [{"pnl": 1.0}] * 5, "final_value": final_value}
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.run_backtest", fake_run_backtest)
+    candidates = [_candidate(10.0, 4)]
+    risk_config = {"initial_capital": 1_000_000}
+
+    final = pick_final_strategy(
+        None, candidates, risk_config, min_trades=3, stop_loss_pct=-5, take_profit_pct=8,
+        trailing_stop_step_pcts=[2, 3, 5],
+    )
+
+    assert sorted(seen_steps) == [2, 3, 5]
+    assert final["trailing_stop_step_pct"] == 3
+    assert final["return_pct"] == 30.0
 
 
 def test_save_and_map_builds_title_and_maps_to_library(monkeypatch):
@@ -246,6 +294,35 @@ def test_save_and_map_builds_title_and_maps_to_library(monkeypatch):
     assert captured["upsert_args"]["source_run_id"] == "abc123"
 
 
+def test_save_and_map_adds_trailing_stop_suffix_when_present(monkeypatch):
+    captured = {}
+
+    def fake_run_backtest_cached(**kwargs):
+        captured["cached_kwargs"] = kwargs
+        return {"run_id": "abc123"}
+
+    monkeypatch.setattr("scripts.regime_strategy_pipeline.run_backtest_cached", fake_run_backtest_cached)
+    monkeypatch.setattr("trading.db.upsert_regime_strategy_mapping", lambda *a, **k: None)
+
+    final = {
+        "buy_conditions": {"type": "AND", "conditions": []},
+        "sell_conditions": {"type": "OR", "conditions": []},
+        "return_pct": 12.5, "trades": [{}] * 5,
+        "raw_return_pct": 10.0, "raw_trade_count": 4,
+        "trailing_stop_step_pct": 3,
+    }
+    start = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    risk_config = {"initial_capital": 1_000_000}
+
+    save_and_map(
+        "KRW-ETH", "상승", start, end, final,
+        df=None, risk_config=risk_config, stop_loss_pct=-5, take_profit_pct=8,
+    )
+
+    assert captured["cached_kwargs"]["title"] == "[상승] KRW-ETH 2026-06-01~2026-06-20 그리드+TP8%/SL5%/TS3%"
+
+
 def test_ensure_supported_market_rejects_unknown_market():
     with pytest.raises(SystemExit):
         _ensure_supported_market("KRW-NOTREAL")
@@ -265,6 +342,24 @@ def test_parse_args_defaults():
     assert args.stop_loss_pct == -5.0
     assert args.take_profit_pct == 8.0
     assert args.candidate_pool == 20
+    assert args.trailing_stop_step_pcts is None
+
+
+def test_parse_args_parses_trailing_stop_step_pcts_list():
+    args = parse_args([
+        "--market", "KRW-ETH", "--history-start", "2026-01-01",
+        "--trailing-stop-step-pcts", "2,3,4,5",
+    ])
+
+    assert args.trailing_stop_step_pcts == [2.0, 3.0, 4.0, 5.0]
+
+
+def test_parse_args_rejects_non_positive_trailing_stop_step_pct():
+    with pytest.raises(SystemExit):
+        parse_args([
+            "--market", "KRW-ETH", "--history-start", "2026-01-01",
+            "--trailing-stop-step-pcts", "2,0,5",
+        ])
 
 
 def test_run_pipeline_isolates_label_failures(monkeypatch):
@@ -302,9 +397,9 @@ def test_run_pipeline_isolates_label_failures(monkeypatch):
     )
     monkeypatch.setattr(
         "scripts.regime_strategy_pipeline.pick_final_strategy",
-        lambda df, candidates, risk_config, min_trades, sl, tp: {
+        lambda df, candidates, risk_config, min_trades, sl, tp, trailing_stop_step_pcts=None: {
             "buy_conditions": {}, "sell_conditions": {}, "return_pct": 6.0, "trades": [{}, {}, {}],
-            "raw_return_pct": 5.0, "raw_trade_count": 3,
+            "raw_return_pct": 5.0, "raw_trade_count": 3, "trailing_stop_step_pct": None,
         },
     )
     monkeypatch.setattr("scripts.regime_strategy_pipeline.save_and_map", lambda *a, **k: "run-xyz")

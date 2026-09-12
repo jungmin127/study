@@ -64,18 +64,25 @@ def select_target_segments(market: str, history_start: datetime) -> dict[str, di
     return {label: by_label.get(label) for label in ("하락", "횡보", "상승")}
 
 
-def augment_with_tp_sl(sell_group: dict, stop_loss_pct: float, take_profit_pct: float) -> dict:
+def augment_with_tp_sl(
+    sell_group: dict, stop_loss_pct: float, take_profit_pct: float,
+    trailing_stop_step_pct: float | None = None,
+) -> dict:
     """원래 매도조건에 손절/익절 OR조건을 얹는다. STOP_LOSS_PCT/TAKE_PROFIT_PCT는
     포지션 진입가 대비 수익률로 평가되는 기존 조건트리 지표(engine/condition_tree.py의
-    POSITION_RELATIVE_INDICATORS)라 그대로 재사용한다."""
-    return {
-        "type": "OR",
-        "conditions": [
-            sell_group,
-            {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": stop_loss_pct},
-            {"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": take_profit_pct},
-        ],
-    }
+    POSITION_RELATIVE_INDICATORS)라 그대로 재사용한다. trailing_stop_step_pct가 주어지면
+    계단식 트레일링 스탑(TRAILING_STOP_STEP_PCT) 조건도 같은 OR에 추가한다."""
+    conditions = [
+        sell_group,
+        {"indicator": "STOP_LOSS_PCT", "params": {}, "operator": "<=", "threshold": stop_loss_pct},
+        {"indicator": "TAKE_PROFIT_PCT", "params": {}, "operator": ">=", "threshold": take_profit_pct},
+    ]
+    if trailing_stop_step_pct is not None:
+        conditions.append({
+            "indicator": "TRAILING_STOP_STEP_PCT", "params": {}, "operator": "<=",
+            "threshold": trailing_stop_step_pct,
+        })
+    return {"type": "OR", "conditions": conditions}
 
 
 def top_candidates(results: list[dict], min_trades: int, pool_size: int) -> list[dict]:
@@ -104,42 +111,52 @@ def run_grid_for_window(market: str, start: datetime, end: datetime, capital: fl
 def pick_final_strategy(
     df, candidates: list[dict], risk_config: dict, min_trades: int,
     stop_loss_pct: float, take_profit_pct: float,
+    trailing_stop_step_pcts: list[float] | None = None,
 ) -> dict | None:
-    """후보를 수익률 내림차순으로 순회하며 TP/SL 증강 후에도 거래횟수를 만족하는
-    첫 번째를 채택한다. 전부 실패하면 None."""
+    """후보 x 트레일링스탑 step(trailing_stop_step_pcts가 없으면 계단식 트레일링
+    미적용 1가지로 취급) 조합을 전부 백테스트해, 거래횟수 조건을 만족하는 것 중
+    최종 수익률이 가장 높은 조합을 채택한다 — 그리드서치 철학: 순서상 먼저
+    통과하는 후보가 아니라 전체 조합 중 최적을 고른다. 전부 실패하면 None."""
+    steps: list[float | None] = trailing_stop_step_pcts if trailing_stop_step_pcts else [None]
+    best: dict | None = None
     for cand in candidates:
         buy_group = _wrap_condition(cand["buy_block"], None, "AND")
         base_sell_group = _wrap_condition(cand["sell_block"], None, "AND")
-        augmented_sell = augment_with_tp_sl(base_sell_group, stop_loss_pct, take_profit_pct)
-        result = run_backtest(
-            df, ConditionTreeStrategy, risk_config,
-            {"buy_conditions": buy_group, "sell_conditions": augmented_sell},
-        )
-        if len(result["trades"]) >= min_trades:
+        for step in steps:
+            augmented_sell = augment_with_tp_sl(base_sell_group, stop_loss_pct, take_profit_pct, step)
+            result = run_backtest(
+                df, ConditionTreeStrategy, risk_config,
+                {"buy_conditions": buy_group, "sell_conditions": augmented_sell},
+            )
+            if len(result["trades"]) < min_trades:
+                continue
             return_pct = (
                 (result["final_value"] - risk_config["initial_capital"])
                 / risk_config["initial_capital"] * 100
             )
-            return {
-                "buy_conditions": buy_group, "sell_conditions": augmented_sell,
-                "return_pct": return_pct, "trades": result["trades"],
-                "raw_return_pct": cand["return_pct"], "raw_trade_count": len(cand["trades"]),
-            }
-    return None
+            if best is None or return_pct > best["return_pct"]:
+                best = {
+                    "buy_conditions": buy_group, "sell_conditions": augmented_sell,
+                    "return_pct": return_pct, "trades": result["trades"],
+                    "raw_return_pct": cand["return_pct"], "raw_trade_count": len(cand["trades"]),
+                    "trailing_stop_step_pct": step,
+                }
+    return best
 
 
 def save_and_map(
     market: str, regime: str, start: datetime, end: datetime, final: dict,
     df, risk_config: dict, stop_loss_pct: float, take_profit_pct: float,
 ) -> str:
-    title = (
-        f"[{regime}] {market} {start.date()}~{end.date()} "
-        f"그리드+TP{take_profit_pct:g}%/SL{abs(stop_loss_pct):g}%"
-    )
+    tp_sl_label = f"TP{take_profit_pct:g}%/SL{abs(stop_loss_pct):g}%"
+    trailing_step = final.get("trailing_stop_step_pct")
+    if trailing_step is not None:
+        tp_sl_label += f"/TS{trailing_step:g}%"
+    title = f"[{regime}] {market} {start.date()}~{end.date()} 그리드+{tp_sl_label}"
     description = (
         f"regime_strategy_pipeline - {market}/{TIMEFRAME}/{start.date()}~{end.date()}, "
         f"원본 수익률 {final['raw_return_pct']:+.2f}%({final['raw_trade_count']}건) -> "
-        f"TP/SL 부착 후 {final['return_pct']:+.2f}%({len(final['trades'])}건)"
+        f"{tp_sl_label} 부착 후 {final['return_pct']:+.2f}%({len(final['trades'])}건)"
     )
     saved = run_backtest_cached(
         df=df, strategy_cls=ConditionTreeStrategy, risk_config=risk_config,
@@ -184,6 +201,23 @@ def _positive_candidate_pool(value: str) -> int:
     return n
 
 
+def _positive_step_list(value: str) -> list[float]:
+    steps: list[float] = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        n = float(part)
+        if n <= 0:
+            raise argparse.ArgumentTypeError(
+                f"--trailing-stop-step-pcts의 각 값은 0보다 커야 합니다 (받은 값: {n})"
+            )
+        steps.append(n)
+    if not steps:
+        raise argparse.ArgumentTypeError("--trailing-stop-step-pcts에 최소 1개의 값이 필요합니다")
+    return steps
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="장세별 전략 자동 발굴 파이프라인")
     parser.add_argument("--market", required=True, help="마켓코드 (예: KRW-ETH)")
@@ -193,12 +227,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stop-loss-pct", type=float, default=-5.0)
     parser.add_argument("--take-profit-pct", type=float, default=8.0)
     parser.add_argument("--candidate-pool", type=_positive_candidate_pool, default=20)
+    parser.add_argument(
+        "--trailing-stop-step-pcts", type=_positive_step_list, default=None,
+        help=(
+            "계단식 트레일링 스탑(TRAILING_STOP_STEP_PCT) step(%) 후보 목록, 콤마 구분 "
+            "(예: 2,3,4,5). 지정하면 SL/TP와 함께 OR로 붙여 후보별로 그리드서치하고, "
+            "거래횟수 조건을 만족하는 조합 중 최종 수익률이 가장 높은 step을 채택한다. "
+            "생략하면 계단식 트레일링을 붙이지 않는다(기존 동작)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def run_pipeline(
     market: str, history_start: datetime, capital: float, min_days: int,
     stop_loss_pct: float, take_profit_pct: float, candidate_pool: int,
+    trailing_stop_step_pcts: list[float] | None = None,
 ) -> list[dict]:
     # 부호가 뒤바뀐 TP/SL(예: --stop-loss-pct 5)은 거의 모든 포지션에서 즉시
     # 청산 조건을 만족시켜 거래횟수만 인위적으로 늘리고, pick_final_strategy의
@@ -242,7 +286,7 @@ def run_pipeline(
 
             final = pick_final_strategy(
                 grid["df"], candidates, grid["risk_config"], min_trades,
-                stop_loss_pct, take_profit_pct,
+                stop_loss_pct, take_profit_pct, trailing_stop_step_pcts,
             )
             if final is None:
                 summary.append({"regime": regime, "status": "skipped", "reason": "TP/SL 부착 후 거래횟수 조건을 만족하는 후보 없음", **seg_info})
@@ -257,6 +301,7 @@ def run_pipeline(
                 "period": f"{start.date()}~{end.date()}",
                 "return_pct": round(final["return_pct"], 2),
                 "trade_count": len(final["trades"]),
+                "trailing_stop_step_pct": final.get("trailing_stop_step_pct"),
                 **seg_info,
             })
         except (SystemExit, Exception) as exc:
@@ -276,6 +321,8 @@ def print_summary_table(summary: list[dict]) -> None:
         return_pct = f"{row['return_pct']:+.2f}%" if "return_pct" in row else "-"
         trade_count = str(row.get("trade_count", "-"))
         reason = row.get("reason", row.get("run_id", ""))
+        if row.get("trailing_stop_step_pct") is not None:
+            reason = f"{reason} (TS step={row['trailing_stop_step_pct']:g}%)"
         if row.get("segment_in_progress") or row.get("segment_bar_count", MIN_SEGMENT_BARS) < MIN_SEGMENT_BARS:
             # cp949 콘솔(PYTHONIOENCODING 미설정)에서도 안전하게 출력되도록 이모지
             # 대신 ASCII 마커를 쓴다 — 표 출력이 이 시점에서 실패하면 다른 라벨의
@@ -291,6 +338,7 @@ def main() -> None:
     summary = run_pipeline(
         args.market, history_start, args.capital, args.min_days,
         args.stop_loss_pct, args.take_profit_pct, args.candidate_pool,
+        args.trailing_stop_step_pcts,
     )
     print_summary_table(summary)
     print(f"RESULT_JSON: {json.dumps({'market': args.market, 'segments': summary}, ensure_ascii=False)}")
