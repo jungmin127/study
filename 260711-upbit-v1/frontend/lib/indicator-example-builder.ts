@@ -745,11 +745,12 @@ export function buildGuideExample(value: string): GuideExample {
       const entry = 100000;
       const step = 5;
       const path = [100000, 106000, 109000, 115000, 103000];
-      let peak = -Infinity;
+      let peak = 0;
       const rows = path.map((price, i) => {
         const returnPct = ((price - entry) / entry) * 100;
         peak = Math.max(peak, returnPct);
-        const stopLevel = (Math.floor(peak / step) - 1) * step;
+        const rawStopLevel = (Math.floor(peak / step) - 1) * step;
+        const stopLevel = rawStopLevel < 0 ? null : rawStopLevel;
         return {
           bar: i,
           cells: {
@@ -757,7 +758,7 @@ export function buildGuideExample(value: string): GuideExample {
             price: n(price, 0),
             returnPct: `${(returnPct >= 0 ? '+' : '') + n(returnPct)}%`,
             peakPct: `${(peak >= 0 ? '+' : '') + n(peak)}%`,
-            stopLevel: `${(stopLevel >= 0 ? '+' : '') + n(stopLevel)}%`,
+            stopLevel: stopLevel === null ? '비활성(수익 미확보)' : `${(stopLevel >= 0 ? '+' : '') + n(stopLevel)}%`,
           },
         };
       });
